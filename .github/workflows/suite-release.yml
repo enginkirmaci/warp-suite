@@ -68,7 +68,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             build-essential pkg-config jq \
-            libwayland-dev libxkbcommon-dev libvulkan-dev libfontconfig1-dev
+            libwayland-dev libxkbcommon-dev libxkbcommon-x11-dev libxcb1-dev \
+            libvulkan-dev libfontconfig1-dev
 
       - uses: dtolnay/rust-toolchain@stable
 
