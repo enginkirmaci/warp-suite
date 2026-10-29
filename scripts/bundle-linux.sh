@@ -33,6 +33,9 @@ command -v jq >/dev/null || { echo "jq required (cargo target dir discovery)" >&
 # CI sets APPS_TOKEN for private app repos; authenticate exactly like
 # actions/checkout does. Local builds without the var just use git credentials.
 if [ -n "${APPS_TOKEN:-}" ]; then
+    # Drop the GITHUB_TOKEN header actions/checkout left in this repo's config
+    # (CI): it cannot read the private app repos and would duplicate ours.
+    git -C "$root" config --unset-all http.https://github.com/.extraheader 2>/dev/null || true
     export GIT_CONFIG_COUNT=1 \
            GIT_CONFIG_KEY_0=http.https://github.com/.extraheader \
            GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$APPS_TOKEN" | base64 -w0)"
