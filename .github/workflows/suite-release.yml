@@ -1,0 +1,175 @@
+name: suite-release
+
+# One-git deploy: builds every app at the refs pinned in apps.toml and
+# publishes one combined GitHub Release. Deploy = set pins
+# (scripts/set-pin.sh) -> run this workflow with a version.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Suite version (release tag will be v<version>)'
+        required: true
+        default: '0.1.0'
+
+permissions:
+  contents: write
+
+jobs:
+  resolve:
+    runs-on: ubuntu-latest
+    outputs:
+      devtools_repo: ${{ steps.pins.outputs.devtools_repo }}
+      devtools_ref: ${{ steps.pins.outputs.devtools_ref }}
+      devtools_sha: ${{ steps.pins.outputs.devtools_sha }}
+      warp_agent_repo: ${{ steps.pins.outputs.warp_agent_repo }}
+      warp_agent_ref: ${{ steps.pins.outputs.warp_agent_ref }}
+      warp_agent_sha: ${{ steps.pins.outputs.warp_agent_sha }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: pins
+        run: |
+          set -euo pipefail
+          for app in devtools warp-agent; do
+            key="${app//-/_}"
+            repo="$(python3 scripts/manifest.py get "$app" repo)"
+            ref="$(python3 scripts/manifest.py get "$app" ref)"
+            sha="$(git ls-remote "$repo" "$ref" | awk 'NR==1{print $1}')"
+            if [ -z "$sha" ]; then
+              echo "::error::ref '$ref' not found in $repo" >&2
+              exit 1
+            fi
+            echo "${key}_repo=$repo" >> "$GITHUB_OUTPUT"
+            echo "${key}_ref=$ref" >> "$GITHUB_OUTPUT"
+            echo "${key}_sha=$sha" >> "$GITHUB_OUTPUT"
+          done
+
+  linux:
+    needs: resolve
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install GPUI build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential pkg-config jq \
+            libwayland-dev libxkbcommon-dev libvulkan-dev libfontconfig1-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      # Clones the app repos at the pins and stages the bundle - the same
+      # script used for local builds, so CI and local produce identical layouts.
+      - name: Bundle Linux deliverables at the pinned refs
+        run: scripts/bundle-linux.sh --version "${{ inputs.version }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: warp-suite-linux
+          path: dist/warp-suite-${{ inputs.version }}-linux.tar.gz
+          if-no-files-found: error
+
+  windows:
+    needs: resolve
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      DEVTOOLS_DIR: ${{ github.workspace }}\.build\devtools
+      WARP_AGENT_DIR: ${{ github.workspace }}\.build\warp-agent
+    steps:
+      - uses: dtolnay/rust-toolchain@stable
+
+      # .NET 10 SDK: DevTools' vendored Tools.SnapIt companion (src/Tools.SnapIt)
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Install Inno Setup
+        run: choco install innosetup -y --no-progress
+
+      - name: Checkout DevTools @ pin
+        uses: actions/checkout@v4
+        with:
+          repository: enginkirmaci/DevTools
+          ref: ${{ needs.resolve.outputs.devtools_sha }}
+          path: .build/devtools
+
+      # The repo's own script: builds devtools.exe + snapit.exe and publishes
+      # the vendored Tools.SnapIt.exe companion into packaging\windows\out\
+      - name: Build DevTools
+        run: '& "$env:DEVTOOLS_DIR\packaging\windows\build.ps1"'
+
+      - name: Package DevTools (portable zip + installer)
+        run: |
+          $v = (cargo metadata --manifest-path "$env:DEVTOOLS_DIR\Cargo.toml" --no-deps --format-version 1 |
+                ConvertFrom-Json).packages | Where-Object name -eq 'devtools' |
+                Select-Object -ExpandProperty version
+          $out = "$env:DEVTOOLS_DIR\packaging\windows\out"
+          Compress-Archive -Path "$out\*" `
+            -DestinationPath "$env:DEVTOOLS_DIR\packaging\windows\DevTools-$v-windows-portable.zip" -Force
+          iscc /DMyAppVersion=$v "$env:DEVTOOLS_DIR\packaging\windows\devtools.iss"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: devtools-windows
+          path: |
+            .build/devtools/packaging/windows/out/DevTools-*-setup-x64.exe
+            .build/devtools/packaging/windows/DevTools-*-windows-portable.zip
+          if-no-files-found: error
+
+      - name: Checkout warp-agent @ pin
+        uses: actions/checkout@v4
+        with:
+          repository: enginkirmaci/warp-agent
+          ref: ${{ needs.resolve.outputs.warp_agent_sha }}
+          path: .build/warp-agent
+
+      - name: Build warp-agent
+        run: '& "$env:WARP_AGENT_DIR\packaging\windows\build.ps1"'
+
+      - name: Package warp-agent (portable zip + installer)
+        run: |
+          $v = (cargo metadata --manifest-path "$env:WARP_AGENT_DIR\Cargo.toml" --no-deps --format-version 1 |
+                ConvertFrom-Json).packages | Where-Object name -eq 'warp-agent' |
+                Select-Object -ExpandProperty version
+          $out = "$env:WARP_AGENT_DIR\packaging\windows\out"
+          Compress-Archive -Path "$out\warp-agent.exe" `
+            -DestinationPath "$env:WARP_AGENT_DIR\packaging\windows\warp-agent-$v-windows-portable.zip" -Force
+          iscc /DMyAppVersion=$v "$env:WARP_AGENT_DIR\packaging\windows\warp-agent.iss"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: warp-agent-windows
+          path: |
+            .build/warp-agent/packaging/windows/out/warp-agent-*-setup-x64.exe
+            .build/warp-agent/packaging/windows/warp-agent-*-windows-portable.zip
+          if-no-files-found: error
+
+  release:
+    needs: [resolve, linux, windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ inputs.version }}
+          name: warp-suite v${{ inputs.version }}
+          body: |
+            Combined suite release built from the refs pinned in `apps.toml`.
+
+            | App | Repo | Ref | Resolved commit |
+            |---|---|---|---|
+            | devtools | ${{ needs.resolve.outputs.devtools_repo }} | ${{ needs.resolve.outputs.devtools_ref }} | ${{ needs.resolve.outputs.devtools_sha }} |
+            | warp-agent | ${{ needs.resolve.outputs.warp_agent_repo }} | ${{ needs.resolve.outputs.warp_agent_ref }} | ${{ needs.resolve.outputs.warp_agent_sha }} |
+          files: |
+            artifacts/*.tar.gz
+            artifacts/*-setup-x64.exe
+            artifacts/*-windows-portable.zip

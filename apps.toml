@@ -1,0 +1,58 @@
+# warp-suite app manifest
+#
+# Each [apps.<name>] section pins one app repo to a ref (branch, tag or
+# SHA). A suite deploy = update pins (scripts/set-pin.sh) -> tag/dispatch
+# the suite-release workflow. The workflow resolves every ref to its commit
+# SHA and records the resolved SHAs in the suite release notes, so every
+# release stays reproducible even with symbolic refs like "main".
+#
+# App repos stay the source of truth and build/release on their own; this
+# manifest only names the known-good combinations warp-suite deploys.
+#
+# Per-app build knobs used by scripts/bundle-linux.sh (all optional):
+#   linux_build   extra args for `cargo build --release` (e.g. "-p devtools")
+#   icon_prefix   base name of packaging/linux/icons/<prefix>-*.png
+#                 (defaults to the app name)
+#   scalable_svg  repo-relative path to a scalable icon, installed as
+#                 hicolor/scalable/apps/<icon_prefix>.svg
+
+[apps.devtools]
+repo = "https://github.com/enginkirmaci/DevTools.git"
+# main holds the C# project; the Rust/GPUI workspace ships on `rust`
+ref = "rust"
+linux_build = "-p devtools"
+icon_prefix = "devtools"
+scalable_svg = "crates/devtools/assets/icons/logo.svg"
+notes = """
+Repository workbench (Rust/GPUI workspace: devtools, devtools-core, snapit).
+AI surface drives warp-agent's loopback door (~/.warp-agent/ipc.port +
+ipc.token, NDJSON: open-workspace, new-chat, run-prompt, models, status).
+Its Windows build (packaging/windows/build.ps1) also builds the vendored
+Tools.SnapIt.exe companion from src/Tools.SnapIt - self-contained, the
+SnapIt repo is not needed. Linux deliverable: devtools alone (crates/snapit
+is Windows-only).
+"""
+
+[apps.warp-agent]
+repo = "https://github.com/enginkirmaci/warp-agent.git"
+# main holds the Avalonia prototype; the GPUI app ships on `rust-gpui`
+ref = "rust-gpui"
+linux_build = ""
+icon_prefix = "warpagent"
+scalable_svg = "packaging/linux/icons/warpagent.svg"
+notes = """
+Chat client over `opencode serve` (Rust/GPUI, single crate). Owns the
+loopback door protocol DevTools consumes. Changing door commands, the
+ipc.port/ipc.token file names or their ~/.warp-agent location is a
+cross-app contract change: update DevTools and re-pin both apps in the
+same suite release.
+"""
+
+# Future apps join with one section here plus one build job block in
+# .github/workflows/suite-release.yml. Placeholder for SnapIt (C#/.NET WPF
+# zone snapper, Windows-only, excluded for now):
+#
+# [apps.snapit]
+# repo = "https://github.com/enginkirmaci/SnapIt.git"
+# ref = "main"
+# notes = "Windows job would mirror its own snapit-release.yml (dotnet publish + Inno Setup)."
