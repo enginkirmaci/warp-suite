@@ -29,8 +29,16 @@ jobs:
       - uses: actions/checkout@v4
 
       - id: pins
+        env:
+          APPS_TOKEN: ${{ secrets.APPS_TOKEN }}
         run: |
           set -euo pipefail
+          # Private app repos: authenticate exactly like actions/checkout does.
+          if [ -n "$APPS_TOKEN" ]; then
+            export GIT_CONFIG_COUNT=1 \
+                   GIT_CONFIG_KEY_0=http.https://github.com/.extraheader \
+                   GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$APPS_TOKEN" | base64 -w0)"
+          fi
           for app in devtools warp-agent; do
             key="${app//-/_}"
             repo="$(python3 scripts/manifest.py get "$app" repo)"
@@ -63,6 +71,8 @@ jobs:
       # Clones the app repos at the pins and stages the bundle - the same
       # script used for local builds, so CI and local produce identical layouts.
       - name: Bundle Linux deliverables at the pinned refs
+        env:
+          APPS_TOKEN: ${{ secrets.APPS_TOKEN }}
         run: scripts/bundle-linux.sh --version "${{ inputs.version }}"
 
       - uses: actions/upload-artifact@v4
@@ -97,6 +107,7 @@ jobs:
           repository: enginkirmaci/DevTools
           ref: ${{ needs.resolve.outputs.devtools_sha }}
           path: .build/devtools
+          token: ${{ secrets.APPS_TOKEN }}
 
       # The repo's own script: builds devtools.exe + snapit.exe and publishes
       # the vendored Tools.SnapIt.exe companion into packaging\windows\out\
@@ -127,6 +138,7 @@ jobs:
           repository: enginkirmaci/warp-agent
           ref: ${{ needs.resolve.outputs.warp_agent_sha }}
           path: .build/warp-agent
+          token: ${{ secrets.APPS_TOKEN }}
 
       - name: Build warp-agent
         run: '& "$env:WARP_AGENT_DIR\packaging\windows\build.ps1"'

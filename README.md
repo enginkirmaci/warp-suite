@@ -96,8 +96,11 @@ doesn't need the SnapIt repo.
 
 ## Notes
 
-- Private app repos would need a PAT with `repo` scope in the checkout steps
-  (`actions/checkout` `token:`); all current repos are public.
+- Private app repos (warp-agent is private): the `APPS_TOKEN` repo secret
+  authenticates the CI checkouts and bundle clones (same extraheader
+  mechanism `actions/checkout` uses). Update it with
+  `gh secret set APPS_TOKEN --body "$(gh auth token)"` when the credential
+  changes. Local builds don't need it — your git credentials apply.
 - Symbolic pins (currently `rust` and `rust-gpui`) build the branch tip at
   dispatch time; the exact SHAs are recorded in the release notes and
   `REVISIONS.txt`. Pin tags or SHAs for fully frozen deploys.

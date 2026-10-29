@@ -30,6 +30,14 @@ fi
 command -v python3 >/dev/null || { echo "python3 required" >&2; exit 1; }
 command -v jq >/dev/null || { echo "jq required (cargo target dir discovery)" >&2; exit 1; }
 
+# CI sets APPS_TOKEN for private app repos; authenticate exactly like
+# actions/checkout does. Local builds without the var just use git credentials.
+if [ -n "${APPS_TOKEN:-}" ]; then
+    export GIT_CONFIG_COUNT=1 \
+           GIT_CONFIG_KEY_0=http.https://github.com/.extraheader \
+           GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$APPS_TOKEN" | base64 -w0)"
+fi
+
 if ! pkg-config --exists wayland-client xkbcommon 2>/dev/null; then
     echo "warning: wayland-client/xkbcommon dev packages missing - the build will likely fail" >&2
     echo "  Arch:   sudo pacman -S wayland libxkbcommon vulkan-headers fontconfig" >&2
