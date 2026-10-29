@@ -186,7 +186,9 @@ jobs:
             |---|---|---|---|
             | devtools | ${{ needs.resolve.outputs.devtools_repo }} | ${{ needs.resolve.outputs.devtools_ref }} | ${{ needs.resolve.outputs.devtools_sha }} |
             | warp-agent | ${{ needs.resolve.outputs.warp_agent_repo }} | ${{ needs.resolve.outputs.warp_agent_ref }} | ${{ needs.resolve.outputs.warp_agent_sha }} |
+          # upload-artifact keeps each artifact's internal structure (the
+          # setup exes sit in out/), so match at any depth.
           files: |
             artifacts/*.tar.gz
-            artifacts/*-setup-x64.exe
-            artifacts/*-windows-portable.zip
+            artifacts/**/*-setup-x64.exe
+            artifacts/**/*-windows-portable.zip
