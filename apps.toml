@@ -11,6 +11,8 @@
 #
 # Per-app build knobs used by scripts/bundle-linux.sh (all optional):
 #   linux_build   extra args for `cargo build --release` (e.g. "-p devtools")
+#   linux_skip    true = Windows-only app; bundle-linux.sh skips it entirely
+#                 (no Linux build, no REVISIONS.txt entry, no desktop entry)
 #   icon_prefix   base name of packaging/linux/icons/<prefix>-*.png
 #                 (defaults to the app name)
 #   scalable_svg  repo-relative path to a scalable icon, installed as
@@ -24,13 +26,13 @@ linux_build = "-p devtools"
 icon_prefix = "devtools"
 scalable_svg = "crates/devtools/assets/icons/logo.svg"
 notes = """
-Repository workbench (Rust/GPUI workspace: devtools, devtools-core, snapit).
+Repository workbench (Rust/GPUI workspace: devtools, devtools-core).
 AI surface drives warp-agent's loopback door (~/.warp-agent/ipc.port +
 ipc.token, NDJSON: open-workspace, new-chat, run-prompt, models, status).
 Its Windows build (packaging/windows/build.ps1) also builds the vendored
 Tools.SnapIt.exe companion from src/Tools.SnapIt - self-contained, the
-SnapIt repo is not needed. Linux deliverable: devtools alone (crates/snapit
-is Windows-only).
+SnapIt repo is not needed. Linux deliverable: devtools alone (the Rust
+snapit port has its own warp-snapit app below).
 """
 
 [apps.warp-agent]
@@ -48,11 +50,22 @@ cross-app contract change: update DevTools and re-pin both apps in the
 same suite release.
 """
 
-# Future apps join with one section here plus one build job block in
-# .github/workflows/suite-release.yml. Placeholder for SnapIt (C#/.NET WPF
-# zone snapper, Windows-only, excluded for now):
-#
-# [apps.snapit]
-# repo = "https://github.com/enginkirmaci/SnapIt.git"
-# ref = "main"
-# notes = "Windows job would mirror its own snapit-release.yml (dotnet publish + Inno Setup)."
+[apps.warp-snapit]
+repo = "https://github.com/enginkirmaci/warp-snapit.git"
+ref = "main"
+linux_skip = true
+notes = """
+Rust port of the SnapIt zone snapper (Windows-only binary; engine is
+cfg(windows)-gated, platform-neutral modules tested on Linux). Reads the
+same ~/.devtools/snapit settings/layouts as DevTools' vendored .NET
+Tools.SnapIt.exe companion - the two share the settings contract, the
+misspelled DeactivedScreens field included. DevTools still launches the
+.NET companion by default; point its SnapIt.Executable setting at
+snapit.exe to run the Rust port. Suite deliverable: a portable zip with
+snapit.exe + the default settings seed (packaging/windows/build.ps1), no
+installer.
+"""
+
+# The C#/.NET SnapIt repo (github.com/enginkirmaci/SnapIt) stays excluded:
+# the Rust warp-snapit port above is the suite's zone snapper, and DevTools'
+# Windows build vendors the .NET companion it needs.

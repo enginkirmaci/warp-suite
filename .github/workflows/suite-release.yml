@@ -25,6 +25,9 @@ jobs:
       warp_agent_repo: ${{ steps.pins.outputs.warp_agent_repo }}
       warp_agent_ref: ${{ steps.pins.outputs.warp_agent_ref }}
       warp_agent_sha: ${{ steps.pins.outputs.warp_agent_sha }}
+      warp_snapit_repo: ${{ steps.pins.outputs.warp_snapit_repo }}
+      warp_snapit_ref: ${{ steps.pins.outputs.warp_snapit_ref }}
+      warp_snapit_sha: ${{ steps.pins.outputs.warp_snapit_sha }}
     steps:
       - uses: actions/checkout@v4
 
@@ -43,7 +46,7 @@ jobs:
                    GIT_CONFIG_KEY_0=http.https://github.com/.extraheader \
                    GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$APPS_TOKEN" | base64 -w0)"
           fi
-          for app in devtools warp-agent; do
+          for app in devtools warp-agent warp-snapit; do
             key="${app//-/_}"
             repo="$(python3 scripts/manifest.py get "$app" repo)"
             ref="$(python3 scripts/manifest.py get "$app" ref)"
@@ -95,6 +98,7 @@ jobs:
     env:
       DEVTOOLS_DIR: ${{ github.workspace }}\.build\devtools
       WARP_AGENT_DIR: ${{ github.workspace }}\.build\warp-agent
+      WARP_SNAPIT_DIR: ${{ github.workspace }}\.build\warp-snapit
     steps:
       - uses: dtolnay/rust-toolchain@stable
 
@@ -166,6 +170,34 @@ jobs:
             .build/warp-agent/packaging/windows/warp-agent-*-windows-portable.zip
           if-no-files-found: error
 
+      # Windows-only app (linux_skip in apps.toml): ships as a portable zip
+      # from its own build.ps1, no installer.
+      - name: Checkout warp-snapit @ pin
+        uses: actions/checkout@v4
+        with:
+          repository: enginkirmaci/warp-snapit
+          ref: ${{ needs.resolve.outputs.warp_snapit_sha }}
+          path: .build/warp-snapit
+          token: ${{ secrets.APPS_TOKEN }}
+
+      - name: Build warp-snapit
+        run: '& "$env:WARP_SNAPIT_DIR\packaging\windows\build.ps1"'
+
+      - name: Package warp-snapit (portable zip)
+        run: |
+          $v = (cargo metadata --manifest-path "$env:WARP_SNAPIT_DIR\Cargo.toml" --no-deps --format-version 1 |
+                ConvertFrom-Json).packages | Where-Object name -eq 'snapit' |
+                Select-Object -ExpandProperty version
+          $out = "$env:WARP_SNAPIT_DIR\packaging\windows\out"
+          Compress-Archive -Path "$out\snapit.exe", "$out\settings" `
+            -DestinationPath "$env:WARP_SNAPIT_DIR\packaging\windows\warp-snapit-$v-windows-portable.zip" -Force
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: warp-snapit-windows
+          path: .build/warp-snapit/packaging/windows/warp-snapit-*-windows-portable.zip
+          if-no-files-found: error
+
   release:
     needs: [resolve, linux, windows]
     runs-on: ubuntu-latest
@@ -186,6 +218,7 @@ jobs:
             |---|---|---|---|
             | devtools | ${{ needs.resolve.outputs.devtools_repo }} | ${{ needs.resolve.outputs.devtools_ref }} | ${{ needs.resolve.outputs.devtools_sha }} |
             | warp-agent | ${{ needs.resolve.outputs.warp_agent_repo }} | ${{ needs.resolve.outputs.warp_agent_ref }} | ${{ needs.resolve.outputs.warp_agent_sha }} |
+            | warp-snapit | ${{ needs.resolve.outputs.warp_snapit_repo }} | ${{ needs.resolve.outputs.warp_snapit_ref }} | ${{ needs.resolve.outputs.warp_snapit_sha }} |
           # upload-artifact keeps each artifact's internal structure (the
           # setup exes sit in out/), so match at any depth.
           files: |

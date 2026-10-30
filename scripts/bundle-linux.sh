@@ -80,6 +80,15 @@ while read -r app; do
     build_args="$(python3 "$here/manifest.py" get "$app" linux_build 2>/dev/null || true)"
     icon_prefix="$(python3 "$here/manifest.py" get "$app" icon_prefix 2>/dev/null || echo "$app")"
     svg_rel="$(python3 "$here/manifest.py" get "$app" scalable_svg 2>/dev/null || true)"
+    linux_skip="$(python3 "$here/manifest.py" get "$app" linux_skip 2>/dev/null || true)"
+
+    # Windows-only apps (linux_skip = true) ship through the suite-release
+    # Windows job only: no Linux build here, so they get no REVISIONS.txt
+    # entry, binary, desktop entry or icons in this bundle.
+    if [ "$linux_skip" = "true" ]; then
+        echo "== $app: skipped on Linux (Windows-only)"
+        continue
+    fi
 
     echo "== $app @ $ref"
     clone_at "$repo" "$ref" "$build_dir/$app"

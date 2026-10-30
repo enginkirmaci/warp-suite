@@ -11,9 +11,11 @@ Currently in the suite:
 |---|---|---|
 | devtools | [enginkirmaci/DevTools](https://github.com/enginkirmaci/DevTools) | Repository workbench (Rust/GPUI workspace) |
 | warp-agent | [enginkirmaci/warp-agent](https://github.com/enginkirmaci/warp-agent) | Chat client over `opencode serve` (Rust/GPUI) |
+| warp-snapit | [enginkirmaci/warp-snapit](https://github.com/enginkirmaci/warp-snapit) | Rust port of the SnapIt zone snapper (Windows-only, portable zip) |
 
-SnapIt (C#/.NET, Windows) is intentionally **excluded for now** — see
-[Adding an app](#adding-an-app).
+The C#/.NET SnapIt repo ([enginkirmaci/SnapIt](https://github.com/enginkirmaci/SnapIt))
+stays excluded — DevTools vendors the .NET companion it ships, and the Rust
+port above is the suite's zone snapper. See [Adding an app](#adding-an-app).
 
 ## Deploy
 
@@ -21,6 +23,7 @@ SnapIt (C#/.NET, Windows) is intentionally **excluded for now** — see
 # 1. choose what ships
 scripts/set-pin.sh devtools rust          # or a tag / commit SHA
 scripts/set-pin.sh warp-agent rust-gpui
+scripts/set-pin.sh warp-snapit main
 
 # 2. build + publish
 #    GitHub → warp-suite → Actions → suite-release → Run workflow (version: 1.2.0)
@@ -77,22 +80,29 @@ together. When one changes, update the other side and re-pin both apps in the
   alongside `devtools.exe`. The vendored copy is a deliberate variant of the
   SnapIt repo's app (they have diverged); the suite builds it from the
   DevTools pin, so suite deploys stay reproducible either way.
+- **SnapIt settings**: the vendored .NET companion and the Rust
+  [warp-snapit](https://github.com/enginkirmaci/warp-snapit) port read the
+  same `~/.devtools/snapit` settings/layouts (string-typed numbers, `"x,y"`
+  points, the misspelled `DeactivedScreens` field). DevTools launches the
+  .NET companion by default; the `SnapIt.Executable` setting points it at the
+  Rust `snapit.exe`, which is a portable-zip deliverable (no installer) and
+  skipped in the Linux bundle (`linux_skip = true` in `apps.toml`).
 - **Shared settings**: the Rust `crates/snapit` port inside DevTools reads
   the same `~/.devtools/snapit` settings/layouts as the C# companion.
 
 ## Adding an app
 
 1. Add a section to `apps.toml` (`repo`, `ref`, optional
-   `linux_build`/`icon_prefix`/`scalable_svg` — `scripts/bundle-linux.sh`
-   picks it up automatically; a Windows app needs a build + package block in
+   `linux_build`/`linux_skip`/`icon_prefix`/`scalable_svg` —
+   `scripts/bundle-linux.sh` picks it up automatically; a Windows-only app
+   sets `linux_skip = true` and needs a build + package block in
    `suite-release.yml` mirroring the existing ones).
 2. Document its contracts in [Cross-app contracts](#cross-app-contracts).
 
-SnapIt would join exactly that way — the commented `[apps.snapit]`
-placeholder is already in `apps.toml`, and its Windows job would mirror its
-own `snapit-release.yml` (dotnet publish + Inno Setup). Excluded for now:
-DevTools' Windows build uses its vendored companion copy, so the suite
-doesn't need the SnapIt repo.
+That is exactly how warp-snapit joined (Windows-only: `linux_skip = true`,
+portable zip from its own `packaging/windows/build.ps1`, no installer). The
+C#/.NET SnapIt repo would join the same way if ever wanted — DevTools' Windows
+build uses its vendored companion copy, so the suite doesn't need it.
 
 ## Notes
 
@@ -101,7 +111,8 @@ doesn't need the SnapIt repo.
   mechanism `actions/checkout` uses). Update it with
   `gh secret set APPS_TOKEN --body "$(gh auth token)"` when the credential
   changes. Local builds don't need it — your git credentials apply.
-- Symbolic pins (currently `rust` and `rust-gpui`) build the branch tip at
+- Symbolic pins (currently `rust`, `rust-gpui` and `main`) build the branch
+  tip at
   dispatch time; the exact SHAs are recorded in the release notes and
   `REVISIONS.txt`. Pin tags or SHAs for fully frozen deploys.
   (Caveat kept in mind: DevTools' `main` is the C# project and warp-agent's
