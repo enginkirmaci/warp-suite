@@ -66,6 +66,22 @@ snapit.exe + the default settings seed (packaging/windows/build.ps1), no
 installer.
 """
 
+[apps.warp-notes]
+repo = "https://github.com/enginkirmaci/warp-notes.git"
+ref = "main"
+icon_prefix = "warpnotes"
+scalable_svg = "packaging/linux/icons/warpnotes.svg"
+notes = """
+Per-repo markdown notes (Rust/GPUI, single crate) - the Notes window
+DevTools' notes toggle, tools menu and repo-row icons launch. Reads the
+shared ~/.warp/notes store (one folder per repo; a legacy ~/.devtools/notes
+renames over on first run, whichever app starts first). Launch contract:
+`warp-notes [--store <path>] [--repo <name>] [--note <path>]` - DevTools
+always passes --store (its notes_store_path setting, default the shared
+root) so a customized path follows; multi-instance is free, the window
+outlives DevTools. Missing binary = the notes surfaces fail with a toast.
+"""
+
 # The C#/.NET SnapIt repo (github.com/enginkirmaci/SnapIt) stays excluded:
 # the Rust warp-snapit port above is the suite's zone snapper, and DevTools'
 # Windows build vendors the .NET companion it needs.

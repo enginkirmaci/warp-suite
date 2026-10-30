@@ -12,6 +12,7 @@ Currently in the suite:
 | devtools | [enginkirmaci/DevTools](https://github.com/enginkirmaci/DevTools) | Repository workbench (Rust/GPUI workspace) |
 | warp-agent | [enginkirmaci/warp-agent](https://github.com/enginkirmaci/warp-agent) | Chat client over `opencode serve` (Rust/GPUI) |
 | warp-snapit | [enginkirmaci/warp-snapit](https://github.com/enginkirmaci/warp-snapit) | Rust port of the SnapIt zone snapper (Windows-only, portable zip) |
+| warp-notes | [enginkirmaci/warp-notes](https://github.com/enginkirmaci/warp-notes) | Per-repo markdown notes with a live editor (Rust/GPUI) |
 
 The C#/.NET SnapIt repo ([enginkirmaci/SnapIt](https://github.com/enginkirmaci/SnapIt))
 stays excluded — DevTools vendors the .NET companion it ships, and the Rust
@@ -87,6 +88,14 @@ together. When one changes, update the other side and re-pin both apps in the
   .NET companion by default; the `SnapIt.Executable` setting points it at the
   Rust `snapit.exe`, which is a portable-zip deliverable (no installer) and
   skipped in the Linux bundle (`linux_skip = true` in `apps.toml`).
+- **Shared notes store** (`~/.warp/notes`, one folder per repo): DevTools'
+  notes surfaces (titlebar toggle, tools menu, repo-row icons, global-search
+  note hits) launch [warp-notes](https://github.com/enginkirmaci/warp-notes)
+  with `--store` (DevTools' resolved `notes_store_path`) plus `--repo`/`--note`;
+  standalone launches root at the shared store and a legacy
+  `~/.devtools/notes` renames over on whichever app runs first. Missing
+  warp-notes binary = the notes surfaces fail with a toast, nothing else
+  breaks.
 - **Shared settings**: the Rust `crates/snapit` port inside DevTools reads
   the same `~/.devtools/snapit` settings/layouts as the C# companion.
 

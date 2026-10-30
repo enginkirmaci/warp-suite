@@ -28,6 +28,9 @@ jobs:
       warp_snapit_repo: ${{ steps.pins.outputs.warp_snapit_repo }}
       warp_snapit_ref: ${{ steps.pins.outputs.warp_snapit_ref }}
       warp_snapit_sha: ${{ steps.pins.outputs.warp_snapit_sha }}
+      warp_notes_repo: ${{ steps.pins.outputs.warp_notes_repo }}
+      warp_notes_ref: ${{ steps.pins.outputs.warp_notes_ref }}
+      warp_notes_sha: ${{ steps.pins.outputs.warp_notes_sha }}
     steps:
       - uses: actions/checkout@v4
 
@@ -46,7 +49,7 @@ jobs:
                    GIT_CONFIG_KEY_0=http.https://github.com/.extraheader \
                    GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$APPS_TOKEN" | base64 -w0)"
           fi
-          for app in devtools warp-agent warp-snapit; do
+          for app in devtools warp-agent warp-snapit warp-notes; do
             key="${app//-/_}"
             repo="$(python3 scripts/manifest.py get "$app" repo)"
             ref="$(python3 scripts/manifest.py get "$app" ref)"
@@ -99,6 +102,7 @@ jobs:
       DEVTOOLS_DIR: ${{ github.workspace }}\.build\devtools
       WARP_AGENT_DIR: ${{ github.workspace }}\.build\warp-agent
       WARP_SNAPIT_DIR: ${{ github.workspace }}\.build\warp-snapit
+      WARP_NOTES_DIR: ${{ github.workspace }}\.build\warp-notes
     steps:
       - uses: dtolnay/rust-toolchain@stable
 
@@ -198,6 +202,36 @@ jobs:
           path: .build/warp-snapit/packaging/windows/warp-snapit-*-windows-portable.zip
           if-no-files-found: error
 
+      # Linux + Windows GPUI app: installer + portable zip, like warp-agent
+      - name: Checkout warp-notes @ pin
+        uses: actions/checkout@v4
+        with:
+          repository: enginkirmaci/warp-notes
+          ref: ${{ needs.resolve.outputs.warp_notes_sha }}
+          path: .build/warp-notes
+          token: ${{ secrets.APPS_TOKEN }}
+
+      - name: Build warp-notes
+        run: '& "$env:WARP_NOTES_DIR\packaging\windows\build.ps1"'
+
+      - name: Package warp-notes (portable zip + installer)
+        run: |
+          $v = (cargo metadata --manifest-path "$env:WARP_NOTES_DIR\Cargo.toml" --no-deps --format-version 1 |
+                ConvertFrom-Json).packages | Where-Object name -eq 'warp-notes' |
+                Select-Object -ExpandProperty version
+          $out = "$env:WARP_NOTES_DIR\packaging\windows\out"
+          Compress-Archive -Path "$out\warp-notes.exe" `
+            -DestinationPath "$env:WARP_NOTES_DIR\packaging\windows\warp-notes-$v-windows-portable.zip" -Force
+          iscc /DMyAppVersion=$v "$env:WARP_NOTES_DIR\packaging\windows\warp-notes.iss"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: warp-notes-windows
+          path: |
+            .build/warp-notes/packaging/windows/out/warp-notes-*-setup-x64.exe
+            .build/warp-notes/packaging/windows/warp-notes-*-windows-portable.zip
+          if-no-files-found: error
+
   release:
     needs: [resolve, linux, windows]
     runs-on: ubuntu-latest
@@ -219,6 +253,7 @@ jobs:
             | devtools | ${{ needs.resolve.outputs.devtools_repo }} | ${{ needs.resolve.outputs.devtools_ref }} | ${{ needs.resolve.outputs.devtools_sha }} |
             | warp-agent | ${{ needs.resolve.outputs.warp_agent_repo }} | ${{ needs.resolve.outputs.warp_agent_ref }} | ${{ needs.resolve.outputs.warp_agent_sha }} |
             | warp-snapit | ${{ needs.resolve.outputs.warp_snapit_repo }} | ${{ needs.resolve.outputs.warp_snapit_ref }} | ${{ needs.resolve.outputs.warp_snapit_sha }} |
+            | warp-notes | ${{ needs.resolve.outputs.warp_notes_repo }} | ${{ needs.resolve.outputs.warp_notes_ref }} | ${{ needs.resolve.outputs.warp_notes_sha }} |
           # upload-artifact keeps each artifact's internal structure (the
           # setup exes sit in out/), so match at any depth.
           files: |
