@@ -30,7 +30,11 @@ def get(name, key):
     data = known[name]
     if key not in data:
         sys.exit(f"[apps.{name}] has no {key}")
-    return data[key]
+    value = data[key]
+    if isinstance(value, bool):
+        # TOML spelling: shell consumers compare against lowercase "true".
+        return "true" if value else "false"
+    return value
 
 
 def set_ref(name, ref):
