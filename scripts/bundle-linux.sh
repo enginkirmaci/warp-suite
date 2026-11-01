@@ -52,7 +52,7 @@ dist_root="$root/dist"
 bundle="$dist_root/warp-suite-$version-linux"
 rm -rf "$bundle"
 mkdir -p "$bundle/bin" "$bundle/applications" "$bundle/icons/hicolor"
-# One shared target dir for all suite clones: devtools and warp-agent share
+# One shared target dir for all suite clones: warp-station and warp-agent share
 # most of the GPUI dependency tree, so repeated suite builds reuse artifacts.
 export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$build_dir/target}"
 

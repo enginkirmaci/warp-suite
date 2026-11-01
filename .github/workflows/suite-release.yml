@@ -19,9 +19,9 @@ jobs:
   resolve:
     runs-on: ubuntu-latest
     outputs:
-      devtools_repo: ${{ steps.pins.outputs.devtools_repo }}
-      devtools_ref: ${{ steps.pins.outputs.devtools_ref }}
-      devtools_sha: ${{ steps.pins.outputs.devtools_sha }}
+      warp_station_repo: ${{ steps.pins.outputs.warp_station_repo }}
+      warp_station_ref: ${{ steps.pins.outputs.warp_station_ref }}
+      warp_station_sha: ${{ steps.pins.outputs.warp_station_sha }}
       warp_agent_repo: ${{ steps.pins.outputs.warp_agent_repo }}
       warp_agent_ref: ${{ steps.pins.outputs.warp_agent_ref }}
       warp_agent_sha: ${{ steps.pins.outputs.warp_agent_sha }}
@@ -49,7 +49,7 @@ jobs:
                    GIT_CONFIG_KEY_0=http.https://github.com/.extraheader \
                    GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$APPS_TOKEN" | base64 -w0)"
           fi
-          for app in devtools warp-agent warp-snapit warp-notes; do
+          for app in warp-station warp-agent warp-snapit warp-notes; do
             key="${app//-/_}"
             repo="$(python3 scripts/manifest.py get "$app" repo)"
             ref="$(python3 scripts/manifest.py get "$app" ref)"
@@ -99,50 +99,44 @@ jobs:
       run:
         shell: pwsh
     env:
-      DEVTOOLS_DIR: ${{ github.workspace }}\.build\devtools
+      WARP_STATION_DIR: ${{ github.workspace }}\.build\warp-station
       WARP_AGENT_DIR: ${{ github.workspace }}\.build\warp-agent
       WARP_SNAPIT_DIR: ${{ github.workspace }}\.build\warp-snapit
       WARP_NOTES_DIR: ${{ github.workspace }}\.build\warp-notes
     steps:
       - uses: dtolnay/rust-toolchain@stable
 
-      # .NET 10 SDK: DevTools' vendored Tools.SnapIt companion (src/Tools.SnapIt)
-      - uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: 10.0.x
-
       - name: Install Inno Setup
         run: choco install innosetup -y --no-progress
 
-      - name: Checkout DevTools @ pin
+      - name: Checkout warp-station @ pin
         uses: actions/checkout@v4
         with:
-          repository: enginkirmaci/DevTools
-          ref: ${{ needs.resolve.outputs.devtools_sha }}
-          path: .build/devtools
+          repository: enginkirmaci/warp-station
+          ref: ${{ needs.resolve.outputs.warp_station_sha }}
+          path: .build/warp-station
           token: ${{ secrets.APPS_TOKEN }}
 
-      # The repo's own script: builds devtools.exe + snapit.exe and publishes
-      # the vendored Tools.SnapIt.exe companion into packaging\windows\out\
-      - name: Build DevTools
-        run: '& "$env:DEVTOOLS_DIR\packaging\windows\build.ps1"'
+      # The repo's own script: builds warp-station.exe into packaging\windows\out\
+      - name: Build warp-station
+        run: '& "$env:WARP_STATION_DIR\packaging\windows\build.ps1"'
 
-      - name: Package DevTools (portable zip + installer)
+      - name: Package warp-station (portable zip + installer)
         run: |
-          $v = (cargo metadata --manifest-path "$env:DEVTOOLS_DIR\Cargo.toml" --no-deps --format-version 1 |
-                ConvertFrom-Json).packages | Where-Object name -eq 'devtools' |
+          $v = (cargo metadata --manifest-path "$env:WARP_STATION_DIR\Cargo.toml" --no-deps --format-version 1 |
+                ConvertFrom-Json).packages | Where-Object name -eq 'warp-station' |
                 Select-Object -ExpandProperty version
-          $out = "$env:DEVTOOLS_DIR\packaging\windows\out"
+          $out = "$env:WARP_STATION_DIR\packaging\windows\out"
           Compress-Archive -Path "$out\*" `
-            -DestinationPath "$env:DEVTOOLS_DIR\packaging\windows\DevTools-$v-windows-portable.zip" -Force
-          iscc /DMyAppVersion=$v "$env:DEVTOOLS_DIR\packaging\windows\devtools.iss"
+            -DestinationPath "$env:WARP_STATION_DIR\packaging\windows\warp-station-$v-windows-portable.zip" -Force
+          iscc /DMyAppVersion=$v "$env:WARP_STATION_DIR\packaging\windows\warp-station.iss"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: devtools-windows
+          name: warp-station-windows
           path: |
-            .build/devtools/packaging/windows/out/DevTools-*-setup-x64.exe
-            .build/devtools/packaging/windows/DevTools-*-windows-portable.zip
+            .build/warp-station/packaging/windows/out/warp-station-*-setup-x64.exe
+            .build/warp-station/packaging/windows/warp-station-*-windows-portable.zip
           if-no-files-found: error
 
       - name: Checkout warp-agent @ pin
@@ -250,7 +244,7 @@ jobs:
 
             | App | Repo | Ref | Resolved commit |
             |---|---|---|---|
-            | devtools | ${{ needs.resolve.outputs.devtools_repo }} | ${{ needs.resolve.outputs.devtools_ref }} | ${{ needs.resolve.outputs.devtools_sha }} |
+            | warp-station | ${{ needs.resolve.outputs.warp_station_repo }} | ${{ needs.resolve.outputs.warp_station_ref }} | ${{ needs.resolve.outputs.warp_station_sha }} |
             | warp-agent | ${{ needs.resolve.outputs.warp_agent_repo }} | ${{ needs.resolve.outputs.warp_agent_ref }} | ${{ needs.resolve.outputs.warp_agent_sha }} |
             | warp-snapit | ${{ needs.resolve.outputs.warp_snapit_repo }} | ${{ needs.resolve.outputs.warp_snapit_ref }} | ${{ needs.resolve.outputs.warp_snapit_sha }} |
             | warp-notes | ${{ needs.resolve.outputs.warp_notes_repo }} | ${{ needs.resolve.outputs.warp_notes_ref }} | ${{ needs.resolve.outputs.warp_notes_sha }} |
