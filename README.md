@@ -100,6 +100,11 @@ together. When one changes, update the other side and re-pin both apps in the
   breaks.
 - **Shared settings**: the Rust `crates/snapit` port inside DevTools reads
   the same `~/.devtools/snapit` settings/layouts as the C# companion.
+- **Shared text size** (`~/.warp/ui.json`, key `text_size`: `compact`, `normal`
+  or `large`): `warpui-kit-core` owns the file and the one control that writes
+  it. A click applies in that app at once; the other apps read the value when
+  they next start. The apps' old `font_scale` settings only seed the file on
+  its first run, so every app must be on the same `warpui-kit-core`.
 
 ## Adding an app
 
