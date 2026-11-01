@@ -73,9 +73,11 @@ together. When one changes, update the other side and re-pin both apps in the
 
 - **warp-agent loopback door** (`~/.warp-agent/ipc.port` + `ipc.token`,
   token-authenticated NDJSON on `127.0.0.1`): commands `open-workspace`,
-  `new-chat`, `run-prompt`, `models`, `status` (+ status pushes). warp-agent
-  owns the protocol; DevTools is the client — a missing warp-agent binary
-  turns DevTools' AI features off, a closed one is launched on demand.
+  `new-chat`, `run-prompt`, `models`, `status` (+ status pushes).
+  `new-chat`/`run-prompt` accept `harness`/`model`/`variant`, and `models`
+  answers with the harnesses and each model's variants. warp-agent owns the
+  protocol; DevTools is the client — a missing warp-agent binary turns
+  DevTools' AI features off, a closed one is launched on demand.
 - **DevTools Windows companion**: `packaging/windows/build.ps1` builds the
   vendored `src/Tools.SnapIt` copy and stages it as `Tools.SnapIt.exe`
   alongside `devtools.exe`. The vendored copy is a deliberate variant of the
