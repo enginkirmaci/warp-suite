@@ -2,6 +2,9 @@ name: suite-release
 
 # Builds the apps in apps/ at this commit and publishes one combined GitHub
 # Release. Deploy = dispatch this workflow with a version.
+#
+# Both jobs call the same scripts a local build uses - scripts/build.sh on
+# Linux, scripts/build.ps1 on Windows - so CI cannot drift from a local build.
 
 on:
   workflow_dispatch:
@@ -30,8 +33,6 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
-      # Every app commits Cargo.lock and the kits are in-tree, so the lock
-      # files + apps.toml fully determine the dependency graph.
       - name: Cache cargo registry and release artifacts
         uses: actions/cache@v4
         with:
@@ -44,13 +45,13 @@ jobs:
             ${{ runner.os }}-cargo-${{ hashFiles('apps/**/Cargo.lock', 'kits/**') }}-
             ${{ runner.os }}-cargo-
 
-      - name: Bundle Linux deliverables
-        run: scripts/bundle-linux.sh --version "${{ inputs.version }}"
+      - name: Build Linux bundle
+        run: scripts/build.sh --version "${{ inputs.version }}"
 
       - uses: actions/upload-artifact@v4
         with:
           name: warp-suite-linux
-          path: dist/warp-suite-${{ inputs.version }}-linux.tar.gz
+          path: dist/linux/*.tar.gz
           if-no-files-found: error
 
   windows:
@@ -58,14 +59,6 @@ jobs:
     defaults:
       run:
         shell: pwsh
-    env:
-      WARP_STATION_DIR: ${{ github.workspace }}/apps/warp-station
-      WARP_AGENT_DIR: ${{ github.workspace }}/apps/warp-agent
-      WARP_SNAPIT_DIR: ${{ github.workspace }}/apps/warp-snapit
-      WARP_NOTES_DIR: ${{ github.workspace }}/apps/warp-notes
-      # All four apps share one target dir, like the Linux job: the GPUI
-      # dependency tree is compiled once instead of once per app.
-      CARGO_TARGET_DIR: ${{ github.workspace }}/.build/target
     steps:
       - uses: actions/checkout@v4
 
@@ -90,87 +83,16 @@ jobs:
             choco install innosetup -y --no-progress
           }
 
-      # Each app's own script builds the exe into packaging/windows/out/
-      - name: Build warp-station
-        run: '& "$env:WARP_STATION_DIR/packaging/windows/build.ps1"'
-
-      - name: Package warp-station (portable zip + installer)
-        run: |
-          $v = (cargo metadata --manifest-path "$env:WARP_STATION_DIR/Cargo.toml" --no-deps --format-version 1 |
-                ConvertFrom-Json).packages | Where-Object name -eq 'warp-station' |
-                Select-Object -ExpandProperty version
-          $out = "$env:WARP_STATION_DIR/packaging/windows/out"
-          Compress-Archive -Path "$out/*" `
-            -DestinationPath "$env:WARP_STATION_DIR/packaging/windows/warp-station-$v-windows-portable.zip" -Force
-          iscc /DMyAppVersion=$v "$env:WARP_STATION_DIR/packaging/windows/warp-station.iss"
+      - name: Build Windows deliverables
+        run: scripts/build.ps1 -Version "${{ inputs.version }}"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: warp-station-windows
+          name: warp-suite-windows
           path: |
-            apps/warp-station/packaging/windows/out/warp-station-*-setup-x64.exe
-            apps/warp-station/packaging/windows/warp-station-*-windows-portable.zip
-          if-no-files-found: error
-
-      - name: Build warp-agent
-        run: '& "$env:WARP_AGENT_DIR/packaging/windows/build.ps1"'
-
-      - name: Package warp-agent (portable zip + installer)
-        run: |
-          $v = (cargo metadata --manifest-path "$env:WARP_AGENT_DIR/Cargo.toml" --no-deps --format-version 1 |
-                ConvertFrom-Json).packages | Where-Object name -eq 'warp-agent' |
-                Select-Object -ExpandProperty version
-          $out = "$env:WARP_AGENT_DIR/packaging/windows/out"
-          Compress-Archive -Path "$out/warp-agent.exe" `
-            -DestinationPath "$env:WARP_AGENT_DIR/packaging/windows/warp-agent-$v-windows-portable.zip" -Force
-          iscc /DMyAppVersion=$v "$env:WARP_AGENT_DIR/packaging/windows/warp-agent.iss"
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: warp-agent-windows
-          path: |
-            apps/warp-agent/packaging/windows/out/warp-agent-*-setup-x64.exe
-            apps/warp-agent/packaging/windows/warp-agent-*-windows-portable.zip
-          if-no-files-found: error
-
-      # Windows-only app (linux_skip in apps.toml): portable zip, no installer.
-      - name: Build warp-snapit
-        run: '& "$env:WARP_SNAPIT_DIR/packaging/windows/build.ps1"'
-
-      - name: Package warp-snapit (portable zip)
-        run: |
-          $v = (cargo metadata --manifest-path "$env:WARP_SNAPIT_DIR/Cargo.toml" --no-deps --format-version 1 |
-                ConvertFrom-Json).packages | Where-Object name -eq 'snapit' |
-                Select-Object -ExpandProperty version
-          $out = "$env:WARP_SNAPIT_DIR/packaging/windows/out"
-          Compress-Archive -Path "$out/snapit.exe", "$out/settings" `
-            -DestinationPath "$env:WARP_SNAPIT_DIR/packaging/windows/warp-snapit-$v-windows-portable.zip" -Force
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: warp-snapit-windows
-          path: apps/warp-snapit/packaging/windows/warp-snapit-*-windows-portable.zip
-          if-no-files-found: error
-
-      - name: Build warp-notes
-        run: '& "$env:WARP_NOTES_DIR/packaging/windows/build.ps1"'
-
-      - name: Package warp-notes (portable zip + installer)
-        run: |
-          $v = (cargo metadata --manifest-path "$env:WARP_NOTES_DIR/Cargo.toml" --no-deps --format-version 1 |
-                ConvertFrom-Json).packages | Where-Object name -eq 'warp-notes' |
-                Select-Object -ExpandProperty version
-          $out = "$env:WARP_NOTES_DIR/packaging/windows/out"
-          Compress-Archive -Path "$out/warp-notes.exe" `
-            -DestinationPath "$env:WARP_NOTES_DIR/packaging/windows/warp-notes-$v-windows-portable.zip" -Force
-          iscc /DMyAppVersion=$v "$env:WARP_NOTES_DIR/packaging/windows/warp-notes.iss"
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: warp-notes-windows
-          path: |
-            apps/warp-notes/packaging/windows/out/warp-notes-*-setup-x64.exe
-            apps/warp-notes/packaging/windows/warp-notes-*-windows-portable.zip
+            dist/windows/*.zip
+            dist/windows/*.exe
+            dist/windows/REVISIONS.txt
           if-no-files-found: error
 
   release:
@@ -189,13 +111,15 @@ jobs:
           body: |
             Combined suite release built from this commit: ${{ github.sha }}.
 
-            Apps: apps/warp-station, apps/warp-agent, apps/warp-snapit,
-            apps/warp-notes. Libraries: the kits/ workspace at this
-            commit (warpui-kit-*), also recorded in the Linux tarball's
-            REVISIONS.txt.
-          # upload-artifact keeps each artifact's internal structure (the
-          # setup exes sit in out/), so match at any depth.
+            Linux: scripts/build.sh -> warp-suite-${{ inputs.version }}-linux.tar.gz.
+            Extract and run bundle-install.sh, or use ./install.sh.
+
+            Windows: scripts/build.ps1 -> per-app installers (Inno Setup) and
+            portable zips. warp-snapit is Windows-only and ships portable only.
+
+            Libraries: the kits/ workspace at this commit (warpui-kit-*), also
+            recorded in each REVISIONS.txt.
           files: |
             artifacts/*.tar.gz
-            artifacts/**/*-setup-x64.exe
-            artifacts/**/*-windows-portable.zip
+            artifacts/*.exe
+            artifacts/*.zip

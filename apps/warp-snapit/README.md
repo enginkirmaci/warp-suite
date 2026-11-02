@@ -36,8 +36,8 @@ That includes the .NET quirks: numbers may be strings, points/sizes are
 `"x,y"`, colours are `"#AARRGGBB"`, `AreaPadding`/`BorderThickness` may be a
 number or a thickness string, and the misspelled `DeactivedScreens` field is
 kept as-is. Missing user files are seeded from `<exe dir>\settings\snapit`,
-just like the .NET companion (`packaging/windows/build.ps1` stages the default
-seed next to the exe).
+just like the .NET companion (`scripts/build.ps1` in warp-suite stages the
+default seed next to the exe).
 
 ## Build and run
 

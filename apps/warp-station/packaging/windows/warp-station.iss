@@ -9,16 +9,25 @@
 #define MyAppName "Warp Station"
 #define MyAppExeName "warp-station.exe"
 
+; build.ps1 passes the staging dir and the dist output dir; the fallbacks keep
+; a manual `iscc warp-station.iss` working against packaging\windows\out.
+#ifndef MySourceDir
+#define MySourceDir "out"
+#endif
+#ifndef MyOutputDir
+#define MyOutputDir "out"
+#endif
+
 [Setup]
-AppId={{8E4C2A70-9B31-4E2B-9C7A-RUSTDEVTOOLS01}
+AppId={{3F7A1C64-9D2E-4B58-8A17-6C05E9B2D4F1}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher=Engin Kirmaci
-DefaultDirName={localappdata}\Programs\warp-station
+DefaultDirName={autopf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 PrivilegesRequired=lowest
 ArchitecturesInstallIn64BitMode=x64compatible
-OutputDir=out
+OutputDir={#MyOutputDir}
 OutputBaseFilename=warp-station-{#MyAppVersion}-setup-x64
 SetupIconFile=warp-station.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
@@ -29,7 +38,7 @@ SolidCompression=yes
 Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription: "Additional icons:"
 
 [Files]
-Source: "out\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#MySourceDir}\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
 ; The SnapIt companion lives in its own repo (warp-snapit) and ships
 ; separately; point the SnapIt.Executable setting at it.
 

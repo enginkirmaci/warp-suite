@@ -38,13 +38,17 @@ the AI features never need the CLI binaries.
 
 ## Package
 
-- Linux: `packaging/linux/install.sh` installs the desktop entry + hicolor
-  icons so the launcher shows the app; `Exec` points at the staged
-  `packaging/linux/out/warp-station`.
+Packaging is driven by the suite, not from this directory:
+
+- Linux: `scripts/build.sh --app warp-station` stages the binary, the desktop
+  entry and hicolor icons; `scripts/deploy.sh --local` installs them.
 - Windows (build on a Windows box — GPUI has no Linux→Windows cross build):
-  `packaging/windows/build.ps1` stages the runnable file under
-  `packaging/windows/out`: `warp-station.exe`. The app icon is
-  embedded into the exe by `build.rs` from `packaging/windows/warp-station.ico`.
+  `scripts/build.ps1 -App warp-station` writes the portable zip and the Inno
+  Setup installer. The app icon is embedded into the exe by `build.rs` from
+  `packaging/windows/warp-station.ico`.
+
+This directory only carries the assets: `packaging/linux/{*.desktop,icons}`,
+`packaging/windows/{*.ico,*.iss}`.
 
 ## SnapIt
 

@@ -2,12 +2,12 @@
 #
 # The apps live in this repo under apps/<name> (imported with git subtree;
 # each keeps its own history). This file only carries the build knobs
-# scripts/bundle-linux.sh and the release workflow use - the suite commit is
+# scripts/build.sh and the release workflow use - the suite commit is
 # the single provenance for every app.
 #
 # Per-app build knobs (all optional):
 #   linux_build   extra args for `cargo build --release` (e.g. "-p warp-station")
-#   linux_skip    true = Windows-only app; bundle-linux.sh skips it entirely
+#   linux_skip    true = Windows-only app; build.sh skips it entirely
 #                 (no Linux build, no REVISIONS.txt entry, no desktop entry)
 #   icon_prefix   base name of packaging/linux/icons/<prefix>-*.png
 #                 (defaults to the app name)
@@ -46,7 +46,7 @@ the settings contract, the misspelled DeactivedScreens field included.
 Warp Station's SnapIt.Executable default still names the retired
 Tools.SnapIt.exe; point it at snapit.exe to run the Rust port. Suite
 deliverable: a portable zip with snapit.exe + the default settings seed
-(packaging/windows/build.ps1), no installer.
+(no packaging/windows/<app>.iss), no installer.
 """
 
 [apps.warp-notes]

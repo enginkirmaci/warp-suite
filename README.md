@@ -42,6 +42,26 @@ git clone https://github.com/enginkirmaci/warp-suite && cd warp-suite
 Binaries go to `~/.local/bin`, desktop entries + hicolor icons to
 `~/.local/share`. Everything is per-user; no root needed.
 
+## Build and deploy locally
+
+```sh
+scripts/build.sh                  # Linux: dist/linux/warp-suite-<v>-linux/ + tarball
+scripts/build.sh --app warp-notes # one app, fast loop
+scripts/deploy.sh --local         # build, then install into ~/.local
+scripts/deploy.sh --uninstall     # remove exactly what it installed
+```
+
+```powershell
+scripts\build.ps1                 # Windows: dist\windows\ zips + installers
+scripts\build.ps1 -App warp-notes -NoPackage
+scripts\deploy.ps1 -Local         # build, then install a portable copy
+scripts\deploy.ps1 -Release       # install a published release (installers)
+scripts\deploy.ps1 -Uninstall
+```
+
+Both builds default the version to `git describe --tags --always
+--first-parent`; CI passes `--version` / `-Version` explicitly.
+
 ## Layout
 
 | Path | Purpose |
@@ -49,17 +69,20 @@ Binaries go to `~/.local/bin`, desktop entries + hicolor icons to
 | `apps/<name>/` | the app sources, each with its own history (imported with `git subtree`) |
 | `apps.toml` | per-app build knobs (`linux_build`, `linux_skip`, `icon_prefix`, `scalable_svg`) and contract notes |
 | `scripts/manifest.py` | apps.toml reader shared by the scripts + CI |
-| `.cargo/config.toml` | one cargo target dir for the whole suite: `.build/target` for every app, `kits` and `bundle-linux.sh` |
+| `.cargo/config.toml` | one cargo target dir for the whole suite: `.build/target` for every app, `kits` and `scripts/build.sh` |
 | `kits/` | cargo workspace of the four `warpui-kit-*` crates the apps depend on (`../../kits`) |
-| `scripts/bundle-linux.sh` | `cargo build --release` each app → stage `dist/warp-suite-<v>-linux/` + tarball (the exact bundle CI publishes) |
-| `scripts/install-root.sh` | install an extracted bundle into `~/.local` |
-| `install.sh` | suite installer: download a release or build locally |
+| `scripts/build.sh` | Linux build: `cargo build --release` each app → `dist/linux/warp-suite-<v>-linux/` + tarball |
+| `scripts/build.ps1` | Windows build: `dist/windows/` portable zips + Inno Setup installers |
+| `scripts/deploy.sh` | Linux install/uninstall: local bundle or published release |
+| `scripts/deploy.ps1` | Windows install/uninstall: portable locally, installers from a release |
+| `scripts/bundle-install.sh` | runs inside an extracted bundle; installs into `~/.local` and records what it wrote |
+| `install.sh` | shim over `scripts/deploy.sh` for the documented one-liner |
 | `.github/workflows/suite-release.yml` | the combined release pipeline |
 | `design/v3/` | the committed design contract (DESIGN.md + prototype source); the live source is the OpenDesign project `warp-suite-v3` |
 
-The suite never reimplements app builds: it invokes what each app already
-ships (`packaging/windows/build.ps1`, the `.iss` installers, the `*.desktop`
-+ icon files). Only orchestration and assembly are new.
+Each app keeps only packaging assets (`packaging/linux/{*.desktop,icons}`,
+`packaging/windows/{*.ico,*.iss,settings}`); every build and install step
+lives in `scripts/`, so a local build and CI run the same code.
 
 ## Cross-app contracts
 
@@ -97,17 +120,17 @@ together. When one changes, update the other side in the **same** commit.
 ## Adding an app
 
 1. Import it with history: `git subtree add --prefix=apps/<name> <repo> <ref>`.
-2. Add a section to `apps.toml` (optional
-   `linux_build`/`linux_skip`/`icon_prefix`/`scalable_svg` —
-   `scripts/bundle-linux.sh` picks it up automatically; a Windows-only app
-   sets `linux_skip = true` and needs a build + package block in
-   `suite-release.yml` mirroring the existing ones).
+2. Add a section to `apps.toml` if it needs non-default build knobs
+   (`linux_build`/`linux_skip`/`icon_prefix`/`scalable_svg`) — `build.sh`
+   picks it up automatically. Windows needs no entry: `build.ps1` discovers
+   every app under `apps/` and compiles an installer only when
+   `packaging/windows/<app>.iss` exists.
 3. If it needs a shared library crate, add it to the `kits/`
    workspace.
 4. Document its contracts in [Cross-app contracts](#cross-app-contracts).
 
 That is exactly how warp-snapit joined (Windows-only: `linux_skip = true`,
-portable zip from its own `packaging/windows/build.ps1`, no installer). The
+no `.iss` so `build.ps1` ships a portable zip only). The
 C#/.NET SnapIt repo would join the same way if ever wanted.
 
 ## Notes

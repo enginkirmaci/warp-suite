@@ -3,7 +3,7 @@
 # Cargo resolves build.target-dir relative to the directory holding this file,
 # so every app under apps/<app> (and kits) builds into
 # warp-suite/.build/target no matter which directory cargo is invoked from.
-# That is also the path scripts/bundle-linux.sh uses (it exports
+# That is also the path scripts/build.sh uses (it exports
 # CARGO_TARGET_DIR), so debug builds and release bundles share one tree and
 # the GPUI dependency graph is compiled once instead of once per app.
 #
