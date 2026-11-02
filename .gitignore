@@ -3,3 +3,4 @@ dist/
 out/
 warpui-kits/target/
 warpui-kits/Cargo.lock
+__pycache__/

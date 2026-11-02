@@ -24,22 +24,20 @@ code blocks.
 
 ## How the apps consume it
 
-The apps point at this workspace from their own checkout:
+The apps point at this workspace from their own directory:
 
 ```toml
-warpui-kit-core = { path = "../warp-suite/warpui-kits/warpui-kit-core" }
+warpui-kit-core = { path = "../../warpui-kits/warpui-kit-core" }
 ```
 
-warp-station's crate sits two levels deeper, so it uses
-`../../../warp-suite/warpui-kits/...`. A local app checkout therefore needs
-this repo as a sibling.
+warp-station's crate sits two levels deeper
+(`apps/warp-station/crates/warp-station`), so it uses
+`../../../../warpui-kits/...`.
 
-The apps do not check out this workspace themselves. `scripts/bundle-linux.sh`
-and the Windows job in `.github/workflows/suite-release.yml` stage the whole
-workspace at `.build/warp-suite/warpui-kits`, the same relative path from
-every app clone, so a suite release builds from the suite repo alone. The suite commit is the kits' provenance: the
-Linux bundle's `REVISIONS.txt` records it against each crate, and there is no
-separate sync step.
+The apps live under `apps/` in this repo, so a release builds from the suite
+checkout alone. The suite commit is the kits' provenance: the Linux bundle's
+`REVISIONS.txt` records it against each crate, and there is no separate sync
+step.
 
 Adding a crate: give it a directory with a `Cargo.toml` and `src/`, add it to
 the workspace `members` in `Cargo.toml`, and both release jobs pick it up

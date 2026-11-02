@@ -1,13 +1,11 @@
 #!/usr/bin/env python3
 """apps.toml helper shared by the warp-suite scripts and CI.
 
-apps.toml sections are tiny and hand-maintained; tomllib (read-only) covers
-reads and set-ref does minimal text surgery for writes.
+apps.toml sections are tiny and hand-maintained; tomllib covers the reads.
 
 Usage:
-  manifest.py list                    print "name ref repo" per app
-  manifest.py get <app> <key>         print one field of [apps.<app>]
-  manifest.py set-ref <app> <ref>     rewrite the ref line under [apps.<app>]
+  manifest.py list                 print one app name per line
+  manifest.py get <app> <key>      print one field of [apps.<app>]
 """
 
 import sys
@@ -37,35 +35,14 @@ def get(name, key):
     return value
 
 
-def set_ref(name, ref):
-    lines = MANIFEST.read_text().splitlines(keepends=True)
-    header = f"[apps.{name}]"
-    inside = False
-    done = False
-    for i, line in enumerate(lines):
-        stripped = line.strip()
-        if stripped.startswith("["):
-            inside = stripped == header
-            continue
-        if inside and not done and stripped.split("=", 1)[0].strip() == "ref":
-            lines[i] = f'ref = "{ref}"\n'
-            done = True
-    if not done:
-        sys.exit(f"no ref line under [apps.{name}]")
-    MANIFEST.write_text("".join(lines))
-
-
 def main():
     argv = sys.argv[1:]
     if argv == ["list"]:
-        for name, data in apps().items():
-            print(name, data["ref"], data["repo"])
+        for name in apps():
+            print(name)
         return
     if len(argv) == 3 and argv[0] == "get":
         print(get(argv[1], argv[2]))
-        return
-    if len(argv) == 3 and argv[0] == "set-ref":
-        set_ref(argv[1], argv[2])
         return
     sys.exit(__doc__)
 

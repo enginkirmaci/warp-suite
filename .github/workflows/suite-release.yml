@@ -1,8 +1,7 @@
 name: suite-release
 
-# One-git deploy: builds every app at the refs pinned in apps.toml and
-# publishes one combined GitHub Release. Deploy = set pins
-# (scripts/set-pin.sh) -> run this workflow with a version.
+# Builds the apps in apps/ at this commit and publishes one combined GitHub
+# Release. Deploy = dispatch this workflow with a version.
 
 on:
   workflow_dispatch:
@@ -16,55 +15,7 @@ permissions:
   contents: write
 
 jobs:
-  resolve:
-    runs-on: ubuntu-latest
-    outputs:
-      warp_station_repo: ${{ steps.pins.outputs.warp_station_repo }}
-      warp_station_ref: ${{ steps.pins.outputs.warp_station_ref }}
-      warp_station_sha: ${{ steps.pins.outputs.warp_station_sha }}
-      warp_agent_repo: ${{ steps.pins.outputs.warp_agent_repo }}
-      warp_agent_ref: ${{ steps.pins.outputs.warp_agent_ref }}
-      warp_agent_sha: ${{ steps.pins.outputs.warp_agent_sha }}
-      warp_snapit_repo: ${{ steps.pins.outputs.warp_snapit_repo }}
-      warp_snapit_ref: ${{ steps.pins.outputs.warp_snapit_ref }}
-      warp_snapit_sha: ${{ steps.pins.outputs.warp_snapit_sha }}
-      warp_notes_repo: ${{ steps.pins.outputs.warp_notes_repo }}
-      warp_notes_ref: ${{ steps.pins.outputs.warp_notes_ref }}
-      warp_notes_sha: ${{ steps.pins.outputs.warp_notes_sha }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - id: pins
-        env:
-          APPS_TOKEN: ${{ secrets.APPS_TOKEN }}
-        run: |
-          set -euo pipefail
-          # Private app repos: authenticate exactly like actions/checkout does.
-          if [ -n "$APPS_TOKEN" ]; then
-            # Drop the GITHUB_TOKEN header actions/checkout left in this repo's
-            # config - it cannot read the private app repos and would duplicate
-            # our header (400 "Duplicate header: Authorization").
-            git config --unset-all http.https://github.com/.extraheader 2>/dev/null || true
-            export GIT_CONFIG_COUNT=1 \
-                   GIT_CONFIG_KEY_0=http.https://github.com/.extraheader \
-                   GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$APPS_TOKEN" | base64 -w0)"
-          fi
-          for app in warp-station warp-agent warp-snapit warp-notes; do
-            key="${app//-/_}"
-            repo="$(python3 scripts/manifest.py get "$app" repo)"
-            ref="$(python3 scripts/manifest.py get "$app" ref)"
-            sha="$(git ls-remote "$repo" "$ref" | awk 'NR==1{print $1}')"
-            if [ -z "$sha" ]; then
-              echo "::error::ref '$ref' not found in $repo" >&2
-              exit 1
-            fi
-            echo "${key}_repo=$repo" >> "$GITHUB_OUTPUT"
-            echo "${key}_ref=$ref" >> "$GITHUB_OUTPUT"
-            echo "${key}_sha=$sha" >> "$GITHUB_OUTPUT"
-          done
-
   linux:
-    needs: resolve
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -79,9 +30,8 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
-      # Keyed on the resolved pins (every app commits Cargo.lock, so the SHA
-      # fully determines the dependency graph) and on apps.toml for build-knob
-      # changes. release/ only: debug/ is ~5x larger and unused here.
+      # Every app commits Cargo.lock and the kits are in-tree, so the lock
+      # files + apps.toml fully determine the dependency graph.
       - name: Cache cargo registry and release artifacts
         uses: actions/cache@v4
         with:
@@ -89,17 +39,12 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             .build/target/release
-          key: ${{ runner.os }}-cargo-${{ hashFiles('apps.toml') }}-${{ hashFiles('warpui-kits/**') }}-${{ needs.resolve.outputs.warp_station_sha }}-${{ needs.resolve.outputs.warp_agent_sha }}-${{ needs.resolve.outputs.warp_notes_sha }}
+          key: ${{ runner.os }}-cargo-${{ hashFiles('apps/**/Cargo.lock', 'warpui-kits/**', 'apps.toml') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-${{ hashFiles('apps.toml') }}-${{ hashFiles('warpui-kits/**') }}-
-            ${{ runner.os }}-cargo-${{ hashFiles('apps.toml') }}-
+            ${{ runner.os }}-cargo-${{ hashFiles('apps/**/Cargo.lock', 'warpui-kits/**') }}-
             ${{ runner.os }}-cargo-
 
-      # Clones the app repos at the pins and stages the bundle - the same
-      # script used for local builds, so CI and local produce identical layouts.
-      - name: Bundle Linux deliverables at the pinned refs
-        env:
-          APPS_TOKEN: ${{ secrets.APPS_TOKEN }}
+      - name: Bundle Linux deliverables
         run: scripts/bundle-linux.sh --version "${{ inputs.version }}"
 
       - uses: actions/upload-artifact@v4
@@ -109,25 +54,20 @@ jobs:
           if-no-files-found: error
 
   windows:
-    needs: resolve
     runs-on: windows-latest
     defaults:
       run:
         shell: pwsh
     env:
-      WARP_STATION_DIR: ${{ github.workspace }}\.build\warp-station
-      WARP_AGENT_DIR: ${{ github.workspace }}\.build\warp-agent
-      WARP_SNAPIT_DIR: ${{ github.workspace }}\.build\warp-snapit
-      WARP_NOTES_DIR: ${{ github.workspace }}\.build\warp-notes
+      WARP_STATION_DIR: ${{ github.workspace }}/apps/warp-station
+      WARP_AGENT_DIR: ${{ github.workspace }}/apps/warp-agent
+      WARP_SNAPIT_DIR: ${{ github.workspace }}/apps/warp-snapit
+      WARP_NOTES_DIR: ${{ github.workspace }}/apps/warp-notes
       # All four apps share one target dir, like the Linux job: the GPUI
       # dependency tree is compiled once instead of once per app.
-      CARGO_TARGET_DIR: ${{ github.workspace }}\.build\target
+      CARGO_TARGET_DIR: ${{ github.workspace }}/.build/target
     steps:
-      # The suite repo itself: warpui-kits/ carries the warpui-kit crates the app
-      # checkouts resolve as path siblings.
       - uses: actions/checkout@v4
-        with:
-          path: .
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -138,10 +78,9 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             .build/target/release
-          key: ${{ runner.os }}-cargo-${{ hashFiles('apps.toml') }}-${{ hashFiles('warpui-kits/**') }}-${{ needs.resolve.outputs.warp_station_sha }}-${{ needs.resolve.outputs.warp_agent_sha }}-${{ needs.resolve.outputs.warp_snapit_sha }}-${{ needs.resolve.outputs.warp_notes_sha }}
+          key: ${{ runner.os }}-cargo-${{ hashFiles('apps/**/Cargo.lock', 'warpui-kits/**', 'apps.toml') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-${{ hashFiles('apps.toml') }}-${{ hashFiles('warpui-kits/**') }}-
-            ${{ runner.os }}-cargo-${{ hashFiles('apps.toml') }}-
+            ${{ runner.os }}-cargo-${{ hashFiles('apps/**/Cargo.lock', 'warpui-kits/**') }}-
             ${{ runner.os }}-cargo-
 
       # windows-latest normally ships Inno Setup; only install when absent.
@@ -151,139 +90,91 @@ jobs:
             choco install innosetup -y --no-progress
           }
 
-      - name: Checkout warp-station @ pin
-        uses: actions/checkout@v4
-        with:
-          repository: enginkirmaci/warp-station
-          ref: ${{ needs.resolve.outputs.warp_station_sha }}
-          path: .build/warp-station
-          token: ${{ secrets.APPS_TOKEN }}
-
-      # The apps resolve the crates as ../warp-suite/warpui-kits/<crate>
-      # from their checkout, so stage the whole workspace at that path before
-      # the first cargo call.
-      - name: Stage the warpui-kit workspace
-        run: |
-          New-Item -ItemType Directory -Force .build | Out-Null
-          Remove-Item -Recurse -Force .build/warp-suite -ErrorAction SilentlyContinue
-          # Drop the old flat staging layout, so nothing resolves a stale copy.
-          Get-ChildItem .build -Directory -Filter 'warpui-kit-*' -ErrorAction SilentlyContinue |
-            Remove-Item -Recurse -Force
-          New-Item -ItemType Directory -Force .build/warp-suite | Out-Null
-          Copy-Item -Recurse -Force warpui-kits .build/warp-suite/warpui-kits
-          Remove-Item -Recurse -Force .build/warp-suite/warpui-kits/target -ErrorAction SilentlyContinue
-
-      # The repo's own script: builds warp-station.exe into packaging\windows\out\
+      # Each app's own script builds the exe into packaging/windows/out/
       - name: Build warp-station
-        run: '& "$env:WARP_STATION_DIR\packaging\windows\build.ps1"'
+        run: '& "$env:WARP_STATION_DIR/packaging/windows/build.ps1"'
 
       - name: Package warp-station (portable zip + installer)
         run: |
-          $v = (cargo metadata --manifest-path "$env:WARP_STATION_DIR\Cargo.toml" --no-deps --format-version 1 |
+          $v = (cargo metadata --manifest-path "$env:WARP_STATION_DIR/Cargo.toml" --no-deps --format-version 1 |
                 ConvertFrom-Json).packages | Where-Object name -eq 'warp-station' |
                 Select-Object -ExpandProperty version
-          $out = "$env:WARP_STATION_DIR\packaging\windows\out"
-          Compress-Archive -Path "$out\*" `
-            -DestinationPath "$env:WARP_STATION_DIR\packaging\windows\warp-station-$v-windows-portable.zip" -Force
-          iscc /DMyAppVersion=$v "$env:WARP_STATION_DIR\packaging\windows\warp-station.iss"
+          $out = "$env:WARP_STATION_DIR/packaging/windows/out"
+          Compress-Archive -Path "$out/*" `
+            -DestinationPath "$env:WARP_STATION_DIR/packaging/windows/warp-station-$v-windows-portable.zip" -Force
+          iscc /DMyAppVersion=$v "$env:WARP_STATION_DIR/packaging/windows/warp-station.iss"
 
       - uses: actions/upload-artifact@v4
         with:
           name: warp-station-windows
           path: |
-            .build/warp-station/packaging/windows/out/warp-station-*-setup-x64.exe
-            .build/warp-station/packaging/windows/warp-station-*-windows-portable.zip
+            apps/warp-station/packaging/windows/out/warp-station-*-setup-x64.exe
+            apps/warp-station/packaging/windows/warp-station-*-windows-portable.zip
           if-no-files-found: error
 
-      - name: Checkout warp-agent @ pin
-        uses: actions/checkout@v4
-        with:
-          repository: enginkirmaci/warp-agent
-          ref: ${{ needs.resolve.outputs.warp_agent_sha }}
-          path: .build/warp-agent
-          token: ${{ secrets.APPS_TOKEN }}
-
       - name: Build warp-agent
-        run: '& "$env:WARP_AGENT_DIR\packaging\windows\build.ps1"'
+        run: '& "$env:WARP_AGENT_DIR/packaging/windows/build.ps1"'
 
       - name: Package warp-agent (portable zip + installer)
         run: |
-          $v = (cargo metadata --manifest-path "$env:WARP_AGENT_DIR\Cargo.toml" --no-deps --format-version 1 |
+          $v = (cargo metadata --manifest-path "$env:WARP_AGENT_DIR/Cargo.toml" --no-deps --format-version 1 |
                 ConvertFrom-Json).packages | Where-Object name -eq 'warp-agent' |
                 Select-Object -ExpandProperty version
-          $out = "$env:WARP_AGENT_DIR\packaging\windows\out"
-          Compress-Archive -Path "$out\warp-agent.exe" `
-            -DestinationPath "$env:WARP_AGENT_DIR\packaging\windows\warp-agent-$v-windows-portable.zip" -Force
-          iscc /DMyAppVersion=$v "$env:WARP_AGENT_DIR\packaging\windows\warp-agent.iss"
+          $out = "$env:WARP_AGENT_DIR/packaging/windows/out"
+          Compress-Archive -Path "$out/warp-agent.exe" `
+            -DestinationPath "$env:WARP_AGENT_DIR/packaging/windows/warp-agent-$v-windows-portable.zip" -Force
+          iscc /DMyAppVersion=$v "$env:WARP_AGENT_DIR/packaging/windows/warp-agent.iss"
 
       - uses: actions/upload-artifact@v4
         with:
           name: warp-agent-windows
           path: |
-            .build/warp-agent/packaging/windows/out/warp-agent-*-setup-x64.exe
-            .build/warp-agent/packaging/windows/warp-agent-*-windows-portable.zip
+            apps/warp-agent/packaging/windows/out/warp-agent-*-setup-x64.exe
+            apps/warp-agent/packaging/windows/warp-agent-*-windows-portable.zip
           if-no-files-found: error
 
-      # Windows-only app (linux_skip in apps.toml): ships as a portable zip
-      # from its own build.ps1, no installer.
-      - name: Checkout warp-snapit @ pin
-        uses: actions/checkout@v4
-        with:
-          repository: enginkirmaci/warp-snapit
-          ref: ${{ needs.resolve.outputs.warp_snapit_sha }}
-          path: .build/warp-snapit
-          token: ${{ secrets.APPS_TOKEN }}
-
+      # Windows-only app (linux_skip in apps.toml): portable zip, no installer.
       - name: Build warp-snapit
-        run: '& "$env:WARP_SNAPIT_DIR\packaging\windows\build.ps1"'
+        run: '& "$env:WARP_SNAPIT_DIR/packaging/windows/build.ps1"'
 
       - name: Package warp-snapit (portable zip)
         run: |
-          $v = (cargo metadata --manifest-path "$env:WARP_SNAPIT_DIR\Cargo.toml" --no-deps --format-version 1 |
+          $v = (cargo metadata --manifest-path "$env:WARP_SNAPIT_DIR/Cargo.toml" --no-deps --format-version 1 |
                 ConvertFrom-Json).packages | Where-Object name -eq 'snapit' |
                 Select-Object -ExpandProperty version
-          $out = "$env:WARP_SNAPIT_DIR\packaging\windows\out"
-          Compress-Archive -Path "$out\snapit.exe", "$out\settings" `
-            -DestinationPath "$env:WARP_SNAPIT_DIR\packaging\windows\warp-snapit-$v-windows-portable.zip" -Force
+          $out = "$env:WARP_SNAPIT_DIR/packaging/windows/out"
+          Compress-Archive -Path "$out/snapit.exe", "$out/settings" `
+            -DestinationPath "$env:WARP_SNAPIT_DIR/packaging/windows/warp-snapit-$v-windows-portable.zip" -Force
 
       - uses: actions/upload-artifact@v4
         with:
           name: warp-snapit-windows
-          path: .build/warp-snapit/packaging/windows/warp-snapit-*-windows-portable.zip
+          path: apps/warp-snapit/packaging/windows/warp-snapit-*-windows-portable.zip
           if-no-files-found: error
 
-      # Linux + Windows GPUI app: installer + portable zip, like warp-agent
-      - name: Checkout warp-notes @ pin
-        uses: actions/checkout@v4
-        with:
-          repository: enginkirmaci/warp-notes
-          ref: ${{ needs.resolve.outputs.warp_notes_sha }}
-          path: .build/warp-notes
-          token: ${{ secrets.APPS_TOKEN }}
-
       - name: Build warp-notes
-        run: '& "$env:WARP_NOTES_DIR\packaging\windows\build.ps1"'
+        run: '& "$env:WARP_NOTES_DIR/packaging/windows/build.ps1"'
 
       - name: Package warp-notes (portable zip + installer)
         run: |
-          $v = (cargo metadata --manifest-path "$env:WARP_NOTES_DIR\Cargo.toml" --no-deps --format-version 1 |
+          $v = (cargo metadata --manifest-path "$env:WARP_NOTES_DIR/Cargo.toml" --no-deps --format-version 1 |
                 ConvertFrom-Json).packages | Where-Object name -eq 'warp-notes' |
                 Select-Object -ExpandProperty version
-          $out = "$env:WARP_NOTES_DIR\packaging\windows\out"
-          Compress-Archive -Path "$out\warp-notes.exe" `
-            -DestinationPath "$env:WARP_NOTES_DIR\packaging\windows\warp-notes-$v-windows-portable.zip" -Force
-          iscc /DMyAppVersion=$v "$env:WARP_NOTES_DIR\packaging\windows\warp-notes.iss"
+          $out = "$env:WARP_NOTES_DIR/packaging/windows/out"
+          Compress-Archive -Path "$out/warp-notes.exe" `
+            -DestinationPath "$env:WARP_NOTES_DIR/packaging/windows/warp-notes-$v-windows-portable.zip" -Force
+          iscc /DMyAppVersion=$v "$env:WARP_NOTES_DIR/packaging/windows/warp-notes.iss"
 
       - uses: actions/upload-artifact@v4
         with:
           name: warp-notes-windows
           path: |
-            .build/warp-notes/packaging/windows/out/warp-notes-*-setup-x64.exe
-            .build/warp-notes/packaging/windows/warp-notes-*-windows-portable.zip
+            apps/warp-notes/packaging/windows/out/warp-notes-*-setup-x64.exe
+            apps/warp-notes/packaging/windows/warp-notes-*-windows-portable.zip
           if-no-files-found: error
 
   release:
-    needs: [resolve, linux, windows]
+    needs: [linux, windows]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
@@ -296,17 +187,12 @@ jobs:
           tag_name: v${{ inputs.version }}
           name: warp-suite v${{ inputs.version }}
           body: |
-            Combined suite release built from the refs pinned in `apps.toml`.
+            Combined suite release built from this commit: ${{ github.sha }}.
 
-            | App | Repo | Ref | Resolved commit |
-            |---|---|---|---|
-            | warp-station | ${{ needs.resolve.outputs.warp_station_repo }} | ${{ needs.resolve.outputs.warp_station_ref }} | ${{ needs.resolve.outputs.warp_station_sha }} |
-            | warp-agent | ${{ needs.resolve.outputs.warp_agent_repo }} | ${{ needs.resolve.outputs.warp_agent_ref }} | ${{ needs.resolve.outputs.warp_agent_sha }} |
-            | warp-snapit | ${{ needs.resolve.outputs.warp_snapit_repo }} | ${{ needs.resolve.outputs.warp_snapit_ref }} | ${{ needs.resolve.outputs.warp_snapit_sha }} |
-            | warp-notes | ${{ needs.resolve.outputs.warp_notes_repo }} | ${{ needs.resolve.outputs.warp_notes_ref }} | ${{ needs.resolve.outputs.warp_notes_sha }} |
-
-            Libraries: the `warpui-kits/` workspace at this tag (`warpui-kit-*`), also
-            recorded in the Linux tarball's `REVISIONS.txt`.
+            Apps: apps/warp-station, apps/warp-agent, apps/warp-snapit,
+            apps/warp-notes. Libraries: the warpui-kits/ workspace at this
+            commit (warpui-kit-*), also recorded in the Linux tarball's
+            REVISIONS.txt.
           # upload-artifact keeps each artifact's internal structure (the
           # setup exes sit in out/), so match at any depth.
           files: |

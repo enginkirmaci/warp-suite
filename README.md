@@ -1,18 +1,17 @@
 # warp-suite
 
-One-git deploy point for Engin's connected apps. Each app lives in its own
-repo and stays the source of truth; warp-suite pins a known-good combination
-of them, builds everything at those pins and publishes **one combined
-release**.
+Monorepo for Engin's connected apps. Each app lives under `apps/<name>`,
+imported with `git subtree` so its history stays intact; warp-suite builds
+them together and publishes **one combined release**.
 
 Currently in the suite:
 
-| App | Repo | What it is |
+| App | Path | What it is |
 |---|---|---|
-| warp-station | [enginkirmaci/warp-station](https://github.com/enginkirmaci/warp-station) | Repository workbench (Rust/GPUI workspace) |
-| warp-agent | [enginkirmaci/warp-agent](https://github.com/enginkirmaci/warp-agent) | Chat client over `opencode serve` (Rust/GPUI) |
-| warp-snapit | [enginkirmaci/warp-snapit](https://github.com/enginkirmaci/warp-snapit) | Rust port of the SnapIt zone snapper (Windows-only, portable zip) |
-| warp-notes | [enginkirmaci/warp-notes](https://github.com/enginkirmaci/warp-notes) | Per-repo markdown notes with a live editor (Rust/GPUI) |
+| warp-station | `apps/warp-station` | Repository workbench (Rust/GPUI workspace) |
+| warp-agent | `apps/warp-agent` | Chat client over `opencode serve` (Rust/GPUI) |
+| warp-snapit | `apps/warp-snapit` | Rust port of the SnapIt zone snapper (Windows-only, portable zip) |
+| warp-notes | `apps/warp-notes` | Per-repo markdown notes with a live editor (Rust/GPUI) |
 
 The C#/.NET SnapIt repo ([enginkirmaci/SnapIt](https://github.com/enginkirmaci/SnapIt))
 stays excluded — the Rust port above is the suite's zone snapper.
@@ -21,20 +20,15 @@ See [Adding an app](#adding-an-app).
 ## Deploy
 
 ```sh
-# 1. choose what ships
-scripts/set-pin.sh warp-station rust      # or a tag / commit SHA
-scripts/set-pin.sh warp-agent rust-gpui
-scripts/set-pin.sh warp-snapit main
-
-# 2. build + publish
-#    GitHub → warp-suite → Actions → suite-release → Run workflow (version: 1.2.0)
+# GitHub → warp-suite → Actions → suite-release → Run workflow (version: 1.2.0)
 gh workflow run suite-release.yml -f version=1.2.0
 ```
 
-The run resolves every pinned ref to its commit SHA, builds each app, and
-publishes release `v<version>` with the Linux tarball, per-app Windows
-installers + portable zips, and a pins table (repo/ref/resolved SHA) so every
-release is reproducible.
+The run builds every app under `apps/` at the dispatched commit and publishes
+release `v<version>` with the Linux tarball plus per-app Windows installers
+and portable zips. The release records the suite commit, and the Linux
+tarball's `REVISIONS.txt` records it per app — one commit identifies the whole
+suite.
 
 ## Install on a Linux machine
 
@@ -42,7 +36,7 @@ release is reproducible.
 git clone https://github.com/enginkirmaci/warp-suite && cd warp-suite
 ./install.sh                    # latest published suite release
 ./install.sh --release v1.2.0   # a specific one
-./install.sh --local            # build the pinned apps here, then install
+./install.sh --local            # build the apps in this checkout, then install
 ```
 
 Binaries go to `~/.local/bin`, desktop entries + hicolor icons to
@@ -52,26 +46,24 @@ Binaries go to `~/.local/bin`, desktop entries + hicolor icons to
 
 | Path | Purpose |
 |---|---|
-| `apps.toml` | the manifest: per app `repo`, `ref`, build knobs (`linux_build`, `icon_prefix`, `scalable_svg`) and contract notes |
-| `scripts/manifest.py` | apps.toml reader/writer shared by all scripts + CI |
-| `scripts/set-pin.sh` | verify a ref against the remote, write it into the manifest |
-| `warpui-kits/` | cargo workspace of the four `warpui-kit-*` crates the apps depend on; the release jobs stage it at `.build/warp-suite/warpui-kits` |
-| `scripts/bundle-linux.sh` | clone at pins → `cargo build --release` → stage `dist/warp-suite-<v>-linux/` + tarball (the exact bundle CI publishes) |
+| `apps/<name>/` | the app sources, each with its own history (imported with `git subtree`) |
+| `apps.toml` | per-app build knobs (`linux_build`, `linux_skip`, `icon_prefix`, `scalable_svg`) and contract notes |
+| `scripts/manifest.py` | apps.toml reader shared by the scripts + CI |
+| `warpui-kits/` | cargo workspace of the four `warpui-kit-*` crates the apps depend on (`../../warpui-kits`) |
+| `scripts/bundle-linux.sh` | `cargo build --release` each app → stage `dist/warp-suite-<v>-linux/` + tarball (the exact bundle CI publishes) |
 | `scripts/install-root.sh` | install an extracted bundle into `~/.local` |
 | `install.sh` | suite installer: download a release or build locally |
 | `.github/workflows/suite-release.yml` | the combined release pipeline |
 | `design/v3/` | the committed design contract (DESIGN.md + prototype source); the live source is the OpenDesign project `warp-suite-v3` |
 
-The suite never reimplements app builds: it checks out each repo at its pin
-and invokes what the repo already ships (`packaging/windows/build.ps1`, the
-`.iss` installers, the `*.desktop` + icon files). Only pin resolution,
-orchestration and assembly are new.
+The suite never reimplements app builds: it invokes what each app already
+ships (`packaging/windows/build.ps1`, the `.iss` installers, the `*.desktop`
++ icon files). Only orchestration and assembly are new.
 
 ## Cross-app contracts
 
 The apps talk to each other; these are the interfaces that must move
-together. When one changes, update the other side and re-pin both apps in the
-**same** suite release.
+together. When one changes, update the other side in the **same** commit.
 
 - **warp-agent loopback door** (`~/.warp-agent/ipc.port` + `ipc.token`,
   token-authenticated NDJSON on `127.0.0.1`): commands `open-workspace`,
@@ -103,14 +95,15 @@ together. When one changes, update the other side and re-pin both apps in the
 
 ## Adding an app
 
-1. Add a section to `apps.toml` (`repo`, `ref`, optional
+1. Import it with history: `git subtree add --prefix=apps/<name> <repo> <ref>`.
+2. Add a section to `apps.toml` (optional
    `linux_build`/`linux_skip`/`icon_prefix`/`scalable_svg` —
    `scripts/bundle-linux.sh` picks it up automatically; a Windows-only app
    sets `linux_skip = true` and needs a build + package block in
    `suite-release.yml` mirroring the existing ones).
-2. If it needs a shared library crate, add it to the `warpui-kits/`
-   workspace; both release jobs stage the whole workspace.
-3. Document its contracts in [Cross-app contracts](#cross-app-contracts).
+3. If it needs a shared library crate, add it to the `warpui-kits/`
+   workspace.
+4. Document its contracts in [Cross-app contracts](#cross-app-contracts).
 
 That is exactly how warp-snapit joined (Windows-only: `linux_skip = true`,
 portable zip from its own `packaging/windows/build.ps1`, no installer). The
@@ -118,27 +111,17 @@ C#/.NET SnapIt repo would join the same way if ever wanted.
 
 ## Notes
 
-- Private app repos (warp-agent is private): the `APPS_TOKEN` repo secret
-  authenticates the CI checkouts and bundle clones (same extraheader
-  mechanism `actions/checkout` uses). Update it with
-  `gh secret set APPS_TOKEN --body "$(gh auth token)"` when the credential
-  changes. Local builds don't need it — your git credentials apply.
-- Symbolic pins (currently `rust`, `rust-gpui` and `main`) build the branch
-  tip at
-  dispatch time; the exact SHAs are recorded in the release notes and
-  `REVISIONS.txt`. Pin tags or SHAs for fully frozen deploys.
-  (Caveat kept in mind: warp-agent's `main` is the Avalonia prototype — the
-  Rust apps ship on the branches above.)
+- The apps are imported with `git subtree` and keep their own histories. Do
+  not `git subtree pull`/`push`: warp-suite is the source of truth, and the
+  old per-app repos are read-only.
+- A release builds whatever is committed on the dispatched ref; the release
+  body records the suite commit, and `REVISIONS.txt` records it per app.
 - The apt dependency list in `suite-release.yml` covers GPUI's Linux needs
   (wayland, xkbcommon, vulkan, fontconfig); expect to touch it when GPUI's
   requirements grow.
 - **Kit crates:** the apps depend on `warpui-kit-core`/`-diff`/`-markdown`/`-picker`
-  through `../warp-suite/warpui-kits/*` path deps. They live in this repo as
-  the `warpui-kits/` cargo workspace (not separate repos yet), and
-  `bundle-linux.sh` + the Windows CI job stage the whole workspace at
-  `.build/warp-suite/warpui-kits`, the same relative path from every app
-  clone, so a release builds from this repo alone. The suite commit is the
-  kits' provenance — no sync step, no second copy. A local app checkout needs
-  this repo as a sibling; no symlinks or extra copies. Run `cargo test` in
-  `warpui-kits/` after changing one; the app pins alone do not describe the
-  libraries.
+  through `../../warpui-kits/*` path deps. They live in this repo as the
+  `warpui-kits/` cargo workspace, so a release builds from this repo alone.
+  The suite commit is the kits' provenance — no sync step, no second copy.
+  Run `cargo test` in `warpui-kits/` after changing one; the apps' lock files
+  alone do not describe the libraries.

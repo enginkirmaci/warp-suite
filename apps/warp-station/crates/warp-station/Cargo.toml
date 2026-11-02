@@ -32,8 +32,8 @@ gpui_platform = { package = "gpui-pre-platform", version = "=0.3.7", features = 
 gpui-kit = { version = "0.7" }
 
 # the shared component family (local sibling repos; swap to version deps to publish)
-warpui-kit-core = { path = "../../../warp-suite/warpui-kits/warpui-kit-core" }
-warpui-kit-diff = { path = "../../../warp-suite/warpui-kits/warpui-kit-diff", features = [
+warpui-kit-core = { path = "../../../../warpui-kits/warpui-kit-core" }
+warpui-kit-diff = { path = "../../../../warpui-kits/warpui-kit-diff", features = [
     "tree-sitter-bash",
     "tree-sitter-c",
     "tree-sitter-cpp",
@@ -48,8 +48,8 @@ warpui-kit-diff = { path = "../../../warp-suite/warpui-kits/warpui-kit-diff", fe
     "tree-sitter-tsx",
     "tree-sitter-yaml",
 ] }
-warpui-kit-markdown = { path = "../../../warp-suite/warpui-kits/warpui-kit-markdown" }
-warpui-kit-picker = { path = "../../../warp-suite/warpui-kits/warpui-kit-picker" }
+warpui-kit-markdown = { path = "../../../../warpui-kits/warpui-kit-markdown" }
+warpui-kit-picker = { path = "../../../../warpui-kits/warpui-kit-picker" }
 
 anyhow = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }

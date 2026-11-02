@@ -3,7 +3,7 @@
 #
 #   install.sh                     install the latest published suite release
 #   install.sh --release <tag>     install a specific suite release (tag or latest)
-#   install.sh --local             build the pinned apps on this machine
+#   install.sh --local             build the apps in this checkout
 #                                  (scripts/bundle-linux.sh) and install that
 set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

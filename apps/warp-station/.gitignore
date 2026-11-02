@@ -7,4 +7,6 @@
 
 # Packaging artifacts
 packaging/windows/out/
+packaging/windows/portable/
 packaging/linux/out/
+packaging/linux/portable/

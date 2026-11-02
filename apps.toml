@@ -1,27 +1,20 @@
 # warp-suite app manifest
 #
-# Each [apps.<name>] section pins one app repo to a ref (branch, tag or
-# SHA). A suite deploy = update pins (scripts/set-pin.sh) -> tag/dispatch
-# the suite-release workflow. The workflow resolves every ref to its commit
-# SHA and records the resolved SHAs in the suite release notes, so every
-# release stays reproducible even with symbolic refs like "main".
+# The apps live in this repo under apps/<name> (imported with git subtree;
+# each keeps its own history). This file only carries the build knobs
+# scripts/bundle-linux.sh and the release workflow use - the suite commit is
+# the single provenance for every app.
 #
-# App repos stay the source of truth and build/release on their own; this
-# manifest only names the known-good combinations warp-suite deploys.
-#
-# Per-app build knobs used by scripts/bundle-linux.sh (all optional):
+# Per-app build knobs (all optional):
 #   linux_build   extra args for `cargo build --release` (e.g. "-p warp-station")
 #   linux_skip    true = Windows-only app; bundle-linux.sh skips it entirely
 #                 (no Linux build, no REVISIONS.txt entry, no desktop entry)
 #   icon_prefix   base name of packaging/linux/icons/<prefix>-*.png
 #                 (defaults to the app name)
-#   scalable_svg  repo-relative path to a scalable icon, installed as
+#   scalable_svg  app-relative path to a scalable icon, installed as
 #                 hicolor/scalable/apps/<icon_prefix>.svg
 
 [apps.warp-station]
-repo = "https://github.com/enginkirmaci/warp-station.git"
-# the Rust/GPUI workspace ships on `rust`
-ref = "rust"
 linux_build = "-p warp-station"
 icon_prefix = "warp-station"
 scalable_svg = "crates/warp-station/assets/icons/logo.svg"
@@ -34,23 +27,16 @@ warp-snapit app below).
 """
 
 [apps.warp-agent]
-repo = "https://github.com/enginkirmaci/warp-agent.git"
-# the Rust/GPUI app ships on `rust-gpui` (main is kept in step)
-ref = "rust-gpui"
-linux_build = ""
 icon_prefix = "warpagent"
 scalable_svg = "packaging/linux/icons/warpagent.svg"
 notes = """
 Chat client over `opencode serve` (Rust/GPUI, single crate). Owns the
 loopback door protocol Warp Station consumes. Changing door commands, the
 ipc.port/ipc.token file names or their ~/.warp-agent location is a
-cross-app contract change: update Warp Station and re-pin both apps in the
-same suite release.
+cross-app contract change: update Warp Station in the same commit.
 """
 
 [apps.warp-snapit]
-repo = "https://github.com/enginkirmaci/warp-snapit.git"
-ref = "main"
 linux_skip = true
 notes = """
 Rust port of the SnapIt zone snapper (Windows-only binary; engine is
@@ -64,8 +50,6 @@ deliverable: a portable zip with snapit.exe + the default settings seed
 """
 
 [apps.warp-notes]
-repo = "https://github.com/enginkirmaci/warp-notes.git"
-ref = "main"
 icon_prefix = "warpnotes"
 scalable_svg = "packaging/linux/icons/warpnotes.svg"
 notes = """
