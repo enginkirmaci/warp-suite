@@ -79,6 +79,22 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
+      # Keyed on the resolved pins (every app commits Cargo.lock, so the SHA
+      # fully determines the dependency graph) and on apps.toml for build-knob
+      # changes. release/ only: debug/ is ~5x larger and unused here.
+      - name: Cache cargo registry and release artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            .build/target/release
+          key: ${{ runner.os }}-cargo-${{ hashFiles('apps.toml') }}-${{ hashFiles('warpui-kits/**') }}-${{ needs.resolve.outputs.warp_station_sha }}-${{ needs.resolve.outputs.warp_agent_sha }}-${{ needs.resolve.outputs.warp_notes_sha }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-${{ hashFiles('apps.toml') }}-${{ hashFiles('warpui-kits/**') }}-
+            ${{ runner.os }}-cargo-${{ hashFiles('apps.toml') }}-
+            ${{ runner.os }}-cargo-
+
       # Clones the app repos at the pins and stages the bundle - the same
       # script used for local builds, so CI and local produce identical layouts.
       - name: Bundle Linux deliverables at the pinned refs
@@ -114,6 +130,19 @@ jobs:
           path: .
 
       - uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry and release artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            .build/target/release
+          key: ${{ runner.os }}-cargo-${{ hashFiles('apps.toml') }}-${{ hashFiles('warpui-kits/**') }}-${{ needs.resolve.outputs.warp_station_sha }}-${{ needs.resolve.outputs.warp_agent_sha }}-${{ needs.resolve.outputs.warp_snapit_sha }}-${{ needs.resolve.outputs.warp_notes_sha }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-${{ hashFiles('apps.toml') }}-${{ hashFiles('warpui-kits/**') }}-
+            ${{ runner.os }}-cargo-${{ hashFiles('apps.toml') }}-
+            ${{ runner.os }}-cargo-
 
       - name: Install Inno Setup
         run: choco install innosetup -y --no-progress
