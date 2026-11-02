@@ -113,13 +113,17 @@ jobs:
 
       # The four app workspaces share ONE target dir (.cargo/config.toml), and
       # rust-cache both defaults the target to `<root>/target` (which does not
-      # exist here) and prunes a target dir to the workspace that owns it, so
-      # listing them all would have each pass delete what the previous kept.
-      # warp-notes is the anchor: its dependency closure covers ~98% of every
-      # app's, kit crates included, so one prune pass keeps the useful part.
+      # exist here) and prunes a target dir to the workspaces listed - so
+      # listing them all would have each prune pass delete what the previous
+      # kept (warp-snapit keeps 31 of 816 packages).
+      # warp-station + warp-notes together cover 812 of the 816 packages the
+      # four apps need; the four that remain (data-encoding, sha1,
+      # tokio-tungstenite, tungstenite) belong to warp-agent alone.
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: apps/warp-notes -> ../../.build/target
+          workspaces: |
+            apps/warp-station -> ../../.build/target
+            apps/warp-notes -> ../../.build/target
           shared-key: apps
           cache-on-failure: true
 

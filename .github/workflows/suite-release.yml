@@ -68,13 +68,16 @@ jobs:
       #    but uploads the apps' own artifacts too (~4.5 GB per OS against a
       #    10 GB repo limit).
       #
-      # So: one anchor workspace. warp-notes pulls in the kit crates plus
-      # merman/git2/rfd and keeps ~98% of the union of every app's dependency
-      # closure; what pruning drops is the apps' own binaries, which cargo
-      # rebuilds from source anyway.
+      # So: two anchor workspaces. warp-station + warp-notes together cover 812
+      # of the 816 packages the four apps need; the four that remain
+      # (data-encoding, sha1, tokio-tungstenite, tungstenite) belong to
+      # warp-agent alone. What pruning drops is the apps' own binaries, which
+      # cargo rebuilds from source anyway.
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: apps/warp-notes -> ../../.build/target
+          workspaces: |
+            apps/warp-station -> ../../.build/target
+            apps/warp-notes -> ../../.build/target
           shared-key: release-linux
           cache-on-failure: true
 
@@ -102,11 +105,13 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
-      # Same single-shared-target-dir rule as the Linux job: one anchor
-      # workspace, and the target dir named explicitly.
+      # Same shared-target-dir rule as the Linux job: two anchor workspaces,
+      # target dir named explicitly.
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: apps/warp-notes -> ../../.build/target
+          workspaces: |
+            apps/warp-station -> ../../.build/target
+            apps/warp-notes -> ../../.build/target
           shared-key: release-windows
           cache-on-failure: true
 
