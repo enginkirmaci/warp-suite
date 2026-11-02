@@ -1,6 +1,6 @@
 .build/
 dist/
 out/
-warpui-kits/target/
-warpui-kits/Cargo.lock
+kits/target/
+kits/Cargo.lock
 __pycache__/

@@ -7,11 +7,11 @@ name: kits
 on:
   push:
     paths:
-      - 'warpui-kits/**'
+      - 'kits/**'
       - '.github/workflows/kits.yml'
   pull_request:
     paths:
-      - 'warpui-kits/**'
+      - 'kits/**'
       - '.github/workflows/kits.yml'
 
 permissions:
@@ -22,7 +22,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: warpui-kits
+        working-directory: kits
     steps:
       - uses: actions/checkout@v4
 
@@ -44,8 +44,8 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            warpui-kits/target
-          key: ${{ runner.os }}-kits-${{ hashFiles('warpui-kits/**') }}
+            kits/target
+          key: ${{ runner.os }}-kits-${{ hashFiles('kits/**') }}
           restore-keys: |
             ${{ runner.os }}-kits-
 

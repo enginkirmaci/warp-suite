@@ -1,7 +1,8 @@
-# warpui-kits
+# kits
 
 The shared GPUI component family the suite's apps build on: one cargo workspace
-for the four `warpui-kit-*` crates, extracted from warp-agent and Warp Station.
+under `kits/` for the four `warpui-kit-*` crates, extracted from warp-agent and
+Warp Station.
 
 | Crate | Provides |
 | --- | --- |
@@ -27,12 +28,12 @@ code blocks.
 The apps point at this workspace from their own directory:
 
 ```toml
-warpui-kit-core = { path = "../../warpui-kits/warpui-kit-core" }
+warpui-kit-core = { path = "../../kits/warpui-kit-core" }
 ```
 
 warp-station's crate sits two levels deeper
 (`apps/warp-station/crates/warp-station`), so it uses
-`../../../../warpui-kits/...`.
+`../../../../kits/...`.
 
 The apps live under `apps/` in this repo, so a release builds from the suite
 checkout alone. The suite commit is the kits' provenance: the Linux bundle's

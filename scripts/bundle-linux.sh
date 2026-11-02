@@ -49,7 +49,7 @@ export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$build_dir/target}"
 suite_sha=""
 if git -C "$root" rev-parse HEAD >/dev/null 2>&1; then
     suite_sha="$(git -C "$root" rev-parse HEAD)"
-    [ -z "$(git -C "$root" status --porcelain -- apps warpui-kits 2>/dev/null)" ] || suite_sha="$suite_sha-dirty"
+    [ -z "$(git -C "$root" status --porcelain -- apps kits 2>/dev/null)" ] || suite_sha="$suite_sha-dirty"
 fi
 
 : > "$bundle/REVISIONS.txt"
@@ -93,13 +93,13 @@ while read -r app; do
     fi
 done < <(python3 "$here/manifest.py" list)
 
-# The kit crates are part of this repo (warpui-kits/), so the suite commit is
+# The kit crates are part of this repo (kits/), so the suite commit is
 # their provenance: record it against each crate in the bundle.
 if [ -n "$suite_sha" ]; then
     {
         echo
-        echo "# warpui-kit crates from this suite checkout (warpui-kits/)"
-        for kit_toml in "$root"/warpui-kits/*/Cargo.toml; do
+        echo "# warpui-kit crates from this suite checkout (kits/)"
+        for kit_toml in "$root"/kits/*/Cargo.toml; do
             echo "lib $(basename "$(dirname "$kit_toml")") $suite_sha"
         done
     } >> "$bundle/REVISIONS.txt"

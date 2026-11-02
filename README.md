@@ -49,8 +49,8 @@ Binaries go to `~/.local/bin`, desktop entries + hicolor icons to
 | `apps/<name>/` | the app sources, each with its own history (imported with `git subtree`) |
 | `apps.toml` | per-app build knobs (`linux_build`, `linux_skip`, `icon_prefix`, `scalable_svg`) and contract notes |
 | `scripts/manifest.py` | apps.toml reader shared by the scripts + CI |
-| `.cargo/config.toml` | one cargo target dir for the whole suite: `.build/target` for every app, `warpui-kits` and `bundle-linux.sh` |
-| `warpui-kits/` | cargo workspace of the four `warpui-kit-*` crates the apps depend on (`../../warpui-kits`) |
+| `.cargo/config.toml` | one cargo target dir for the whole suite: `.build/target` for every app, `kits` and `bundle-linux.sh` |
+| `kits/` | cargo workspace of the four `warpui-kit-*` crates the apps depend on (`../../kits`) |
 | `scripts/bundle-linux.sh` | `cargo build --release` each app → stage `dist/warp-suite-<v>-linux/` + tarball (the exact bundle CI publishes) |
 | `scripts/install-root.sh` | install an extracted bundle into `~/.local` |
 | `install.sh` | suite installer: download a release or build locally |
@@ -102,7 +102,7 @@ together. When one changes, update the other side in the **same** commit.
    `scripts/bundle-linux.sh` picks it up automatically; a Windows-only app
    sets `linux_skip = true` and needs a build + package block in
    `suite-release.yml` mirroring the existing ones).
-3. If it needs a shared library crate, add it to the `warpui-kits/`
+3. If it needs a shared library crate, add it to the `kits/`
    workspace.
 4. Document its contracts in [Cross-app contracts](#cross-app-contracts).
 
@@ -124,8 +124,8 @@ C#/.NET SnapIt repo would join the same way if ever wanted.
   (wayland, xkbcommon, vulkan, fontconfig); expect to touch it when GPUI's
   requirements grow.
 - **Kit crates:** the apps depend on `warpui-kit-core`/`-diff`/`-markdown`/`-picker`
-  through `../../warpui-kits/*` path deps. They live in this repo as the
-  `warpui-kits/` cargo workspace, so a release builds from this repo alone.
+  through `../../kits/*` path deps. They live in this repo as the
+  `kits/` cargo workspace, so a release builds from this repo alone.
   The suite commit is the kits' provenance — no sync step, no second copy.
-  Run `cargo test` in `warpui-kits/` after changing one; the apps' lock files
+  Run `cargo test` in `kits/` after changing one; the apps' lock files
   alone do not describe the libraries.

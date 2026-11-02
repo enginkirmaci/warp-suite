@@ -39,9 +39,9 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             .build/target/release
-          key: ${{ runner.os }}-cargo-${{ hashFiles('apps/**/Cargo.lock', 'warpui-kits/**', 'apps.toml') }}
+          key: ${{ runner.os }}-cargo-${{ hashFiles('apps/**/Cargo.lock', 'kits/**', 'apps.toml') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-${{ hashFiles('apps/**/Cargo.lock', 'warpui-kits/**') }}-
+            ${{ runner.os }}-cargo-${{ hashFiles('apps/**/Cargo.lock', 'kits/**') }}-
             ${{ runner.os }}-cargo-
 
       - name: Bundle Linux deliverables
@@ -78,9 +78,9 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             .build/target/release
-          key: ${{ runner.os }}-cargo-${{ hashFiles('apps/**/Cargo.lock', 'warpui-kits/**', 'apps.toml') }}
+          key: ${{ runner.os }}-cargo-${{ hashFiles('apps/**/Cargo.lock', 'kits/**', 'apps.toml') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-${{ hashFiles('apps/**/Cargo.lock', 'warpui-kits/**') }}-
+            ${{ runner.os }}-cargo-${{ hashFiles('apps/**/Cargo.lock', 'kits/**') }}-
             ${{ runner.os }}-cargo-
 
       # windows-latest normally ships Inno Setup; only install when absent.
@@ -190,7 +190,7 @@ jobs:
             Combined suite release built from this commit: ${{ github.sha }}.
 
             Apps: apps/warp-station, apps/warp-agent, apps/warp-snapit,
-            apps/warp-notes. Libraries: the warpui-kits/ workspace at this
+            apps/warp-notes. Libraries: the kits/ workspace at this
             commit (warpui-kit-*), also recorded in the Linux tarball's
             REVISIONS.txt.
           # upload-artifact keeps each artifact's internal structure (the
