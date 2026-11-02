@@ -984,7 +984,7 @@ impl MainWindow {
                 row.child(title_icon(
                     "notes-toggle",
                     "Open warp-notes",
-                    "icons/icon-note.svg",
+                    "icons/icon-warp-notes.svg",
                     show_tooltips,
                     cx.listener(|this, _, _, cx| this.launch_notes(None, cx)),
                 ))
@@ -993,7 +993,7 @@ impl MainWindow {
                 row.child(title_icon(
                     "agent-toggle",
                     "Open warp-agent",
-                    "icons/icon-app-window.svg",
+                    "icons/icon-warp-agent.svg",
                     show_tooltips,
                     cx.listener(|this, _, _, cx| {
                         this.store

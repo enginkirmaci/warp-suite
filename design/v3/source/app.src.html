@@ -45,9 +45,9 @@ const stat = (cls, icon, text, size = 14) => `<span class="stat ${cls}">${I(icon
 
 /* ---- apps: SnapIt has no window of its own, Station hosts it under Tools ---- */
 const APPS = {
-  station: { name: 'Warp Station', icon: 'code', rail: [['repos', 'Repos', 'repos'], ['summary', 'Summary', 'summary'], ['tools', 'Tools', 'tools']] },
-  agent: { name: 'Warp Agent', icon: 'bot', rail: [['chats', 'Chats', 'chat']] },
-  notes: { name: 'Warp Notes', icon: 'notes', rail: [['notes', 'Notes', 'notes']] },
+  station: { name: 'Warp Station', icon: 'code', mark: 'appstation', rail: [['repos', 'Repos', 'repos'], ['summary', 'Summary', 'summary'], ['tools', 'Tools', 'tools']] },
+  agent: { name: 'Warp Agent', icon: 'bot', mark: 'appagent', rail: [['chats', 'Chats', 'chat']] },
+  notes: { name: 'Warp Notes', icon: 'notes', mark: 'appnotes', rail: [['notes', 'Notes', 'notes']] },
 };
 
 /* ---- sample data ---- */
@@ -339,11 +339,12 @@ function renderChrome() {
   const root = document.documentElement;
   seg('r-palette', [['copper', 'Copper'], ['plum', 'Plum'], ['pine', 'Pine'], ['blue', 'Blue']], root.dataset.palette, 'palette');
   seg('r-type', [['inter', 'Inter + JetBrains'], ['plex', 'IBM Plex']], root.dataset.type, 'type');
+  // the sibling buttons carry each app's own mark, not a generic glyph
   const a = APPS[S.app], launch = S.app === 'station'
-    ? `<button class="winbtn" title="Open warp-notes" data-act="app" data-arg="notes">${I('notes', 18)}</button><button class="winbtn" title="Open warp-agent" data-act="app" data-arg="agent">${I('bot', 18)}</button>`
-    : `<button class="winbtn" title="Open Warp Station" data-act="app" data-arg="station">${I('code', 18)}</button>`;
+    ? `<button class="winbtn" title="Open warp-notes" data-act="app" data-arg="notes">${I('appnotes', 18)}</button><button class="winbtn" title="Open warp-agent" data-act="app" data-arg="agent">${I('appagent', 18)}</button>`
+    : `<button class="winbtn" title="Open Warp Station" data-act="app" data-arg="station">${I('appstation', 18)}</button>`;
   const scope = S.app === 'notes' && S.noteScope ? `<span class="scope-chip">${esc(S.noteScope)}</span><button class="winbtn" title="Show all notes" aria-label="Show all notes" data-act="notescope" data-arg="">${I('up', 16)}</button>` : '';
-  $('titlebar').innerHTML = `<span class="mark">${I(a.icon, 16)}</span><span class="name">${a.name}</span>${scope}
+  $('titlebar').innerHTML = `<span class="mark">${I(a.mark, 16)}</span><span class="name">${a.name}</span>${scope}
     ${S.app === 'station' ? `<label class="field">${I('search', 16)}<input id="search" placeholder="Search repos, notes, code…" aria-label="Search" autocomplete="off" value="${esc(S.q)}"><span class="kbd">Ctrl K</span>${searchPop()}</label>` : '<span style="margin:0 auto"></span>'}
     ${activity()}
     <button class="winbtn" title="Toggle list (Ctrl \\)" data-act="focus">${I('panel', 18)}</button>${launch}
