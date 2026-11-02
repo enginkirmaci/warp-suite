@@ -18,8 +18,3 @@ tracing = { version = "0.1", default-features = false, features = ["std"] }
 # only under `cargo test`
 gpui-kit = { version = "0.7", features = ["test-support"] }
 gpui = { package = "gpui-pre", version = "=0.3.7", features = ["test-support"] }
-
-[profile.release]
-lto = "thin"
-strip = true
-codegen-units = 1

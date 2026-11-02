@@ -1,0 +1,27 @@
+# The warpui-kit crates shared by the suite's apps.
+#
+# They live here instead of in their own repos: the apps depend on them as
+# path siblings (../warpui-kit-*), so bundle-linux.sh and the Windows release
+# job stage these crate directories beside the app clones before cargo runs.
+# A suite release therefore builds from this repo alone, and the suite commit
+# is the kits' provenance.
+#
+#   cargo test          # all four crates, headless GPUI probes included
+#   cargo fmt --check
+#   cargo clippy --all-targets
+
+[workspace]
+resolver = "3"
+members = [
+    "warpui-kit-core",
+    "warpui-kit-diff",
+    "warpui-kit-markdown",
+    "warpui-kit-picker",
+]
+
+# The apps build these crates through their own workspace profiles, so this
+# only shapes standalone cargo runs in warpui-kits/ (tests, clippy, a manual build).
+[profile.release]
+lto = "thin"
+strip = true
+codegen-units = 1

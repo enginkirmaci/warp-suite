@@ -103,9 +103,12 @@ jobs:
       WARP_AGENT_DIR: ${{ github.workspace }}\.build\warp-agent
       WARP_SNAPIT_DIR: ${{ github.workspace }}\.build\warp-snapit
       WARP_NOTES_DIR: ${{ github.workspace }}\.build\warp-notes
+      # All four apps share one target dir, like the Linux job: the GPUI
+      # dependency tree is compiled once instead of once per app.
+      CARGO_TARGET_DIR: ${{ github.workspace }}\.build\target
     steps:
-      # The suite repo itself: vendor/ carries the warpui-kit snapshot the
-      # app checkouts resolve as path siblings.
+      # The suite repo itself: warpui-kits/ carries the warpui-kit crates the app
+      # checkouts resolve as path siblings.
       - uses: actions/checkout@v4
         with:
           path: .
@@ -123,14 +126,17 @@ jobs:
           path: .build/warp-station
           token: ${{ secrets.APPS_TOKEN }}
 
-      # The apps resolve the warpui-kit crates as path siblings; the kit repos
-      # are not published, so the suite carries their snapshot under vendor/
-      # and stages it beside the app clones before the first cargo call.
-      - name: Stage the vendored warpui-kit crates
+      # The apps resolve the warpui-kit crates as path siblings; the crates
+      # live in this repo under warpui-kits/, so stage the four crate dirs
+      # beside the app clones before the first cargo call.
+      - name: Stage the warpui-kit crates
         run: |
           New-Item -ItemType Directory -Force .build | Out-Null
-          foreach ($lib in 'warpui-kit-core','warpui-kit-diff','warpui-kit-markdown','warpui-kit-picker') {
-            Copy-Item -Recurse -Force "vendor/$lib" ".build/$lib"
+          # Drop crates that left the workspace, so a stale copy cannot resolve.
+          Get-ChildItem .build -Directory -Filter 'warpui-kit-*' -ErrorAction SilentlyContinue |
+            Remove-Item -Recurse -Force
+          Get-ChildItem warpui-kits -Directory | Where-Object { Test-Path "$($_.FullName)\Cargo.toml" } | ForEach-Object {
+            Copy-Item -Recurse -Force $_.FullName ".build/$($_.Name)"
           }
 
       # The repo's own script: builds warp-station.exe into packaging\windows\out\
@@ -265,8 +271,8 @@ jobs:
             | warp-snapit | ${{ needs.resolve.outputs.warp_snapit_repo }} | ${{ needs.resolve.outputs.warp_snapit_ref }} | ${{ needs.resolve.outputs.warp_snapit_sha }} |
             | warp-notes | ${{ needs.resolve.outputs.warp_notes_repo }} | ${{ needs.resolve.outputs.warp_notes_ref }} | ${{ needs.resolve.outputs.warp_notes_sha }} |
 
-            Libraries: the vendored `warpui-kit-*` snapshot listed in `vendor/REVISIONS.txt`
-            (also recorded in the Linux tarball's `REVISIONS.txt`).
+            Libraries: the `warpui-kits/` workspace at this tag (`warpui-kit-*`), also
+            recorded in the Linux tarball's `REVISIONS.txt`.
           # upload-artifact keeps each artifact's internal structure (the
           # setup exes sit in out/), so match at any depth.
           files: |

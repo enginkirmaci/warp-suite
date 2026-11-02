@@ -53,16 +53,24 @@ bundle="$dist_root/warp-suite-$version-linux"
 rm -rf "$bundle"
 mkdir -p "$bundle/bin" "$bundle/applications" "$bundle/icons/hicolor"
 
-# The apps depend on the warpui-kit crates as path siblings. The kit repos are
-# not published yet, so the suite carries their snapshot under vendor/ and
-# stages it next to the app clones before cargo resolves the workspaces.
-for kit in warpui-kit-core warpui-kit-diff warpui-kit-markdown warpui-kit-picker; do
-    [ -d "$root/vendor/$kit/src" ] || {
-        echo "missing vendored kit: $root/vendor/$kit (run scripts/sync-kits.sh)" >&2
+# The apps depend on the warpui-kit crates as path siblings. The crates live
+# in this repo under warpui-kits/ (a cargo workspace), so stage every member
+# next to the app clones before cargo resolves the app workspaces.
+for kit_toml in "$root"/warpui-kits/*/Cargo.toml; do
+    kit_dir="$(dirname "$kit_toml")"
+    kit="$(basename "$kit_dir")"
+    [ -d "$kit_dir/src" ] || {
+        echo "missing kit crate sources: $kit_dir" >&2
         exit 1
     }
     mkdir -p "$build_dir/$kit"
-    rsync -a --delete "$root/vendor/$kit/" "$build_dir/$kit/"
+    rsync -a --delete "$kit_dir/" "$build_dir/$kit/"
+done
+# Drop staged crates that left the workspace, so cargo cannot resolve a stale
+# copy from an earlier build.
+for staged in "$build_dir"/warpui-kit-*; do
+    [ -d "$staged" ] || continue
+    [ -f "$root/warpui-kits/$(basename "$staged")/Cargo.toml" ] || rm -rf "$staged"
 done
 # One shared target dir for all suite clones: warp-station and warp-agent share
 # most of the GPUI dependency tree, so repeated suite builds reuse artifacts.
@@ -128,12 +136,16 @@ while read -r app; do
     fi
 done < <(python3 "$here/manifest.py" list | awk '{print $1}')
 
-# The vendored kit snapshot is part of the build, so it belongs in the record.
-if [ -f "$root/vendor/REVISIONS.txt" ]; then
+# The kit crates are part of this repo (warpui-kits/), so the suite commit is their
+# provenance: record it against each crate in the bundle.
+if suite_sha="$(git -C "$root" rev-parse HEAD 2>/dev/null)"; then
+    [ -z "$(git -C "$root" status --porcelain -- warpui-kits 2>/dev/null)" ] || suite_sha="$suite_sha-dirty"
     {
         echo
-        echo "# vendored warpui-kit snapshot (vendor/REVISIONS.txt)"
-        grep -v '^#' "$root/vendor/REVISIONS.txt" | sed 's/^/lib /'
+        echo "# warpui-kit crates from this suite checkout (warpui-kits/)"
+        for kit_toml in "$root"/warpui-kits/*/Cargo.toml; do
+            echo "lib $(basename "$(dirname "$kit_toml")") $suite_sha"
+        done
     } >> "$bundle/REVISIONS.txt"
 fi
 

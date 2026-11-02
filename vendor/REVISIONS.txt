@@ -1,5 +1,0 @@
-# Source commits of the vendored warpui-kit crates (scripts/sync-kits.sh writes this).
-warpui-kit-core 8c46d5148a5bfb53057dc44b19cedae5438d5a7a main
-warpui-kit-diff 078049ddc6bb87fbd718631c3ff6216d7b7de2b5 main
-warpui-kit-markdown 7144aa41dad368fed0081db5a0ac2a5110200380 main
-warpui-kit-picker 98f9727c560a6b004b6fb11da10d8e80b4328ac3 main

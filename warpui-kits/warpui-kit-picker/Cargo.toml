@@ -16,8 +16,3 @@ warpui-kit-core = { path = "../warpui-kit-core" }
 # headless probes (tests/); feature-unifies with the normal gpui-kit dep
 # only under `cargo test`
 gpui-kit = { version = "0.7", features = ["test-support"] }
-
-[profile.release]
-lto = "thin"
-strip = true
-codegen-units = 1

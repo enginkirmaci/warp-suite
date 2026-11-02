@@ -55,8 +55,7 @@ Binaries go to `~/.local/bin`, desktop entries + hicolor icons to
 | `apps.toml` | the manifest: per app `repo`, `ref`, build knobs (`linux_build`, `icon_prefix`, `scalable_svg`) and contract notes |
 | `scripts/manifest.py` | apps.toml reader/writer shared by all scripts + CI |
 | `scripts/set-pin.sh` | verify a ref against the remote, write it into the manifest |
-| `scripts/sync-kits.sh` | refresh `vendor/warpui-kit-*` from the sibling kit checkouts |
-| `vendor/warpui-kit-*` | the kit crates the apps depend on as path siblings, vendored because the kit repos are not published yet |
+| `warpui-kits/` | cargo workspace of the four `warpui-kit-*` crates the apps depend on as path siblings; the release jobs stage them beside the app clones |
 | `scripts/bundle-linux.sh` | clone at pins → `cargo build --release` → stage `dist/warp-suite-<v>-linux/` + tarball (the exact bundle CI publishes) |
 | `scripts/install-root.sh` | install an extracted bundle into `~/.local` |
 | `install.sh` | suite installer: download a release or build locally |
@@ -109,7 +108,9 @@ together. When one changes, update the other side and re-pin both apps in the
    `scripts/bundle-linux.sh` picks it up automatically; a Windows-only app
    sets `linux_skip = true` and needs a build + package block in
    `suite-release.yml` mirroring the existing ones).
-2. Document its contracts in [Cross-app contracts](#cross-app-contracts).
+2. If it needs a shared library crate, add it to the `warpui-kits/`
+   workspace; both release jobs stage every crate they find there.
+3. Document its contracts in [Cross-app contracts](#cross-app-contracts).
 
 That is exactly how warp-snapit joined (Windows-only: `linux_skip = true`,
 portable zip from its own `packaging/windows/build.ps1`, no installer). The
@@ -132,8 +133,9 @@ C#/.NET SnapIt repo would join the same way if ever wanted.
   (wayland, xkbcommon, vulkan, fontconfig); expect to touch it when GPUI's
   requirements grow.
 - **Kit crates:** the apps depend on `warpui-kit-core`/`-diff`/`-markdown`/`-picker`
-  as path siblings, and those repos are local-only for now. The suite vendors
-  their snapshot under `vendor/` (recorded in `vendor/REVISIONS.txt`) and stages
-  it beside the app clones in `bundle-linux.sh` and the Windows CI job, so a
-  release builds from this repo alone. Run `scripts/sync-kits.sh` after changing
-  a kit, before pinning a release — the app pins do not describe the libraries.
+  as path siblings. They live in this repo as the `warpui-kits/` cargo
+  workspace (not separate repos yet), and `bundle-linux.sh` + the Windows CI
+  job stage every crate found there beside the app clones, so a release builds
+  from this repo alone. The suite commit is the kits' provenance — no sync
+  step, no second copy. Run `cargo test` in `warpui-kits/` after changing one;
+  the app pins alone do not describe the libraries.
