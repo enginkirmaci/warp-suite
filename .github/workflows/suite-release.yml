@@ -104,6 +104,12 @@ jobs:
       WARP_SNAPIT_DIR: ${{ github.workspace }}\.build\warp-snapit
       WARP_NOTES_DIR: ${{ github.workspace }}\.build\warp-notes
     steps:
+      # The suite repo itself: vendor/ carries the warpui-kit snapshot the
+      # app checkouts resolve as path siblings.
+      - uses: actions/checkout@v4
+        with:
+          path: .
+
       - uses: dtolnay/rust-toolchain@stable
 
       - name: Install Inno Setup
