@@ -120,7 +120,7 @@ impl ItemListView {
             .items_center()
             .gap_2()
             .border_b_1()
-            .border_color(theme::HAIRLINE)
+            .border_color(theme::hairline())
             .child(
                 segment_row()
                     .child(segment(
@@ -164,8 +164,8 @@ impl ItemListView {
                         .items_center()
                         .gap_1()
                         .text_size(px(theme::font_control()))
-                        .text_color(theme::TEXT_MUTED)
-                        .hover(|s| s.bg(theme::RAISED))
+                        .text_color(theme::text_muted())
+                        .hover(|s| s.bg(theme::raised()))
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.sort_open = !this.sort_open;
                             cx.notify();
@@ -174,13 +174,13 @@ impl ItemListView {
                         .child(
                             div()
                                 .font_weight(FontWeight::SEMIBOLD)
-                                .text_color(theme::TEXT)
+                                .text_color(theme::text())
                                 .child(sort.label()),
                         )
                         .child(icon(
                             "icons/icon-chevron-down.svg",
                             px(theme::icon_tiny()),
-                            theme::TEXT_MUTED,
+                            theme::text_muted(),
                         )),
                 )
             })
@@ -195,14 +195,14 @@ impl ItemListView {
                     .flex()
                     .items_center()
                     .justify_center()
-                    .hover(|s| s.bg(theme::RAISED))
+                    .hover(|s| s.bg(theme::raised()))
                     .on_click(move |_, _, cx| {
                         store.update(cx, |s, cx| s.refresh_panel(cx));
                     })
                     .child(icon(
                         "icons/icon-refresh.svg",
                         px(theme::icon_small()),
-                        theme::TEXT_MUTED,
+                        theme::text_muted(),
                     )),
             )
             .when_some(new_url, |bar, url| {
@@ -217,18 +217,18 @@ impl ItemListView {
                         .flex()
                         .items_center()
                         .gap_2()
-                        .bg(theme::ACCENT)
+                        .bg(theme::accent())
                         .text_size(px(theme::font_control()))
                         .font_weight(FontWeight::SEMIBOLD)
-                        .text_color(theme::ON_ACCENT)
-                        .hover(|s| s.bg(theme::ACCENT_HOVER))
+                        .text_color(theme::on_accent())
+                        .hover(|s| s.bg(theme::accent_hover()))
                         .on_click(move |_, _, _| {
                             let _ = warp_station_core::terminal::open_folder(&url);
                         })
                         .child(icon(
                             "icons/icon-plus.svg",
                             px(theme::icon_small()),
-                            theme::ON_ACCENT,
+                            theme::on_accent(),
                         ))
                         .child(label),
                 )
@@ -246,8 +246,8 @@ impl ItemListView {
             .p(px(4.))
             .rounded(px(8.))
             .border_1()
-            .border_color(theme::LINE_STRONG)
-            .bg(theme::OVERLAY)
+            .border_color(theme::line_strong())
+            .bg(theme::overlay())
             .shadow_lg()
             .occlude()
             .on_mouse_down_out(cx.listener(|this, _, _, cx| {
@@ -272,8 +272,8 @@ impl ItemListView {
                     .items_center()
                     .justify_between()
                     .text_size(px(theme::font_control()))
-                    .text_color(theme::TEXT)
-                    .hover(|d| d.bg(theme::LINE_STRONG))
+                    .text_color(theme::text())
+                    .hover(|d| d.bg(theme::line_strong()))
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.store.update(cx, |s, cx| s.set_issue_sort(sort, cx));
                         this.sort_open = false;
@@ -284,7 +284,7 @@ impl ItemListView {
                         d.child(icon(
                             "icons/icon-check.svg",
                             px(theme::icon_small()),
-                            theme::ACCENT_INK,
+                            theme::accent_ink(),
                         ))
                     }),
             );
@@ -444,7 +444,7 @@ impl ItemListView {
         let store = self.store.clone();
         let kind = if item.is_pull_request { "PR" } else { "Issue" };
         let glyph_color = match (closed, item.is_pull_request) {
-            (true, _) => theme::TEXT_MUTED,
+            (true, _) => theme::text_muted(),
             (false, true) => theme::PR,
             (false, false) => theme::ISSUE,
         };
@@ -462,7 +462,7 @@ impl ItemListView {
             .overflow_hidden()
             .whitespace_nowrap()
             .text_size(px(theme::font_meta()))
-            .text_color(theme::TEXT_MUTED);
+            .text_color(theme::text_muted());
         if item.is_pull_request {
             let head = item.head_ref_name.clone().unwrap_or_default();
             let base = item.base_ref_name.clone().unwrap_or_default();
@@ -479,9 +479,9 @@ impl ItemListView {
             second_line = second_line.child(
                 div()
                     .rounded(px(4.))
-                    .bg(theme::RAISED)
+                    .bg(theme::raised())
                     .px_1p5()
-                    .text_color(theme::TEXT_DIM)
+                    .text_color(theme::text_dim())
                     .child(label.clone()),
             );
         }
@@ -501,11 +501,11 @@ impl ItemListView {
             .gap_2()
             .flex_shrink_0()
             .text_size(px(theme::font_meta()))
-            .text_color(theme::TEXT_MUTED)
+            .text_color(theme::text_muted())
             .child(item.author.clone().unwrap_or_else(|| "ghost".into()))
             .children(age);
         if item.is_draft {
-            right = right.child(pill("Draft", theme::TEXT_MUTED));
+            right = right.child(pill("Draft", theme::text_muted()));
         } else if item.is_pull_request && !closed {
             right = right.child(match item.review_decision.as_deref() {
                 Some("APPROVED") => pill("Approved", theme::SUCCESS_BRIGHT),
@@ -533,7 +533,7 @@ impl ItemListView {
             .rounded(px(6.))
             .px_2()
             .py_2p5()
-            .hover(|s| s.bg(theme::RAISED))
+            .hover(|s| s.bg(theme::raised()))
             .on_click(cx.listener(move |_, _, _, cx| {
                 if opens_here {
                     let item = target.clone();
@@ -563,7 +563,7 @@ impl ItemListView {
                             .min_w_0()
                             .text_size(px(theme::font_name()))
                             .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(theme::TEXT)
+                            .text_color(theme::text())
                             .overflow_hidden()
                             .whitespace_nowrap()
                             .text_ellipsis()
@@ -599,13 +599,13 @@ fn no_match(query: &str, cx: &mut Context<ItemListView>) -> gpui::AnyElement {
             div()
                 .text_size(px(theme::font_heading()))
                 .font_weight(FontWeight::SEMIBOLD)
-                .text_color(theme::TEXT)
+                .text_color(theme::text())
                 .child("No issues match"),
         )
         .child(
             div()
                 .text_size(px(theme::font_meta()))
-                .text_color(theme::TEXT_MUTED)
+                .text_color(theme::text_muted())
                 .child(format!("Nothing matches “{query}”.")),
         )
         .child(
@@ -616,7 +616,7 @@ fn no_match(query: &str, cx: &mut Context<ItemListView>) -> gpui::AnyElement {
                 .cursor_pointer()
                 .mt_1()
                 .text_size(px(theme::font_control()))
-                .text_color(theme::ACCENT_INK)
+                .text_color(theme::accent_ink())
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.clear_filter = true;
                     cx.notify();
@@ -654,14 +654,14 @@ fn empty_note(title: String, detail: String) -> gpui::AnyElement {
             div()
                 .text_size(px(theme::font_body()))
                 .font_weight(FontWeight::SEMIBOLD)
-                .text_color(theme::TEXT_DIM)
+                .text_color(theme::text_dim())
                 .child(title),
         )
         .when(!detail.is_empty(), |column| {
             column.child(
                 div()
                     .text_size(px(theme::font_meta()))
-                    .text_color(theme::TEXT_MUTED)
+                    .text_color(theme::text_muted())
                     .child(detail),
             )
         })

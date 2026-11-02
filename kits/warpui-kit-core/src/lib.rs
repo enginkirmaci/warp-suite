@@ -43,4 +43,7 @@ pub use palette::{
     ACCENT_PRESETS, AccentColors, AccentPreset, highlight_theme, normalize_accent, rgba_hex,
     rgba_u32, selection, tint,
 };
-pub use scale::{adopt_text_size, follow_ui_scale, set_text_size, text_size_control};
+pub use scale::{
+    adopt_palette, adopt_text_size, follow_palette, follow_ui_scale, palette_control, palette_key,
+    set_palette, set_text_size, text_size_control,
+};

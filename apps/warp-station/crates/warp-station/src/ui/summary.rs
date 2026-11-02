@@ -86,7 +86,7 @@ impl SummaryPage {
             div()
                 .text_size(px(theme::font_name()))
                 .font_weight(FontWeight::SEMIBOLD)
-                .text_color(theme::TEXT)
+                .text_color(theme::text())
                 .child(name),
         )
         .child(
@@ -94,7 +94,7 @@ impl SummaryPage {
                 .mt_0p5()
                 .font_family(theme::code_font())
                 .text_size(px(theme::font_mono_meta()))
-                .text_color(theme::TEXT_MUTED)
+                .text_color(theme::text_muted())
                 .child(file),
         )
     }
@@ -121,20 +121,22 @@ impl SummaryPage {
             .font_weight(FontWeight::SEMIBOLD)
             .when(live, |d| {
                 d.cursor_pointer()
-                    .bg(theme::ACCENT)
-                    .text_color(theme::ON_ACCENT)
-                    .hover(|s| s.bg(theme::ACCENT_HOVER))
+                    .bg(theme::accent())
+                    .text_color(theme::on_accent())
+                    .hover(|s| s.bg(theme::accent_hover()))
                     .on_click(move |_, _, cx| {
                         store.update(cx, |s, cx| s.run_summary(cx));
                     })
             })
-            .when(!live, |d| d.bg(theme::RAISED).text_color(theme::TEXT_MUTED))
+            .when(!live, |d| {
+                d.bg(theme::raised()).text_color(theme::text_muted())
+            })
             .child(if busy {
                 warpui_kit_core::motion::spinner(
                     "summary-spinner",
                     "icons/icon-spinner.svg",
                     px(theme::icon_small()),
-                    theme::TEXT_MUTED,
+                    theme::text_muted(),
                 )
                 .into_any_element()
             } else {
@@ -142,9 +144,9 @@ impl SummaryPage {
                     "icons/icon-agent-sparkle.svg",
                     px(theme::icon_small()),
                     if live {
-                        theme::ON_ACCENT
+                        theme::on_accent()
                     } else {
-                        theme::TEXT_MUTED
+                        theme::text_muted()
                     },
                 )
                 .into_any_element()
@@ -206,13 +208,13 @@ impl Render for SummaryPage {
                         div()
                             .text_size(px(theme::font_body()))
                             .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(theme::TEXT_DIM)
+                            .text_color(theme::text_dim())
                             .child("No summaries yet"),
                     )
                     .child(
                         div()
                             .text_size(px(theme::font_meta()))
-                            .text_color(theme::TEXT_MUTED)
+                            .text_color(theme::text_muted())
                             .child("Summarize yesterday writes the first one to Summaries/."),
                     ),
             );
@@ -229,19 +231,19 @@ impl Render for SummaryPage {
                     .pt_3p5()
                     .pb_3()
                     .border_b_1()
-                    .border_color(theme::HAIRLINE)
+                    .border_color(theme::hairline())
                     .child(
                         div()
                             .text_size(px(theme::font_list_title()))
                             .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(theme::TEXT)
+                            .text_color(theme::text())
                             .child("Summary"),
                     )
                     .child(
                         div()
                             .mt_1()
                             .text_size(px(theme::font_meta()))
-                            .text_color(theme::TEXT_DIM)
+                            .text_color(theme::text_dim())
                             .child("Yesterday's work across every tracked repository"),
                     ),
             )
@@ -256,7 +258,7 @@ impl Render for SummaryPage {
             div()
                 .text_size(px(theme::font_screen_title()))
                 .font_weight(FontWeight::SEMIBOLD)
-                .text_color(theme::TEXT)
+                .text_color(theme::text())
                 .child(title),
         );
         if let Some(path) = self.selected.as_deref() {
@@ -268,7 +270,7 @@ impl Render for SummaryPage {
                     .gap_2()
                     .font_family(theme::code_font())
                     .text_size(px(theme::font_mono_meta()))
-                    .text_color(theme::TEXT_MUTED)
+                    .text_color(theme::text_muted())
                     .child(format!("Summaries/{}", file_name(path))),
             );
         }
@@ -281,7 +283,7 @@ impl Render for SummaryPage {
             .px(px(shell::DETAIL_PADDING))
             .py_4()
             .border_b_1()
-            .border_color(theme::HAIRLINE)
+            .border_color(theme::hairline())
             .child(heading)
             .when_some(notes_path, |row, path| {
                 let store = self.store.clone();
@@ -296,15 +298,15 @@ impl Render for SummaryPage {
                         .px_3()
                         .rounded(px(6.))
                         .border_1()
-                        .border_color(theme::LINE_STRONG)
-                        .bg(theme::PANEL)
+                        .border_color(theme::line_strong())
+                        .bg(theme::panel())
                         .flex()
                         .items_center()
                         .gap_2()
                         .text_size(px(theme::font_control()))
                         .font_weight(FontWeight::MEDIUM)
-                        .text_color(theme::TEXT)
-                        .hover(|s| s.bg(theme::RAISED))
+                        .text_color(theme::text())
+                        .hover(|s| s.bg(theme::raised()))
                         .on_click(move |_, _, cx| {
                             store.update(cx, |s, cx| {
                                 s.open_note_in_notes(path.clone());
@@ -314,7 +316,7 @@ impl Render for SummaryPage {
                         .child(icon(
                             "icons/icon-note.svg",
                             px(theme::icon_small()),
-                            theme::TEXT_DIM,
+                            theme::text_dim(),
                         ))
                         .child("Open in Notes"),
                 )
@@ -337,7 +339,7 @@ impl Render for SummaryPage {
                     .into_any_element(),
                 None => div()
                     .text_size(px(theme::font_body()))
-                    .text_color(theme::TEXT_DIM)
+                    .text_color(theme::text_dim())
                     .child(if !available {
                         "Summaries run through warp-agent. Turn it on in Settings."
                     } else if files.is_empty() {

@@ -43,12 +43,12 @@ impl Render for AppTooltip {
         div()
             .rounded(px(4.))
             .border_1()
-            .border_color(theme::HAIRLINE)
-            .bg(theme::POPUP)
+            .border_color(theme::hairline())
+            .bg(theme::popup())
             .px(px(8.))
             .py(px(4.))
             .text_size(px(theme::font_row_meta()))
-            .text_color(theme::TEXT_DIM)
+            .text_color(theme::text_dim())
             .shadow_md()
             .whitespace_nowrap()
             .child(self.text.clone())
@@ -139,14 +139,14 @@ pub fn tool_header(title: &'static str, hint: &'static str) -> gpui::AnyElement 
         div()
             .text_size(px(theme::font_screen_title()))
             .font_weight(FontWeight::SEMIBOLD)
-            .text_color(theme::TEXT)
+            .text_color(theme::text())
             .child(title),
     );
     if !hint.is_empty() {
         header = header.child(
             div()
                 .text_size(px(theme::font_meta()))
-                .text_color(theme::TEXT_FAINT)
+                .text_color(theme::text_faint())
                 .child(hint),
         );
     }
@@ -156,7 +156,7 @@ pub fn tool_header(title: &'static str, hint: &'static str) -> gpui::AnyElement 
         .gap_1()
         .pb_3()
         .border_b_1()
-        .border_color(theme::BORDER_LIGHT)
+        .border_color(theme::border_light())
         .child(header)
         .into_any_element()
 }

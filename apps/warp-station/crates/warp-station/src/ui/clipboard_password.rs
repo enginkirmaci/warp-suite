@@ -160,7 +160,7 @@ impl Render for ClipboardPasswordDrawer {
                     .child(
                         div()
                             .text_size(px(theme::font_meta()))
-                            .text_color(theme::TEXT_MUTED)
+                            .text_color(theme::text_muted())
                             .child("Password"),
                     )
                     .child(Input::new(&self.password).with_size(theme::field_size()).mask_toggle()),
@@ -212,7 +212,7 @@ impl Render for ClipboardPasswordDrawer {
                     .child(ghost_button(
                         "clipboard-copy",
                         "Copy",
-                        theme::BLUE_BRIGHT,
+                        theme::blue_bright(),
                         stored,
                         false,
                         cx.listener(|this, _, _, cx| this.copy(cx)),
@@ -227,13 +227,13 @@ impl Render for ClipboardPasswordDrawer {
             .child(
                 div()
                     .text_size(px(theme::font_body()))
-                    .text_color(theme::TEXT_DIM)
+                    .text_color(theme::text_dim())
                     .child(self.status.clone()),
             )
             .child(
                 div()
                     .text_size(px(theme::font_meta()))
-                    .text_color(theme::TEXT_FAINT)
+                    .text_color(theme::text_faint())
                     .child("Ctrl+Shift+V copies the stored password system-wide while Warp Station runs (focused-only where the OS refuses a global grab)."),
             )
     }
@@ -290,8 +290,8 @@ fn accent_button(
         .py_1()
         .text_size(px(theme::font_body()))
         .font_weight(FontWeight::SEMIBOLD)
-        .bg(theme::ACCENT)
-        .text_color(theme::ON_ACCENT)
+        .bg(theme::accent())
+        .text_color(theme::on_accent())
         .map(|d| {
             if enabled {
                 d.hover(|s| s.opacity(0.9))

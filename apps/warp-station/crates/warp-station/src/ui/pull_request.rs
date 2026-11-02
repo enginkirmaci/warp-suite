@@ -66,7 +66,7 @@ fn head(
                 .flex()
                 .items_center()
                 .justify_center()
-                .hover(|s| s.bg(theme::RAISED))
+                .hover(|s| s.bg(theme::raised()))
                 .on_click(move |_, _, cx| {
                     back.update(cx, |s, cx| {
                         s.close_pull_request(cx);
@@ -75,7 +75,7 @@ fn head(
                 .child(icon(
                     "icons/icon-arrow-left.svg",
                     px(theme::icon_small()),
-                    theme::TEXT_DIM,
+                    theme::text_dim(),
                 )),
         )
         .child(
@@ -83,7 +83,7 @@ fn head(
                 .min_w_0()
                 .text_size(px(theme::font_screen_title()))
                 .font_weight(FontWeight::SEMIBOLD)
-                .text_color(theme::TEXT)
+                .text_color(theme::text())
                 .overflow_hidden()
                 .whitespace_nowrap()
                 .text_ellipsis()
@@ -106,7 +106,7 @@ fn head(
                     .flex()
                     .items_center()
                     .justify_center()
-                    .hover(|s| s.bg(theme::RAISED))
+                    .hover(|s| s.bg(theme::raised()))
                     .on_click(move |_, _, cx| {
                         target.update(cx, |s, cx| s.open_repo_tab(&folder, cx));
                     })
@@ -117,7 +117,7 @@ fn head(
                             "icons/icon-tab-plus.svg"
                         },
                         px(theme::icon_small()),
-                        theme::TEXT_DIM,
+                        theme::text_dim(),
                     )),
             )
         })
@@ -131,14 +131,14 @@ fn head(
                 .px_3()
                 .rounded(px(6.))
                 .border_1()
-                .border_color(theme::LINE_STRONG)
+                .border_color(theme::line_strong())
                 .flex()
                 .items_center()
                 .gap_2()
                 .text_size(px(theme::font_control()))
                 .font_weight(FontWeight::MEDIUM)
-                .text_color(theme::TEXT)
-                .hover(|s| s.bg(theme::RAISED))
+                .text_color(theme::text())
+                .hover(|s| s.bg(theme::raised()))
                 .on_click(move |_, _, _| {
                     if !url.is_empty() {
                         let _ = warp_station_core::terminal::open_folder(&url);
@@ -147,7 +147,7 @@ fn head(
                 .child(icon(
                     "icons/icon-open-in-new.svg",
                     px(theme::icon_small()),
-                    theme::TEXT_DIM,
+                    theme::text_dim(),
                 ))
                 .child("Open on GitHub"),
         )
@@ -177,7 +177,7 @@ fn head(
         .items_center()
         .gap(px(14.))
         .text_size(px(theme::font_meta()))
-        .text_color(theme::TEXT_DIM)
+        .text_color(theme::text_dim())
         .child(
             div()
                 .flex()
@@ -227,7 +227,7 @@ fn head(
         .pt_4()
         .pb(px(14.))
         .border_b_1()
-        .border_color(theme::HAIRLINE)
+        .border_color(theme::hairline())
         .child(title_row)
         .child(subtitle)
 }
@@ -236,7 +236,7 @@ fn state_pill(pull: Option<&GitHubPull>) -> impl IntoElement + use<> {
     let (label, color) = match pull {
         Some(p) if p.state == "MERGED" => ("Merged", theme::PR),
         Some(p) if p.state == "CLOSED" => ("Closed", theme::DANGER),
-        Some(p) if p.is_draft => ("Draft", theme::TEXT_MUTED),
+        Some(p) if p.is_draft => ("Draft", theme::text_muted()),
         _ => ("Open", theme::PR),
     };
     div()
@@ -291,23 +291,27 @@ fn merge_button(
         .font_weight(FontWeight::SEMIBOLD)
         .when(ready, |d| {
             d.cursor_pointer()
-                .bg(if armed { theme::DANGER } else { theme::ACCENT })
+                .bg(if armed {
+                    theme::DANGER
+                } else {
+                    theme::accent()
+                })
                 .text_color(if armed {
                     theme::ON_DANGER
                 } else {
-                    theme::ON_ACCENT
+                    theme::on_accent()
                 })
                 .on_click(move |_, _, cx| store.update(cx, |s, cx| s.press_merge(cx)))
         })
         .when(!ready, |d| {
-            d.bg(theme::RAISED).text_color(theme::TEXT_MUTED)
+            d.bg(theme::raised()).text_color(theme::text_muted())
         })
         .when(open.merging, |d| {
             d.child(motion::spinner(
                 "pull-merge-spinner",
                 "icons/icon-spinner.svg",
                 px(theme::icon_small()),
-                theme::TEXT_MUTED,
+                theme::text_muted(),
             ))
         })
         .child(label)
@@ -364,7 +368,7 @@ fn merge_state(pull: &GitHubPull) -> (&'static str, Rgba, &'static str) {
         return ("icons/icon-close.svg", theme::DANGER, "Closed");
     }
     if pull.is_draft {
-        return ("icons/icon-clock.svg", theme::TEXT_MUTED, "Draft");
+        return ("icons/icon-clock.svg", theme::text_muted(), "Draft");
     }
     if pull.has_conflicts() {
         return (
@@ -395,11 +399,11 @@ fn status_strip(open: &OpenPull) -> impl IntoElement + use<> {
         .flex_row()
         .items_center()
         .gap(px(18.))
-        .bg(theme::SURFACE)
+        .bg(theme::surface())
         .border_b_1()
-        .border_color(theme::HAIRLINE)
+        .border_color(theme::hairline())
         .text_size(px(theme::font_meta()))
-        .text_color(theme::TEXT_DIM);
+        .text_color(theme::text_dim());
     let Some(pull) = open.pull.as_ref() else {
         return strip.child(if open.failed {
             "GitHub did not answer."
@@ -501,9 +505,9 @@ fn comment(ix: usize, author: &str, verb: String, text: &str) -> impl IntoElemen
                 .flex_1()
                 .min_w_0()
                 .rounded(px(8.))
-                .bg(theme::CARD)
+                .bg(theme::card())
                 .border_1()
-                .border_color(theme::HAIRLINE)
+                .border_color(theme::hairline())
                 .overflow_hidden()
                 .child(
                     div()
@@ -513,18 +517,18 @@ fn comment(ix: usize, author: &str, verb: String, text: &str) -> impl IntoElemen
                         .px_4()
                         .h(px(40.))
                         .border_b_1()
-                        .border_color(theme::HAIRLINE)
+                        .border_color(theme::hairline())
                         .child(
                             div()
                                 .text_size(px(theme::font_body()))
                                 .font_weight(FontWeight::SEMIBOLD)
-                                .text_color(theme::TEXT)
+                                .text_color(theme::text())
                                 .child(author.to_string()),
                         )
                         .child(
                             div()
                                 .text_size(px(theme::font_meta()))
-                                .text_color(theme::TEXT_MUTED)
+                                .text_color(theme::text_muted())
                                 .child(verb),
                         ),
                 )
@@ -558,9 +562,9 @@ fn checks_card(pull: &GitHubPull) -> impl IntoElement + use<> {
         .debug_selector(|| "pull-checks".into())
         .ml(px(44.))
         .rounded(px(8.))
-        .bg(theme::CARD)
+        .bg(theme::card())
         .border_1()
-        .border_color(theme::HAIRLINE)
+        .border_color(theme::hairline())
         .overflow_hidden()
         .child(
             div()
@@ -586,13 +590,13 @@ fn checks_card(pull: &GitHubPull) -> impl IntoElement + use<> {
                     div()
                         .text_size(px(theme::font_heading()))
                         .font_weight(FontWeight::SEMIBOLD)
-                        .text_color(theme::TEXT)
+                        .text_color(theme::text())
                         .child("Checks"),
                 )
                 .child(
                     div()
                         .text_size(px(theme::font_meta()))
-                        .text_color(theme::TEXT_MUTED)
+                        .text_color(theme::text_muted())
                         .child(parts),
                 ),
         );
@@ -626,7 +630,7 @@ fn check_row(ix: usize, check: &GitHubCheck) -> impl IntoElement + use<> {
         CheckState::Skipped => icon(
             "icons/icon-clock.svg",
             px(theme::icon_small()),
-            theme::TEXT_MUTED,
+            theme::text_muted(),
         )
         .into_any_element(),
     };
@@ -640,15 +644,15 @@ fn check_row(ix: usize, check: &GitHubCheck) -> impl IntoElement + use<> {
         .items_center()
         .gap_2()
         .border_t_1()
-        .border_color(theme::HAIRLINE)
+        .border_color(theme::hairline())
         .text_size(px(theme::font_body()))
-        .text_color(theme::TEXT)
+        .text_color(theme::text())
         .when(check.state == CheckState::Failed, |d| {
             d.bg(theme::DIFF_DEL_BG)
         })
         .when_some(url, |d, url| {
             d.cursor_pointer()
-                .hover(|s| s.bg(theme::RAISED))
+                .hover(|s| s.bg(theme::raised()))
                 .on_click(move |_, _, _| {
                     let _ = warp_station_core::terminal::open_folder(&url);
                 })
@@ -677,12 +681,12 @@ fn avatar(name: &str, size: f32) -> impl IntoElement + use<> {
         .flex_shrink_0()
         .size(px(size))
         .rounded_full()
-        .bg(theme::RAISED)
+        .bg(theme::raised())
         .flex()
         .items_center()
         .justify_center()
         .text_size(px(theme::font_micro()))
         .font_weight(FontWeight::SEMIBOLD)
-        .text_color(theme::TEXT_DIM)
+        .text_color(theme::text_dim())
         .child(initials)
 }

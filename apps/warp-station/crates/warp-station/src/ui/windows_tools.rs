@@ -73,11 +73,11 @@ impl Render for SnapItPage {
             .flex()
             .items_center()
             .gap_2()
-            .bg(theme::ACCENT)
+            .bg(theme::accent())
             .text_size(px(theme::font_control()))
             .font_weight(FontWeight::SEMIBOLD)
-            .text_color(theme::ON_ACCENT)
-            .hover(|s| s.bg(theme::ACCENT_HOVER))
+            .text_color(theme::on_accent())
+            .hover(|s| s.bg(theme::accent_hover()))
             .on_click(cx.listener(|this, _, _, cx| this.toggle(cx)))
             .child(icon(
                 if running {
@@ -86,7 +86,7 @@ impl Render for SnapItPage {
                     "icons/icon-play.svg"
                 },
                 px(theme::icon_small()),
-                theme::ON_ACCENT,
+                theme::on_accent(),
             ))
             .child(label);
 
@@ -107,20 +107,20 @@ impl Render for SnapItPage {
                     .border_color(if selected {
                         theme::ACCENT_BORDER
                     } else {
-                        theme::LINE_STRONG
+                        theme::line_strong()
                     })
-                    .when(selected, |d| d.bg(theme::ACCENT_SOFT))
+                    .when(selected, |d| d.bg(theme::accent_soft()))
                     .flex()
                     .items_center()
                     .gap_2()
                     .text_size(px(theme::font_control()))
-                    .text_color(theme::TEXT)
-                    .hover(|s| s.bg(theme::RAISED))
+                    .text_color(theme::text())
+                    .hover(|s| s.bg(theme::raised()))
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.selected = ix;
                         cx.notify();
                     }))
-                    .child(preview(layout, THUMB_W, THUMB_H, theme::TEXT_MUTED))
+                    .child(preview(layout, THUMB_W, THUMB_H, theme::text_muted()))
                     .child(layout.name.clone()),
             );
         }
@@ -137,19 +137,19 @@ impl Render for SnapItPage {
                         div()
                             .debug_selector(|| "snapit-preview".into())
                             .w(px(width))
-                            .child(preview(layout, width, height, theme::ACCENT_INK)),
+                            .child(preview(layout, width, height, theme::accent_ink())),
                     )
                     .child(
                         div()
                             .text_size(px(theme::font_meta()))
-                            .text_color(theme::TEXT_MUTED)
+                            .text_color(theme::text_muted())
                             .child("The engine snaps a dragged window into the zones these lines make."),
                     )
                     .into_any_element()
             }
             None => div()
                 .text_size(px(theme::font_body()))
-                .text_color(theme::TEXT_DIM)
+                .text_color(theme::text_dim())
                 .child("No layouts yet. SnapIt writes its defaults the first time it starts.")
                 .into_any_element(),
         };
@@ -195,8 +195,8 @@ fn preview(layout: &SnapLayout, width: f32, height: f32, line: Rgba) -> impl Int
         .h(px(height))
         .rounded(px(4.))
         .border_1()
-        .border_color(theme::LINE_STRONG)
-        .bg(theme::WELL)
+        .border_color(theme::line_strong())
+        .bg(theme::well())
         .overflow_hidden();
     for split in &layout.lines {
         frame = frame.child(
@@ -245,11 +245,11 @@ impl Render for KeepAwakePage {
                     .rounded(px(6.))
                     .flex()
                     .items_center()
-                    .bg(theme::ACCENT)
+                    .bg(theme::accent())
                     .text_size(px(theme::font_control()))
                     .font_weight(FontWeight::SEMIBOLD)
-                    .text_color(theme::ON_ACCENT)
-                    .hover(|s| s.bg(theme::ACCENT_HOVER))
+                    .text_color(theme::on_accent())
+                    .hover(|s| s.bg(theme::accent_hover()))
                     .on_click(cx.listener(|this, _, _, cx| {
                         let wanted = !warp_station_core::keepawake::is_enabled();
                         this.store.update(cx, |s, cx| {
@@ -288,7 +288,7 @@ fn page(title: &'static str, on: bool, state: &'static str, hint: &'static str) 
                     div()
                         .text_size(px(theme::font_screen_title()))
                         .font_weight(FontWeight::SEMIBOLD)
-                        .text_color(theme::TEXT)
+                        .text_color(theme::text())
                         .child(title),
                 )
                 .child(
@@ -297,11 +297,11 @@ fn page(title: &'static str, on: bool, state: &'static str, hint: &'static str) 
                         .items_center()
                         .gap_2()
                         .text_size(px(theme::font_meta()))
-                        .text_color(theme::TEXT_MUTED)
+                        .text_color(theme::text_muted())
                         .child(div().size(px(8.)).rounded_full().bg(if on {
                             theme::SUCCESS_BRIGHT
                         } else {
-                            theme::LINE_STRONG
+                            theme::line_strong()
                         }))
                         .child(state)
                         .child(hint),

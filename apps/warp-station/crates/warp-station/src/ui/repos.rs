@@ -502,7 +502,7 @@ impl ReposPage {
                     "repo-tab-home",
                     "Repositories",
                     active.is_none(),
-                    theme::SURFACE,
+                    theme::surface(),
                 )
                 .debug_selector(|| "repo-tab-home".into())
                 .flex_shrink_0()
@@ -512,7 +512,7 @@ impl ReposPage {
                 .child(icon(
                     "icons/icon-folder.svg",
                     px(theme::icon_small()),
-                    theme::TEXT_DIM,
+                    theme::text_dim(),
                 ))
                 .child("Repositories"),
             );
@@ -538,7 +538,7 @@ impl ReposPage {
                     SharedString::from(format!("repo-tab-{ix}-id")),
                     name.clone(),
                     selected,
-                    theme::PANEL,
+                    theme::panel(),
                 )
                 .debug_selector(move || format!("repo-strip-tab-{ix}"))
                 .group(group.clone())
@@ -556,7 +556,7 @@ impl ReposPage {
                             SharedString::from(format!("repo-strip-spinner-{ix}")),
                             "icons/icon-spinner.svg",
                             px(theme::icon_tiny()),
-                            theme::TEXT_DIM,
+                            theme::text_dim(),
                         ))
                 })
                 .child(
@@ -600,7 +600,7 @@ impl ReposPage {
                         .when(!selected, |x| {
                             x.invisible().group_hover(group, |s| s.visible())
                         })
-                        .hover(|s| s.bg(theme::RAISED))
+                        .hover(|s| s.bg(theme::raised()))
                         .on_click(move |_, _, cx| {
                             cx.stop_propagation();
                             close_target.update(cx, |s, cx| s.close_repo_tab(&close_folder, cx));
@@ -608,7 +608,7 @@ impl ReposPage {
                         .child(icon(
                             "icons/icon-close.svg",
                             px(theme::icon_tiny()),
-                            theme::TEXT_MUTED,
+                            theme::text_muted(),
                         )),
                 ),
             ));
@@ -694,8 +694,8 @@ impl ReposPage {
             .items_center()
             .gap(px(6.))
             .text_size(px(theme::font_meta()))
-            .text_color(theme::TEXT_DIM)
-            .hover(|s| s.bg(theme::RAISED))
+            .text_color(theme::text_dim())
+            .hover(|s| s.bg(theme::raised()))
             // as the Sort button: a press toggles instead of close-then-reopen
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .on_click(cx.listener(|this, _, _, cx| {
@@ -707,13 +707,13 @@ impl ReposPage {
             .child(
                 div()
                     .font_weight(FontWeight::MEDIUM)
-                    .text_color(theme::TEXT)
+                    .text_color(theme::text())
                     .child(tag_label),
             )
             .child(icon(
                 "icons/icon-chevron-down.svg",
                 px(theme::icon_tiny()),
-                theme::TEXT_MUTED,
+                theme::text_muted(),
             ));
         self.tag_counts = tag_counts;
 
@@ -764,7 +764,7 @@ impl ReposPage {
             .text_color(if stats.attention > 0 {
                 theme::CHANGES
             } else {
-                theme::TEXT_DIM
+                theme::text_dim()
             })
             .child(format!(
                 "{} of {} need attention",
@@ -780,7 +780,7 @@ impl ReposPage {
             .overflow_hidden()
             .whitespace_nowrap()
             .text_size(px(theme::font_sub()))
-            .text_color(theme::TEXT_DIM)
+            .text_color(theme::text_dim())
             .child(attention_label)
             .child(format!(
                 "· {} changes · {} issues",
@@ -850,8 +850,8 @@ impl ReposPage {
             .items_center()
             .gap(px(6.))
             .text_size(px(theme::font_meta()))
-            .text_color(theme::TEXT_DIM)
-            .hover(|s| s.bg(theme::RAISED))
+            .text_color(theme::text_dim())
+            .hover(|s| s.bg(theme::raised()))
             // keep the window's outside-click dismissal from seeing this
             // press: it must toggle, not close-then-reopen
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
@@ -860,13 +860,13 @@ impl ReposPage {
             .child(
                 div()
                     .font_weight(FontWeight::MEDIUM)
-                    .text_color(theme::TEXT)
+                    .text_color(theme::text())
                     .child(sort_label(sort_mode)),
             )
             .child(icon(
                 "icons/icon-chevron-down.svg",
                 px(theme::icon_tiny()),
-                theme::TEXT_MUTED,
+                theme::text_muted(),
             ));
 
         let store_clear = self.store.clone();
@@ -888,8 +888,8 @@ impl ReposPage {
                         .flex_shrink_0()
                         .text_size(px(theme::font_meta()))
                         .font_weight(FontWeight::MEDIUM)
-                        .text_color(theme::ACCENT_INK)
-                        .hover(|s| s.text_color(theme::ACCENT_HOVER))
+                        .text_color(theme::accent_ink())
+                        .hover(|s| s.text_color(theme::accent_hover()))
                         .on_click(move |_, _, cx| {
                             store_clear.update(cx, |s, cx| s.clear_filters(cx));
                         })
@@ -908,9 +908,9 @@ impl ReposPage {
             .pt_3p5()
             .pb_2()
             .border_b_1()
-            .border_color(theme::HAIRLINE)
+            .border_color(theme::hairline())
             .when(scanning, |head| {
-                head.child(motion::progress_line("list-progress", theme::ACCENT))
+                head.child(motion::progress_line("list-progress", theme::accent()))
             })
             .child(
                 div()
@@ -950,14 +950,14 @@ impl ReposPage {
                 .items_center()
                 .gap_2()
                 .text_size(px(theme::font_control()))
-                .text_color(theme::TEXT)
-                .hover(|d| d.bg(theme::LINE_STRONG))
+                .text_color(theme::text())
+                .hover(|d| d.bg(theme::line_strong()))
                 .child(div().flex_1().min_w_0().child(label))
                 .when(on, |d| {
                     d.child(icon(
                         "icons/icon-check.svg",
                         px(theme::icon_small()),
-                        theme::ACCENT_INK,
+                        theme::accent_ink(),
                     ))
                 })
         };
@@ -973,8 +973,8 @@ impl ReposPage {
             .p(px(4.))
             .rounded(px(8.))
             .border_1()
-            .border_color(theme::LINE_STRONG)
-            .bg(theme::OVERLAY)
+            .border_color(theme::line_strong())
+            .bg(theme::overlay())
             .shadow_lg()
             .occlude()
             .flex()
@@ -1029,8 +1029,8 @@ impl ReposPage {
             .p(px(4.))
             .rounded(px(8.))
             .border_1()
-            .border_color(theme::LINE_STRONG)
-            .bg(theme::OVERLAY)
+            .border_color(theme::line_strong())
+            .bg(theme::overlay())
             .shadow_lg()
             // presses inside must not reach the rows under it, or the
             // window's outside-click dismissal before the row's click lands
@@ -1057,8 +1057,8 @@ impl ReposPage {
                     .items_center()
                     .justify_between()
                     .text_size(px(theme::font_control()))
-                    .text_color(theme::TEXT)
-                    .hover(|d| d.bg(theme::LINE_STRONG))
+                    .text_color(theme::text())
+                    .hover(|d| d.bg(theme::line_strong()))
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.store.update(cx, |s, cx| {
                             let ascending = if s.sort_mode == mode {
@@ -1121,7 +1121,7 @@ fn icon_action(
         .flex()
         .items_center()
         .justify_center()
-        .hover(|d| d.bg(theme::RAISED))
+        .hover(|d| d.bg(theme::raised()))
         .on_click(on_click)
         .child(if busy {
             motion::spinner(
@@ -1132,7 +1132,7 @@ fn icon_action(
             )
             .into_any_element()
         } else {
-            icon(icon_path, px(theme::icon_medium()), theme::TEXT_DIM).into_any_element()
+            icon(icon_path, px(theme::icon_medium()), theme::text_dim()).into_any_element()
         })
         .into_any_element()
 }
@@ -1159,7 +1159,7 @@ fn resize_handle() -> impl IntoElement {
         .right(px(-3.))
         .w(px(6.))
         .cursor_col_resize()
-        .hover(|s| s.bg(theme::LINE_STRONG))
+        .hover(|s| s.bg(theme::line_strong()))
         .on_drag(ListResize, |_, _, _, cx| {
             cx.stop_propagation();
             cx.new(|_| ListResize)
@@ -1175,7 +1175,7 @@ pub(crate) fn segment_row() -> gpui::Div {
         .h(px(36.))
         .p(px(3.))
         .rounded(px(8.))
-        .bg(theme::SEG_BG)
+        .bg(theme::seg_bg())
 }
 
 /// One segment: label, count when it has one, and the raised fill when it is
@@ -1208,22 +1208,22 @@ pub(crate) fn segment(
         .text_size(px(theme::font_row_meta()))
         .font_weight(FontWeight::MEDIUM)
         .when(active, |d| {
-            d.bg(theme::SEG_ACTIVE)
-                .text_color(theme::SEG_ACTIVE_FG)
+            d.bg(theme::seg_active())
+                .text_color(theme::seg_active_fg())
                 .font_weight(FontWeight::SEMIBOLD)
         })
         .when(!active, |d| {
-            d.text_color(theme::TEXT_DIM)
-                .hover(|s| s.text_color(theme::TEXT))
+            d.text_color(theme::text_dim())
+                .hover(|s| s.text_color(theme::text()))
         })
         .on_click(on_click)
         .child(label)
         .children(count.map(|count| {
             div()
                 .text_color(if active {
-                    theme::ACCENT_INK
+                    theme::accent_ink()
                 } else {
-                    theme::TEXT_MUTED
+                    theme::text_muted()
                 })
                 .child(format!("{count}"))
         }))

@@ -106,7 +106,7 @@ impl AzureView {
         let (glyph, color, word, busy) = if snapshot.pipelines.is_empty() {
             (
                 "icons/icon-clock.svg",
-                theme::TEXT_MUTED,
+                theme::text_muted(),
                 "No pipeline runs",
                 false,
             )
@@ -134,7 +134,7 @@ impl AzureView {
         } else {
             (
                 "icons/icon-clock.svg",
-                theme::TEXT_MUTED,
+                theme::text_muted(),
                 "Latest run queued",
                 false,
             )
@@ -145,7 +145,7 @@ impl AzureView {
             .items_center()
             .gap_2()
             .text_size(px(theme::font_body()))
-            .text_color(theme::TEXT_DIM)
+            .text_color(theme::text_dim())
             .child(if busy {
                 motion::spinner(
                     "azure-latest-spinner",
@@ -173,7 +173,7 @@ impl AzureView {
             .items_center()
             .gap_2()
             .border_b_1()
-            .border_color(theme::HAIRLINE)
+            .border_color(theme::hairline())
             .child(latest)
             .child(div().flex_1())
             .child(
@@ -187,14 +187,14 @@ impl AzureView {
                     .flex()
                     .items_center()
                     .justify_center()
-                    .hover(|s| s.bg(theme::RAISED))
+                    .hover(|s| s.bg(theme::raised()))
                     .on_click(move |_, _, cx| {
                         store.update(cx, |s, cx| s.refresh_panel(cx));
                     })
                     .child(icon(
                         "icons/icon-refresh.svg",
                         px(theme::icon_small()),
-                        theme::TEXT_MUTED,
+                        theme::text_muted(),
                     )),
             )
             .into_any_element()
@@ -218,7 +218,7 @@ fn runs_card(snapshot: &AzureSnapshot) -> AnyElement {
                 .px_4()
                 .py_3()
                 .text_size(px(theme::font_meta()))
-                .text_color(theme::TEXT_MUTED)
+                .text_color(theme::text_muted())
                 .child("No pipeline runs yet"),
         )
     })
@@ -234,7 +234,7 @@ fn run_row(ix: usize, run: &PipelineRun) -> AnyElement {
     } else if run.is_succeeded() {
         ("icons/icon-check.svg", theme::SUCCESS_BRIGHT, "succeeded")
     } else {
-        ("icons/icon-clock.svg", theme::TEXT_MUTED, "queued")
+        ("icons/icon-clock.svg", theme::text_muted(), "queued")
     };
     let url = run.url.clone();
     let branch = run.display_branch();
@@ -243,7 +243,7 @@ fn run_row(ix: usize, run: &PipelineRun) -> AnyElement {
         .items_center()
         .gap_1p5()
         .text_size(px(theme::font_meta()))
-        .text_color(theme::TEXT_MUTED);
+        .text_color(theme::text_muted());
     if let Some(branch) = branch {
         sub = sub
             .child(icon(
@@ -251,8 +251,8 @@ fn run_row(ix: usize, run: &PipelineRun) -> AnyElement {
                 px(theme::icon_tiny()),
                 theme::BRANCH,
             ))
-            .child(div().text_color(theme::TEXT_DIM).child(branch))
-            .child(div().text_color(theme::TEXT_MUTED).child("·"));
+            .child(div().text_color(theme::text_dim()).child(branch))
+            .child(div().text_color(theme::text_muted()).child("·"));
     }
     sub = sub.child(word);
 
@@ -271,7 +271,7 @@ fn run_row(ix: usize, run: &PipelineRun) -> AnyElement {
         .px_4()
         .py_1p5()
         .border_t_1()
-        .border_color(theme::BORDER_LIGHT)
+        .border_color(theme::border_light())
         .child(if glyph == "spinner" {
             motion::spinner(
                 SharedString::from(format!("pipeline-spin-{ix}")),
@@ -294,7 +294,7 @@ fn run_row(ix: usize, run: &PipelineRun) -> AnyElement {
                     div()
                         .min_w_0()
                         .text_size(px(theme::font_body()))
-                        .text_color(theme::TEXT)
+                        .text_color(theme::text())
                         .overflow_hidden()
                         .whitespace_nowrap()
                         .text_ellipsis()
@@ -319,14 +319,14 @@ fn run_row(ix: usize, run: &PipelineRun) -> AnyElement {
                     .flex()
                     .items_center()
                     .justify_center()
-                    .hover(|s| s.bg(theme::RAISED))
+                    .hover(|s| s.bg(theme::raised()))
                     .on_click(move |_, _, _| {
                         let _ = warp_station_core::terminal::open_folder(&url);
                     })
                     .child(icon(
                         "icons/icon-open-in-new.svg",
                         px(theme::icon_tiny()),
-                        theme::TEXT_MUTED,
+                        theme::text_muted(),
                     )),
             )
         })
@@ -353,7 +353,7 @@ fn items_card(
                     .px_4()
                     .py_3()
                     .text_size(px(theme::font_meta()))
-                    .text_color(theme::TEXT_MUTED)
+                    .text_color(theme::text_muted())
                     .child(empty),
             )
         })
@@ -386,8 +386,8 @@ fn item_row(
         .px_4()
         .py_1p5()
         .border_t_1()
-        .border_color(theme::BORDER_LIGHT)
-        .hover(|row| row.bg(theme::RAISED))
+        .border_color(theme::border_light())
+        .hover(|row| row.bg(theme::raised()))
         .on_click(move |_, _, _| {
             if !url.is_empty() {
                 let _ = warp_station_core::terminal::open_folder(&url);
@@ -405,7 +405,7 @@ fn item_row(
                     div()
                         .min_w_0()
                         .text_size(px(theme::font_body()))
-                        .text_color(theme::TEXT)
+                        .text_color(theme::text())
                         .overflow_hidden()
                         .whitespace_nowrap()
                         .text_ellipsis()
@@ -416,7 +416,7 @@ fn item_row(
                         div()
                             .min_w_0()
                             .text_size(px(theme::font_meta()))
-                            .text_color(theme::TEXT_MUTED)
+                            .text_color(theme::text_muted())
                             .overflow_hidden()
                             .whitespace_nowrap()
                             .text_ellipsis()
@@ -435,8 +435,8 @@ fn card(head: &'static str, count: Option<String>) -> gpui::Div {
         .pb_2()
         .rounded(px(8.))
         .border_1()
-        .border_color(theme::HAIRLINE)
-        .bg(theme::SURFACE)
+        .border_color(theme::hairline())
+        .bg(theme::surface())
         .child(
             div()
                 .flex()
@@ -447,18 +447,18 @@ fn card(head: &'static str, count: Option<String>) -> gpui::Div {
                 .px_4()
                 .mb_1()
                 .border_b_1()
-                .border_color(theme::BORDER_LIGHT)
+                .border_color(theme::border_light())
                 .child(
                     div()
                         .text_size(px(theme::font_name()))
                         .font_weight(FontWeight::SEMIBOLD)
-                        .text_color(theme::TEXT)
+                        .text_color(theme::text())
                         .child(head),
                 )
                 .children(count.map(|count| {
                     div()
                         .text_size(px(theme::font_meta()))
-                        .text_color(theme::TEXT_MUTED)
+                        .text_color(theme::text_muted())
                         .child(count)
                 })),
         )
@@ -472,7 +472,7 @@ fn empty_state(text: String) -> gpui::AnyElement {
         .justify_center()
         .p_6()
         .text_size(px(theme::font_body()))
-        .text_color(theme::TEXT_FAINT)
+        .text_color(theme::text_faint())
         .child(text)
         .into_any_element()
 }

@@ -106,7 +106,7 @@ pub(crate) fn empty_state() -> AnyElement {
         .items_center()
         .justify_center()
         .text_size(px(theme::font_meta()))
-        .text_color(theme::TEXT_MUTED)
+        .text_color(theme::text_muted())
         .child("No repositories yet")
         .into_any_element()
 }
@@ -122,12 +122,12 @@ fn head_icon(id: &'static str, label: &'static str) -> gpui::Stateful<gpui::Div>
         .size(px(warpui_kit_core::shell::CONTROL_HEIGHT))
         .rounded(px(6.))
         .border_1()
-        .border_color(theme::LINE_STRONG)
-        .bg(theme::PANEL)
+        .border_color(theme::line_strong())
+        .bg(theme::panel())
         .flex()
         .items_center()
         .justify_center()
-        .hover(|d| d.bg(theme::RAISED))
+        .hover(|d| d.bg(theme::raised()))
 }
 
 /// The head's top row: star, name, then the verbs. The open tab owns the one
@@ -167,7 +167,7 @@ pub(crate) fn header(
                 .flex()
                 .items_center()
                 .justify_center()
-                .hover(|d| d.bg(theme::RAISED))
+                .hover(|d| d.bg(theme::raised()))
                 .on_click(move |_, _, cx| {
                     star_target.update(cx, |s, cx| s.toggle_favorite(&star_folder, cx));
                 })
@@ -177,7 +177,7 @@ pub(crate) fn header(
                         icon(
                             "icons/icon-star-filled.svg",
                             px(theme::icon_medium()),
-                            theme::ACCENT_INK,
+                            theme::accent_ink(),
                         ),
                     ),
                     None => icon(
@@ -188,9 +188,9 @@ pub(crate) fn header(
                         },
                         px(theme::icon_medium()),
                         if favorite {
-                            theme::ACCENT_INK
+                            theme::accent_ink()
                         } else {
-                            theme::STAR_MUTED
+                            theme::star_muted()
                         },
                     )
                     .into_any_element(),
@@ -202,7 +202,7 @@ pub(crate) fn header(
                 .min_w_0()
                 .text_size(px(theme::font_screen_title()))
                 .font_weight(FontWeight::SEMIBOLD)
-                .text_color(theme::TEXT)
+                .text_color(theme::text())
                 .overflow_hidden()
                 .whitespace_nowrap()
                 .text_ellipsis()
@@ -225,15 +225,15 @@ pub(crate) fn header(
                     .px_3()
                     .rounded(px(6.))
                     .border_1()
-                    .border_color(theme::LINE_STRONG)
-                    .bg(theme::PANEL)
+                    .border_color(theme::line_strong())
+                    .bg(theme::panel())
                     .flex()
                     .items_center()
                     .gap_2()
                     .text_size(px(theme::font_control()))
                     .font_weight(FontWeight::MEDIUM)
-                    .text_color(theme::TEXT)
-                    .hover(|d| d.bg(theme::RAISED))
+                    .text_color(theme::text())
+                    .hover(|d| d.bg(theme::raised()))
                     .on_click(move |_, _, cx| {
                         tab_target.update(cx, |s, cx| s.open_repo_tab(&tab_folder, cx));
                     })
@@ -244,7 +244,7 @@ pub(crate) fn header(
                             "icons/icon-tab-plus.svg"
                         },
                         px(theme::icon_small()),
-                        theme::TEXT_DIM,
+                        theme::text_dim(),
                     ))
                     .child(label),
             )
@@ -272,7 +272,7 @@ pub(crate) fn header(
                 .child(icon(
                     "icons/icon-ellipsis-vertical.svg",
                     px(theme::icon_small()),
-                    theme::TEXT_DIM,
+                    theme::text_dim(),
                 )),
         )
         .into_any_element()
@@ -283,17 +283,17 @@ fn launch_toggle(filled: bool, page: &Entity<ReposPage>) -> AnyElement {
     let target = page.clone();
     let (fill, hover, ink, edge) = if filled {
         (
-            theme::ACCENT,
-            theme::ACCENT_HOVER,
-            theme::ON_ACCENT,
-            theme::ACCENT,
+            theme::accent(),
+            theme::accent_hover(),
+            theme::on_accent(),
+            theme::accent(),
         )
     } else {
         (
-            theme::PANEL,
-            theme::RAISED,
-            theme::TEXT_DIM,
-            theme::LINE_STRONG,
+            theme::panel(),
+            theme::raised(),
+            theme::text_dim(),
+            theme::line_strong(),
         )
     };
     div()
@@ -351,8 +351,8 @@ pub(crate) fn launch_menu(
                 .items_center()
                 .gap_2()
                 .text_size(px(theme::font_control()))
-                .text_color(theme::TEXT)
-                .hover(|d| d.bg(theme::LINE_STRONG))
+                .text_color(theme::text())
+                .hover(|d| d.bg(theme::line_strong()))
                 .on_click(move |_, _, cx| {
                     launch.run(&path, &target, cx);
                     close.update(cx, |this, cx| this.close_popups(cx));
@@ -360,13 +360,13 @@ pub(crate) fn launch_menu(
                 .child(icon(
                     launcher.icon,
                     px(theme::icon_small()),
-                    theme::TEXT_DIM,
+                    theme::text_dim(),
                 ))
                 .child(div().flex_1().child(launcher.label))
                 .children(
                     launcher
                         .key
-                        .map(|key| keycap(key, theme::TEXT_DIM, theme::KEY_BORDER)),
+                        .map(|key| keycap(key, theme::text_dim(), theme::key_border())),
                 ),
         );
     }
@@ -385,8 +385,8 @@ fn menu_panel(id: &'static str) -> gpui::Stateful<gpui::Div> {
         .p(px(4.))
         .rounded(px(8.))
         .border_1()
-        .border_color(theme::LINE_STRONG)
-        .bg(theme::OVERLAY)
+        .border_color(theme::line_strong())
+        .bg(theme::overlay())
         .shadow_lg()
         // presses inside must not reach the pane under it, or the window's
         // outside-click dismissal before the row's own click lands
@@ -475,7 +475,7 @@ pub(crate) fn popup_menu(
             }),
         ));
     }
-    menu.child(div().h(px(1.)).mx(px(4.)).my(px(2.)).bg(theme::HAIRLINE))
+    menu.child(div().h(px(1.)).mx(px(4.)).my(px(2.)).bg(theme::hairline()))
         .child(remove_row(state.remove_armed, entities, page))
         .into_any_element()
 }
@@ -492,8 +492,8 @@ fn menu_row(id: &'static str, label: &'static str) -> gpui::Stateful<gpui::Div> 
         .flex()
         .items_center()
         .text_size(px(theme::font_control()))
-        .text_color(theme::TEXT)
-        .hover(|d| d.bg(theme::LINE_STRONG))
+        .text_color(theme::text())
+        .hover(|d| d.bg(theme::line_strong()))
         .child(label)
 }
 
@@ -521,7 +521,7 @@ fn remove_row(armed: bool, entities: &Entity<Store>, page: &Entity<ReposPage>) -
         .text_color(if armed {
             theme::DANGER
         } else {
-            theme::TEXT_DIM
+            theme::text_dim()
         })
         .when(armed, |row| row.bg(theme::tint(theme::DANGER)))
         .hover(|d| d.bg(theme::tint(theme::DANGER)).text_color(theme::DANGER))
@@ -608,7 +608,7 @@ fn tag_row(
                 .items_center()
                 .text_size(px(theme::font_control()))
                 .font_weight(FontWeight::MEDIUM)
-                .text_color(theme::ACCENT_INK)
+                .text_color(theme::accent_ink())
                 .on_click(move |_, _, cx| {
                     target.update(cx, |this, cx| this.begin_tag_edit(cx));
                 })
@@ -632,9 +632,9 @@ fn tag_chip(tag: &str, entities: &Entity<Store>, folder: &str) -> AnyElement {
         .flex()
         .items_center()
         .rounded(px(12.))
-        .bg(theme::RAISED)
+        .bg(theme::raised())
         .text_size(px(theme::font_row_meta()))
-        .text_color(theme::TEXT_DIM)
+        .text_color(theme::text_dim())
         .child(SharedString::from(tag.to_string()))
         .child(
             div()
@@ -647,10 +647,10 @@ fn tag_chip(tag: &str, entities: &Entity<Store>, folder: &str) -> AnyElement {
                 .flex()
                 .items_center()
                 .justify_center()
-                .text_color(theme::TEXT_MUTED)
+                .text_color(theme::text_muted())
                 .opacity(0.45)
                 .group_hover("insp-tag", |d| d.opacity(1.))
-                .hover(|d| d.text_color(theme::TEXT))
+                .hover(|d| d.text_color(theme::text()))
                 .on_click(move |_, _, cx| {
                     target.update(cx, |s, cx| s.toggle_repo_tag(&path, &name, cx));
                 })
@@ -679,7 +679,7 @@ fn fact(label: &'static str, value: impl IntoElement) -> gpui::Div {
                 .w(px(112.))
                 .flex_shrink_0()
                 .text_size(px(theme::font_meta()))
-                .text_color(theme::TEXT_DIM)
+                .text_color(theme::text_dim())
                 .child(label),
         )
         .child(div().flex_1().min_w_0().child(value))
@@ -714,12 +714,12 @@ fn status_section(
         .gap(px(5.))
         .font_family(theme::code_font())
         .text_size(px(theme::font_mono_meta()))
-        .text_color(theme::TEXT_DIM)
+        .text_color(theme::text_dim())
         .when_some(repo.git_branch_name.clone(), |line, name| {
             let target = entities.clone();
             line.a11y_button(format!("Copy branch name {name}"))
                 .cursor_pointer()
-                .hover(|d| d.text_color(theme::TEXT))
+                .hover(|d| d.text_color(theme::text()))
                 .on_click(move |_, _, cx| {
                     copy_with_toast(name.clone(), "Branch name copied", &target, cx);
                 })
@@ -751,7 +751,7 @@ fn status_section(
             row.child(
                 div()
                     .text_size(px(theme::font_meta()))
-                    .text_color(theme::TEXT_MUTED)
+                    .text_color(theme::text_muted())
                     .child("No remote"),
             )
         })
@@ -759,7 +759,7 @@ fn status_section(
             row.child(
                 div()
                     .text_size(px(theme::font_meta()))
-                    .text_color(theme::TEXT_MUTED)
+                    .text_color(theme::text_muted())
                     .child("Not published"),
             )
         })
@@ -792,7 +792,7 @@ fn status_section(
         .child(
             div()
                 .text_size(px(theme::font_meta()))
-                .text_color(theme::TEXT_MUTED)
+                .text_color(theme::text_muted())
                 .child(format!("fetched {fetched}")),
         );
 
@@ -807,7 +807,7 @@ fn status_section(
     let last_commit_line = div()
         .min_w_0()
         .text_size(px(theme::font_body()))
-        .text_color(theme::TEXT)
+        .text_color(theme::text())
         .overflow_hidden()
         .whitespace_nowrap()
         .text_ellipsis()
@@ -837,13 +837,18 @@ fn primary_action(
     let launch = launcher.launch.clone();
     let (fill, hover, ink, edge) = if filled {
         (
-            theme::ACCENT,
-            theme::ACCENT_HOVER,
-            theme::ON_ACCENT,
-            theme::ACCENT,
+            theme::accent(),
+            theme::accent_hover(),
+            theme::on_accent(),
+            theme::accent(),
         )
     } else {
-        (theme::PANEL, theme::RAISED, theme::TEXT, theme::LINE_STRONG)
+        (
+            theme::panel(),
+            theme::raised(),
+            theme::text(),
+            theme::line_strong(),
+        )
     };
     div()
         .id("insp-primary")
@@ -895,20 +900,20 @@ fn open_in_section(launchers: &[Launcher], folder: &str, entities: &Entity<Store
                 .px_2p5()
                 .rounded(px(6.))
                 .border_1()
-                .border_color(theme::LINE_STRONG)
-                .bg(theme::PANEL)
+                .border_color(theme::line_strong())
+                .bg(theme::panel())
                 .flex()
                 .items_center()
                 .gap_1p5()
                 .text_size(px(theme::font_control()))
                 .font_weight(FontWeight::MEDIUM)
-                .text_color(theme::TEXT)
-                .hover(|el| el.bg(theme::RAISED))
+                .text_color(theme::text())
+                .hover(|el| el.bg(theme::raised()))
                 .on_click(move |_, _, cx| launch.run(&path, &target, cx))
                 .child(icon(
                     launcher.icon,
                     px(theme::icon_small()),
-                    theme::TEXT_DIM,
+                    theme::text_dim(),
                 ))
                 .child(
                     div()
@@ -922,7 +927,7 @@ fn open_in_section(launchers: &[Launcher], folder: &str, entities: &Entity<Store
                 .children(
                     launcher
                         .key
-                        .map(|key| keycap(key, theme::TEXT_DIM, theme::KEY_BORDER)),
+                        .map(|key| keycap(key, theme::text_dim(), theme::key_border())),
                 ),
         );
     }
@@ -948,8 +953,8 @@ fn card(head: gpui::Div) -> gpui::Div {
         .pb_2()
         .rounded(px(8.))
         .border_1()
-        .border_color(theme::HAIRLINE)
-        .bg(theme::SURFACE)
+        .border_color(theme::hairline())
+        .bg(theme::surface())
         .child(head)
 }
 
@@ -964,12 +969,12 @@ fn section_title(label: String) -> gpui::Div {
         .px_4()
         .mb_1()
         .border_b_1()
-        .border_color(theme::BORDER_LIGHT)
+        .border_color(theme::border_light())
         .child(
             div()
                 .text_size(px(theme::font_name()))
                 .font_weight(FontWeight::SEMIBOLD)
-                .text_color(theme::TEXT)
+                .text_color(theme::text())
                 .child(label),
         )
 }
@@ -1016,7 +1021,7 @@ fn needs_you_section(
         *any = true;
         div()
             .when(!first, |row| {
-                row.border_t_1().border_color(theme::BORDER_LIGHT)
+                row.border_t_1().border_color(theme::border_light())
             })
             .child(row)
     };
@@ -1241,7 +1246,7 @@ fn needs_you_section(
                 .child(
                     div()
                         .text_size(px(theme::font_body()))
-                        .text_color(theme::TEXT_DIM)
+                        .text_color(theme::text_dim())
                         .child("Working tree clean and in sync. Nothing to do here."),
                 ),
         );
@@ -1281,7 +1286,7 @@ fn needy_row(
                     div()
                         .min_w_0()
                         .text_size(px(theme::font_body()))
-                        .text_color(theme::TEXT)
+                        .text_color(theme::text())
                         .overflow_hidden()
                         .whitespace_nowrap()
                         .text_ellipsis()
@@ -1292,7 +1297,7 @@ fn needy_row(
                         div()
                             .min_w_0()
                             .text_size(px(theme::font_meta()))
-                            .text_color(theme::TEXT_MUTED)
+                            .text_color(theme::text_muted())
                             .overflow_hidden()
                             .whitespace_nowrap()
                             .text_ellipsis()
@@ -1319,8 +1324,8 @@ fn needy_link(id: &'static str, label: &'static str, on_click: Action) -> AnyEle
         .rounded(px(6.))
         .text_size(px(theme::font_control()))
         .font_weight(FontWeight::MEDIUM)
-        .text_color(theme::ACCENT_INK)
-        .hover(|el| el.bg(theme::RAISED).text_color(theme::ACCENT_HOVER))
+        .text_color(theme::accent_ink())
+        .hover(|el| el.bg(theme::raised()).text_color(theme::accent_hover()))
         .on_click(on_click)
         .child(label)
         .into_any_element()
@@ -1360,7 +1365,7 @@ fn needy_job_button(
         .border_color(if done {
             theme::tint(theme::SUCCESS_BRIGHT)
         } else {
-            theme::LINE_STRONG.into()
+            theme::line_strong().into()
         })
         .flex()
         .items_center()
@@ -1368,17 +1373,17 @@ fn needy_job_button(
         .text_size(px(theme::font_control()))
         .font_weight(FontWeight::MEDIUM)
         .when(running, |d| {
-            d.bg(theme::PANEL)
-                .text_color(theme::TEXT_MUTED)
+            d.bg(theme::panel())
+                .text_color(theme::text_muted())
                 .child(motion::spinner(
                     SharedString::from(format!("{id}-spin")),
                     "icons/icon-spinner.svg",
                     px(theme::icon_tiny()),
-                    theme::TEXT_MUTED,
+                    theme::text_muted(),
                 ))
         })
         .when(done, |d| {
-            d.bg(theme::PANEL)
+            d.bg(theme::panel())
                 .text_color(theme::SUCCESS_BRIGHT)
                 .child(icon(
                     "icons/icon-check.svg",
@@ -1387,13 +1392,15 @@ fn needy_job_button(
                 ))
         })
         .when(!running && !done, |d| {
-            d.bg(theme::PANEL).text_color(theme::TEXT).when(!busy, |d| {
-                d.cursor_pointer()
-                    .hover(|el| el.bg(theme::RAISED))
-                    .on_click(move |_, _, cx| {
-                        target.update(cx, |s, cx| s.run_git(action.clone(), cx));
-                    })
-            })
+            d.bg(theme::panel())
+                .text_color(theme::text())
+                .when(!busy, |d| {
+                    d.cursor_pointer()
+                        .hover(|el| el.bg(theme::raised()))
+                        .on_click(move |_, _, cx| {
+                            target.update(cx, |s, cx| s.run_git(action.clone(), cx));
+                        })
+                })
         })
         .child(label)
         .into_any_element()
@@ -1423,7 +1430,7 @@ fn details_section(store: &Store) -> Option<AnyElement> {
             label,
             div()
                 .text_size(px(theme::font_body()))
-                .text_color(theme::TEXT)
+                .text_color(theme::text())
                 .overflow_hidden()
                 .whitespace_nowrap()
                 .text_ellipsis()
@@ -1448,9 +1455,9 @@ fn details_section(store: &Store) -> Option<AnyElement> {
                     .flex()
                     .items_center()
                     .rounded(px(12.))
-                    .bg(theme::RAISED)
+                    .bg(theme::raised())
                     .text_size(px(theme::font_row_meta()))
-                    .text_color(theme::TEXT_DIM)
+                    .text_color(theme::text_dim())
                     .child(SharedString::from(topic.clone()))
             }));
 

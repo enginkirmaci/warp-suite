@@ -100,8 +100,8 @@ fn dialog_card(
         .w(px(CARD_W))
         .rounded(px(8.))
         .border_1()
-        .border_color(theme::LINE_STRONG)
-        .bg(theme::CARD)
+        .border_color(theme::line_strong())
+        .bg(theme::card())
         .shadow_lg()
         .overflow_hidden()
         .flex()
@@ -115,15 +115,15 @@ fn dialog_card(
                 .items_center()
                 .gap(px(8.))
                 .border_b_1()
-                .border_color(theme::ROW_LINE)
-                .child(icon(icon_path, px(theme::icon_small()), theme::TEXT_DIM))
+                .border_color(theme::row_line())
+                .child(icon(icon_path, px(theme::icon_small()), theme::text_dim()))
                 .child(
                     div()
                         .flex_1()
                         .min_w_0()
                         .text_size(px(theme::font_brand()))
                         .font_weight(FontWeight::SEMIBOLD)
-                        .text_color(theme::TEXT)
+                        .text_color(theme::text())
                         .child(title.to_string()),
                 )
                 .child(
@@ -137,9 +137,9 @@ fn dialog_card(
                         .flex()
                         .items_center()
                         .justify_center()
-                        .hover(|s| s.bg(theme::HOVER_BG))
+                        .hover(|s| s.bg(theme::hover_bg()))
                         .on_click(on_close)
-                        .child(icon("icons/icon-close.svg", px(12.), theme::TEXT_MUTED)),
+                        .child(icon("icons/icon-close.svg", px(12.), theme::text_muted())),
                 ),
         )
 }
@@ -162,14 +162,14 @@ fn dialog_footer() -> gpui::Div {
         .justify_end()
         .gap(px(8.))
         .border_t_1()
-        .border_color(theme::ROW_LINE)
+        .border_color(theme::row_line())
 }
 
 /// A field label on the row meta step.
 fn field_label(label: &str) -> gpui::Div {
     div()
         .text_size(px(theme::font_row_meta()))
-        .text_color(theme::TEXT_MUTED)
+        .text_color(theme::text_muted())
         .child(label.to_string())
 }
 
@@ -184,8 +184,8 @@ fn dialog_field(id: &'static str, input: &Entity<InputState>) -> gpui::Stateful<
             .h(px(30.))
             .px(px(8.))
             .rounded(px(4.))
-            .bg(theme::SEARCH_BG)
-            .border_color(theme::SEARCH_BORDER)
+            .bg(theme::search_bg())
+            .border_color(theme::search_border())
             .text_size(px(theme::font_sub())),
     )
 }
@@ -211,17 +211,17 @@ fn ghost_button(
         .text_size(px(theme::font_control()))
         .font_weight(FontWeight::MEDIUM)
         .border_1()
-        .border_color(theme::GHOST_BORDER)
-        .bg(theme::GHOST_BG)
+        .border_color(theme::ghost_border())
+        .bg(theme::ghost_bg())
         .map(|d| {
             if enabled {
-                d.cursor_pointer().text_color(theme::TEXT_DIM).hover(|s| {
-                    s.bg(theme::HOVER_BG)
+                d.cursor_pointer().text_color(theme::text_dim()).hover(|s| {
+                    s.bg(theme::hover_bg())
                         .border_color(theme::GHOST_BORDER_HOVER)
-                        .text_color(theme::TEXT)
+                        .text_color(theme::text())
                 })
             } else {
-                d.text_color(theme::TEXT_MUTED).opacity(0.45)
+                d.text_color(theme::text_muted()).opacity(0.45)
             }
         })
         .when(enabled, |d| d.on_click(on_click))
@@ -247,14 +247,14 @@ fn ghost_busy(label: &'static str) -> gpui::AnyElement {
         .text_size(px(theme::font_control()))
         .font_weight(FontWeight::MEDIUM)
         .border_1()
-        .border_color(theme::GHOST_BORDER)
-        .bg(theme::GHOST_BG)
-        .text_color(theme::TEXT_DIM)
+        .border_color(theme::ghost_border())
+        .bg(theme::ghost_bg())
+        .text_color(theme::text_dim())
         .child(warpui_kit_core::motion::spinner(
             "dialog-scan-spinner",
             "icons/icon-spinner.svg",
             px(theme::icon_tiny()),
-            theme::TEXT_DIM,
+            theme::text_dim(),
         ))
         .child(label)
         .into_any_element()
@@ -279,11 +279,11 @@ fn primary_button(
         .items_center()
         .text_size(px(theme::font_control()))
         .font_weight(FontWeight::MEDIUM)
-        .bg(theme::ACCENT)
-        .text_color(theme::ON_ACCENT)
+        .bg(theme::accent())
+        .text_color(theme::on_accent())
         .map(|d| {
             if enabled {
-                d.cursor_pointer().hover(|s| s.bg(theme::ACCENT_HOVER))
+                d.cursor_pointer().hover(|s| s.bg(theme::accent_hover()))
             } else {
                 d.opacity(0.4)
             }
@@ -372,10 +372,10 @@ impl AddRepoDialog {
                     .h(px(28.))
                     .px(px(8.))
                     .border_b_1()
-                    .border_color(theme::ROW_LINE)
+                    .border_color(theme::row_line())
                     .text_size(px(theme::font_row_meta()))
-                    .text_color(theme::TEXT_MUTED)
-                    .hover(|s| s.bg(theme::HOVER_BG))
+                    .text_color(theme::text_muted())
+                    .hover(|s| s.bg(theme::hover_bg()))
                     .on_click(cx.listener(move |this: &mut ReposPage, _, _, cx| {
                         if let Some(Dialog::AddRepo(dialog)) = &mut this.dialog {
                             // three-state header checkbox touches only the
@@ -397,13 +397,11 @@ impl AddRepoDialog {
                             .flex()
                             .items_center()
                             .justify_center()
-                            .border_color(theme::GHOST_BORDER)
+                            .border_color(theme::ghost_border())
                             .when(all_checked, |d| {
-                                d.bg(theme::ACCENT).border_color(theme::ACCENT).child(icon(
-                                    "icons/icon-check.svg",
-                                    px(8.),
-                                    theme::ON_ACCENT,
-                                ))
+                                d.bg(theme::accent())
+                                    .border_color(theme::accent())
+                                    .child(icon("icons/icon-check.svg", px(8.), theme::on_accent()))
                             }),
                     )
                     .child(format!("Select all available ({selectable})")),
@@ -428,12 +426,12 @@ impl AddRepoDialog {
                     .items_center()
                     .gap(px(8.))
                     .text_size(px(theme::font_sub()))
-                    .text_color(theme::TEXT_DIM)
+                    .text_color(theme::text_dim())
                     .when(*checked && !*tracked, |d| {
-                        d.bg(theme::tint(theme::ACCENT)).text_color(theme::TEXT)
+                        d.bg(theme::tint(theme::accent())).text_color(theme::text())
                     })
                     .when(*tracked, |d| d.opacity(0.45))
-                    .hover(|s| s.bg(theme::HOVER_BG))
+                    .hover(|s| s.bg(theme::hover_bg()))
                     .on_click(cx.listener(move |this: &mut ReposPage, _, _, cx| {
                         if let Some(Dialog::AddRepo(dialog)) = &mut this.dialog
                             && !dialog.found[index].2
@@ -451,13 +449,11 @@ impl AddRepoDialog {
                             .flex()
                             .items_center()
                             .justify_center()
-                            .border_color(theme::GHOST_BORDER)
+                            .border_color(theme::ghost_border())
                             .when(*checked && !*tracked, |d| {
-                                d.bg(theme::ACCENT).border_color(theme::ACCENT).child(icon(
-                                    "icons/icon-check.svg",
-                                    px(8.),
-                                    theme::ON_ACCENT,
-                                ))
+                                d.bg(theme::accent())
+                                    .border_color(theme::accent())
+                                    .child(icon("icons/icon-check.svg", px(8.), theme::on_accent()))
                             }),
                     )
                     .child(label),
@@ -470,8 +466,8 @@ impl AddRepoDialog {
             .h(px(results_h))
             .rounded(px(6.))
             .border_1()
-            .border_color(theme::ROWS_RULE)
-            .bg(theme::SEARCH_BG)
+            .border_color(theme::rows_rule())
+            .bg(theme::search_bg())
             .overflow_hidden()
             .when(self.found.is_empty(), |card| {
                 card.child(
@@ -482,7 +478,7 @@ impl AddRepoDialog {
                         .items_center()
                         .justify_center()
                         .text_size(px(theme::font_sub()))
-                        .text_color(theme::TEXT_FAINT)
+                        .text_color(theme::text_faint())
                         .child(card_center_text),
                 )
             })
@@ -502,7 +498,7 @@ impl AddRepoDialog {
                                     .px(px(8.))
                                     .py(px(6.))
                                     .text_size(px(theme::font_sub()))
-                                    .text_color(theme::TEXT_FAINT)
+                                    .text_color(theme::text_faint())
                                     .child("All found repositories are already in your list."),
                             )
                         }),
@@ -518,15 +514,15 @@ impl AddRepoDialog {
             .items_center()
             .rounded(px(4.))
             .border_1()
-            .border_color(theme::GHOST_BORDER)
-            .bg(theme::GHOST_BG)
+            .border_color(theme::ghost_border())
+            .bg(theme::ghost_bg())
             .child(
                 div()
                     .w(px(22.))
                     .flex()
                     .justify_center()
                     .text_size(px(theme::font_row_meta()))
-                    .text_color(theme::TEXT)
+                    .text_color(theme::text())
                     .child(format!("{}", self.depth)),
             )
             .child(
@@ -534,7 +530,7 @@ impl AddRepoDialog {
                     .flex()
                     .flex_col()
                     .border_l_1()
-                    .border_color(theme::GHOST_BORDER)
+                    .border_color(theme::ghost_border())
                     .child(
                         div()
                             .id("depth-up")
@@ -545,14 +541,14 @@ impl AddRepoDialog {
                             .flex()
                             .items_center()
                             .justify_center()
-                            .hover(|s| s.bg(theme::HOVER_BG))
+                            .hover(|s| s.bg(theme::hover_bg()))
                             .on_click(cx.listener(|this: &mut ReposPage, _, _, cx| {
                                 if let Some(Dialog::AddRepo(dialog)) = &mut this.dialog {
                                     dialog.depth = (dialog.depth + 1).min(8);
                                     cx.notify();
                                 }
                             }))
-                            .child(icon("icons/icon-arrow-up.svg", px(7.), theme::TEXT_MUTED)),
+                            .child(icon("icons/icon-arrow-up.svg", px(7.), theme::text_muted())),
                     )
                     .child(
                         div()
@@ -564,14 +560,18 @@ impl AddRepoDialog {
                             .flex()
                             .items_center()
                             .justify_center()
-                            .hover(|s| s.bg(theme::HOVER_BG))
+                            .hover(|s| s.bg(theme::hover_bg()))
                             .on_click(cx.listener(|this: &mut ReposPage, _, _, cx| {
                                 if let Some(Dialog::AddRepo(dialog)) = &mut this.dialog {
                                     dialog.depth = (dialog.depth - 1).max(1);
                                     cx.notify();
                                 }
                             }))
-                            .child(icon("icons/icon-arrow-down.svg", px(7.), theme::TEXT_MUTED)),
+                            .child(icon(
+                                "icons/icon-arrow-down.svg",
+                                px(7.),
+                                theme::text_muted(),
+                            )),
                     ),
             );
 
@@ -636,7 +636,7 @@ impl AddRepoDialog {
                                 .flex_1()
                                 .min_w_0()
                                 .text_size(px(theme::font_row_meta()))
-                                .text_color(theme::TEXT_FAINT)
+                                .text_color(theme::text_faint())
                                 .overflow_hidden()
                                 .whitespace_nowrap()
                                 .text_ellipsis()
@@ -802,7 +802,7 @@ impl CloneDialog {
                         div()
                             .font_family(theme::code_font())
                             .text_size(px(theme::font_mono_meta()))
-                            .text_color(theme::TEXT_MUTED)
+                            .text_color(theme::text_muted())
                             .child(target_line),
                     )
                 })

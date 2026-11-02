@@ -53,7 +53,7 @@ fn cloning_row(ix: usize, name: &str) -> impl IntoElement + use<> {
                 .min_w_0()
                 .text_size(px(theme::font_name()))
                 .font_weight(FontWeight::SEMIBOLD)
-                .text_color(theme::TEXT_DIM)
+                .text_color(theme::text_dim())
                 .overflow_hidden()
                 .whitespace_nowrap()
                 .text_ellipsis()
@@ -63,12 +63,12 @@ fn cloning_row(ix: usize, name: &str) -> impl IntoElement + use<> {
             SharedString::from(format!("repo-cloning-spinner-{ix}")),
             "icons/icon-spinner.svg",
             px(theme::icon_tiny()),
-            theme::TEXT_DIM,
+            theme::text_dim(),
         ))
         .child(
             div()
                 .text_size(px(theme::font_meta()))
-                .text_color(theme::TEXT_DIM)
+                .text_color(theme::text_dim())
                 .child("Cloning"),
         )
 }
@@ -177,7 +177,7 @@ fn empty_list(store: &Store) -> gpui::AnyElement {
         .items_center()
         .justify_center()
         .text_size(px(theme::font_meta()))
-        .text_color(theme::TEXT_MUTED)
+        .text_color(theme::text_muted())
         .child(text)
         .into_any_element()
 }
@@ -212,14 +212,14 @@ fn group_band(
         .items_center()
         .justify_center()
         .rounded(px(3.))
-        .hover(|d| d.bg(theme::BORDER_LIGHT))
+        .hover(|d| d.bg(theme::border_light()))
         .on_click(move |_, _, cx| {
             // the band's own press folds the group
             cx.stop_propagation();
             solo_target.update(cx, |s, cx| s.solo_group(&solo_key, cx));
         })
         .child(
-            icon("icons/icon-folder.svg", px(13.), theme::MUTED_ICON)
+            icon("icons/icon-folder.svg", px(13.), theme::muted_icon())
                 .when(soloed, |glyph| glyph.opacity(0.))
                 .group_hover(BAND_GROUP, |s| s.opacity(0.)),
         )
@@ -235,9 +235,9 @@ fn group_band(
                         "icons/icon-filter.svg",
                         px(12.),
                         if soloed {
-                            theme::BLUE_BRIGHT
+                            theme::blue_bright()
                         } else {
-                            theme::MUTED_ICON
+                            theme::muted_icon()
                         },
                     )
                     .when(!soloed, |glyph| glyph.opacity(0.))
@@ -258,7 +258,7 @@ fn group_band(
         .gap(px(6.))
         .h(px(34.))
         .px_4()
-        .hover(|d| d.bg(theme::PANEL))
+        .hover(|d| d.bg(theme::panel()))
         .on_click(move |_, _, cx| {
             fold_target.update(cx, |s, cx| s.toggle_group_collapse(&fold_key, cx));
         })
@@ -269,20 +269,20 @@ fn group_band(
                 "icons/icon-chevron-down.svg"
             },
             px(13.),
-            theme::MUTED_ICON,
+            theme::muted_icon(),
         ))
         .child(solo)
         .child(
             div()
                 .text_size(px(theme::font_sub()))
                 .font_weight(FontWeight::SEMIBOLD)
-                .text_color(theme::TEXT_DIM)
+                .text_color(theme::text_dim())
                 .child(name.to_string()),
         )
         .child(
             div()
                 .text_size(px(theme::font_mono_meta()))
-                .text_color(theme::TEXT_MUTED)
+                .text_color(theme::text_muted())
                 .child(format!("{count}")),
         )
         .into_any_element()
@@ -308,9 +308,9 @@ fn row_action(
         .flex()
         .items_center()
         .justify_center()
-        .hover(|d| d.bg(theme::OVERLAY))
+        .hover(|d| d.bg(theme::overlay()))
         .on_click(on_click)
-        .child(icon(icon_path, px(theme::icon_small()), theme::TEXT_DIM))
+        .child(icon(icon_path, px(theme::icon_small()), theme::text_dim()))
         .into_any_element()
 }
 
@@ -340,7 +340,7 @@ pub fn stats(repo: &RepoEntry, github: bool, row_ix: Option<usize>) -> gpui::Div
                     div()
                         .min_w_0()
                         .font_family(theme::code_font())
-                        .text_color(theme::TEXT_DIM)
+                        .text_color(theme::text_dim())
                         .overflow_hidden()
                         .whitespace_nowrap()
                         .text_ellipsis()
@@ -368,7 +368,7 @@ pub fn stats(repo: &RepoEntry, github: bool, row_ix: Option<usize>) -> gpui::Div
                 .flex()
                 .items_center()
                 .gap(px(5.))
-                .text_color(theme::TEXT_MUTED)
+                .text_color(theme::text_muted())
                 .child(icon(
                     "icons/icon-check.svg",
                     px(theme::icon_tiny()),
@@ -437,9 +437,9 @@ fn repo_row(
     let star_press = facts.star_press;
     let archived = repo.is_archived();
     let name_color = if archived {
-        theme::TEXT_MUTED
+        theme::text_muted()
     } else {
-        theme::TEXT
+        theme::text()
     };
     let folder = repo.folder_path.to_string_lossy().to_string();
     let select_target = store.clone();
@@ -475,7 +475,7 @@ fn repo_row(
                     let glyph = icon(
                         "icons/icon-star-filled.svg",
                         px(theme::icon_tiny()),
-                        theme::ACCENT_INK,
+                        theme::accent_ink(),
                     );
                     star.child(match star_press {
                         Some(press) => motion::pop(
@@ -491,7 +491,7 @@ fn repo_row(
                         .child(icon(
                             "icons/icon-star.svg",
                             px(theme::icon_tiny()),
-                            theme::STAR_MUTED,
+                            theme::star_muted(),
                         ))
                 })
         });
@@ -614,8 +614,8 @@ fn repo_row(
         .pl(px(13.))
         .pr(px(16.))
         .when(archived, |row| row.opacity(0.55))
-        .when(selected, |row| row.bg(theme::RAISED))
-        .when(!selected, |row| row.hover(|s| s.bg(theme::PANEL)))
+        .when(selected, |row| row.bg(theme::raised()))
+        .when(!selected, |row| row.hover(|s| s.bg(theme::panel())))
         .child(star)
         .child(identity)
         .child(
@@ -631,7 +631,7 @@ fn repo_row(
                     line.child(icon(
                         "icons/icon-tab.svg",
                         px(theme::icon_tiny()),
-                        theme::ACCENT_INK,
+                        theme::accent_ink(),
                     ))
                 })
                 .when_some(facts.job, |line, job| {
@@ -640,12 +640,12 @@ fn repo_row(
                             SharedString::from(format!("repo-row-spinner-{row_ix}")),
                             "icons/icon-spinner.svg",
                             px(theme::icon_tiny()),
-                            theme::TEXT_DIM,
+                            theme::text_dim(),
                         ))
                         .child(
                             div()
                                 .text_size(px(theme::font_meta()))
-                                .text_color(theme::TEXT_DIM)
+                                .text_color(theme::text_dim())
                                 .child(crate::net::git_working_word(job)),
                         )
                 })
@@ -653,7 +653,7 @@ fn repo_row(
                     line.child(
                         div()
                             .text_size(px(theme::font_meta()))
-                            .text_color(theme::TEXT_MUTED)
+                            .text_color(theme::text_muted())
                             .child(stamp),
                     )
                 }),
@@ -666,9 +666,9 @@ fn repo_row(
         .flex_shrink_0()
         .border_l_3()
         .border_color(if selected {
-            theme::ACCENT
+            theme::accent()
         } else {
-            theme::SURFACE
+            theme::surface()
         })
         .child(row)
         .into_any_element()
@@ -709,16 +709,16 @@ fn azure_chips(snapshot: &AzureSnapshot, row_ix: usize) -> Option<gpui::AnyEleme
         .flex()
         .items_center()
         .gap(px(4.))
-        .text_color(theme::TEXT_DIM);
+        .text_color(theme::text_dim());
     if !snapshot.pipelines.is_empty() {
         let (glyph, color) = if snapshot.pipeline_running() {
-            ("icons/icon-play.svg", theme::BLUE_BRIGHT)
+            ("icons/icon-play.svg", theme::blue_bright())
         } else if snapshot.pipeline_failed() {
             ("icons/icon-close.svg", theme::DANGER)
         } else if snapshot.pipeline_ok() {
             ("icons/icon-check.svg", theme::SUCCESS_BRIGHT)
         } else {
-            ("icons/icon-clock.svg", theme::TEXT_MUTED)
+            ("icons/icon-clock.svg", theme::text_muted())
         };
         chips = chips.child(icon(glyph, px(11.), color));
     }

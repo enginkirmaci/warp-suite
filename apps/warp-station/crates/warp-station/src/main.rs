@@ -46,6 +46,11 @@ fn main() {
             warpui_kit_core::adopt_text_size(
                 store.read(cx).settings().general.font_scale.as_deref(),
             );
+            warpui_kit_core::adopt_palette(None);
+            warpui_kit_core::follow_palette(|cx: &mut gpui::App| {
+                theme::apply_kit_theme(cx);
+                cx.refresh_windows();
+            });
             theme::apply_kit_theme(cx);
             warpui_kit_core::follow_ui_scale(cx, theme::apply_kit_theme);
             warpui_kit_core::motion::set_reduced(

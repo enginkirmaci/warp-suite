@@ -135,7 +135,7 @@ pub fn render(
                     div()
                         .text_size(px(theme::font_meta()))
                         .font_weight(FontWeight::MEDIUM)
-                        .text_color(theme::TEXT_MUTED)
+                        .text_color(theme::text_muted())
                         .child(format!("{count}"))
                 })),
         );
@@ -151,7 +151,7 @@ pub fn render(
             div()
                 .font_family(theme::code_font())
                 .text_size(px(theme::font_mono_meta()))
-                .text_color(theme::TEXT_DIM)
+                .text_color(theme::text_dim())
                 .child(overview::display_path(repo)),
         )
         .child(crate::ui::repos_list::stats(
@@ -166,7 +166,7 @@ pub fn render(
         .px(px(shell::DETAIL_PADDING))
         .pt_4()
         .border_b_1()
-        .border_color(theme::HAIRLINE)
+        .border_color(theme::hairline())
         .child(overview::header(
             repo,
             &launchers,
@@ -178,7 +178,7 @@ pub fn render(
         .child(sub)
         .child(strip)
         .when(store.git_jobs.contains_key(&folder), |head| {
-            head.child(motion::progress_line("detail-progress", theme::ACCENT))
+            head.child(motion::progress_line("detail-progress", theme::accent()))
         });
 
     let body = div()

@@ -118,8 +118,12 @@ jobs:
 
   release:
     needs: [linux, windows]
-    # `needs` plus a skipped Windows job would otherwise skip the release too.
-    if: ${{ always() && needs.linux.result == 'success' && (needs.windows.result == 'success' || needs.windows.result == 'skipped') }}
+    # Only publish when BOTH platforms built. `needs` alone would also skip this
+    # job when windows is skipped, so the condition is explicit - and it
+    # deliberately does NOT accept `skipped`: skip_windows is a Linux build
+    # check, and publishing from it would ship a Linux-only release under the
+    # real version tag (that is how v0.1.2 briefly went out without installers).
+    if: ${{ always() && needs.linux.result == 'success' && needs.windows.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v8

@@ -143,11 +143,13 @@ impl Render for FormattersDrawer {
                         .py_1()
                         .text_size(px(theme::font_body()))
                         .when(active, |d| {
-                            d.bg(theme::tint(theme::ACCENT))
-                                .text_color(theme::BLUE_BRIGHT)
+                            d.bg(theme::tint(theme::accent()))
+                                .text_color(theme::blue_bright())
                                 .font_weight(FontWeight::SEMIBOLD)
                         })
-                        .when(!active, |d| d.bg(theme::CHIP).text_color(theme::TEXT_MUTED))
+                        .when(!active, |d| {
+                            d.bg(theme::chip()).text_color(theme::text_muted())
+                        })
                         .hover(|s| s.opacity(0.9))
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.mode = mode;
@@ -176,14 +178,14 @@ impl Render for FormattersDrawer {
                     .rounded_md()
                     .px_1p5()
                     .py_0p5()
-                    .hover(|s| s.bg(theme::HOVER_BG))
+                    .hover(|s| s.bg(theme::hover_bg()))
                     .child(
                         div()
                             .flex_1()
                             .min_w_0()
                             .text_size(px(theme::font_meta()))
                             .font_family(gpui::SharedString::from(theme::code_font()))
-                            .text_color(theme::TEXT_FAINT)
+                            .text_color(theme::text_faint())
                             .overflow_hidden()
                             .whitespace_nowrap()
                             .child(truncate_middle(item, 48)),
@@ -196,8 +198,8 @@ impl Render for FormattersDrawer {
                             .rounded_md()
                             .px_1()
                             .text_size(px(theme::font_control()))
-                            .text_color(theme::TEXT_MUTED)
-                            .hover(|s| s.text_color(theme::BLUE_BRIGHT))
+                            .text_color(theme::text_muted())
+                            .hover(|s| s.text_color(theme::blue_bright()))
                             .on_click({
                                 let item = item.clone();
                                 let store = self.store.clone();
@@ -259,17 +261,19 @@ impl Render for FormattersDrawer {
                 div()
                     .id("fmt-output")
                     .rounded_md()
-                    .bg(theme::CARD)
+                    .bg(theme::card())
                     .border_1()
-                    .border_color(theme::BORDER_LIGHT)
+                    .border_color(theme::border_light())
                     .p_2()
                     .min_h(px(72.))
                     .max_h(px(180.))
                     .overflow_y_scroll()
                     .text_size(px(theme::font_body()))
                     .font_family(gpui::SharedString::from(theme::code_font()))
-                    .text_color(theme::TEXT_DIM)
-                    .when(self.output.is_empty(), |d| d.text_color(theme::TEXT_FAINT))
+                    .text_color(theme::text_dim())
+                    .when(self.output.is_empty(), |d| {
+                        d.text_color(theme::text_faint())
+                    })
                     .child(if self.output.is_empty() {
                         "Result appears here.".to_string()
                     } else {
@@ -287,7 +291,7 @@ impl Render for FormattersDrawer {
                             .child(
                                 div()
                                     .text_size(px(theme::font_meta()))
-                                    .text_color(theme::TEXT_FAINT)
+                                    .text_color(theme::text_faint())
                                     .child("Recent"),
                             )
                             .child(div().flex_1())
@@ -300,8 +304,8 @@ impl Render for FormattersDrawer {
                                     .px_1p5()
                                     .py_0p5()
                                     .text_size(px(theme::font_meta()))
-                                    .text_color(theme::TEXT_MUTED)
-                                    .hover(|s| s.bg(theme::HOVER_BG).text_color(theme::TEXT))
+                                    .text_color(theme::text_muted())
+                                    .hover(|s| s.bg(theme::hover_bg()).text_color(theme::text()))
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         this.history.clear();
                                         cx.notify();
@@ -328,8 +332,8 @@ fn run_button(enabled: bool, cx: &mut Context<FormattersDrawer>) -> gpui::AnyEle
         .px_3()
         .text_size(px(theme::font_control()))
         .font_weight(FontWeight::SEMIBOLD)
-        .bg(theme::ACCENT)
-        .text_color(theme::ON_ACCENT)
+        .bg(theme::accent())
+        .text_color(theme::on_accent())
         .map(|d| {
             if enabled {
                 d.hover(|s| s.opacity(0.9))

@@ -104,7 +104,17 @@ impl Render for Host {
             .w(px(800.))
             .h(px(600.))
             .relative()
+            .flex()
+            .flex_col()
             .child(self.picker.clone())
+            // a form row under the slot: a floating panel must not move it
+            .child(
+                div()
+                    .id("form-row-after")
+                    .debug_selector(|| "form-row-after".into())
+                    .h(px(60.))
+                    .w_full(),
+            )
     }
 }
 
@@ -257,4 +267,59 @@ fn composer_catcher_click_dismisses_without_pick(cx: &mut TestAppContext) {
         "a catcher click is not a pick"
     );
     assert_eq!(*dismissals.lock().unwrap(), 1, "a catcher click dismisses");
+}
+
+/// A settings slot floats: the panel must be drawn outside the trigger's own
+/// box, so the form under it is covered rather than pushed down. The host
+/// below puts a fixed-height form row after the picker; if the panel were
+/// in-flow, that row would move.
+#[gpui_kit::gpui::test]
+fn field_anchor_floats_the_panel_over_the_form(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+    let (_handle, cx) = cx.add_window_view(|window, cx| {
+        let field = cx.new(|cx| InputState::new(window, cx).placeholder("target"));
+        let picker = cx.new(|cx| {
+            FilteredPicker::new(
+                spec(true, OverlayAnchor::Field),
+                PickerTarget::Field(field.clone()),
+                Box::new(data),
+                window,
+                cx,
+            )
+        });
+        Host { field, picker }
+    });
+    cx.run_until_parked();
+    cx.update(|window, cx| drop(window.draw(cx)));
+
+    let trigger = cx
+        .debug_bounds("model-trigger-test")
+        .expect("the trigger renders in the slot");
+    let row_before = cx
+        .debug_bounds("form-row-after")
+        .expect("the form row after the slot renders");
+    click(cx, "model-trigger-test");
+    cx.run_until_parked();
+    cx.update(|window, cx| drop(window.draw(cx)));
+
+    let panel = cx
+        .debug_bounds("model-panel-test")
+        .expect("the floating panel opens");
+    assert!(
+        panel.origin.y >= trigger.origin.y + trigger.size.height,
+        "the panel opens below the trigger (panel {panel:?}, trigger {trigger:?})"
+    );
+    assert!(
+        panel.origin.y < trigger.origin.y + trigger.size.height + px(24.),
+        "the panel sits just under the trigger, not at the stage's end (panel {panel:?}, trigger {trigger:?})"
+    );
+    // the row after the picker keeps its place: a floating panel costs no
+    // layout height, which is the bug the screenshot showed
+    let row_after = cx
+        .debug_bounds("form-row-after")
+        .expect("the form row after the slot still renders");
+    assert_eq!(
+        row_before.origin.y, row_after.origin.y,
+        "an open floating panel must not push the form down"
+    );
 }

@@ -23,6 +23,158 @@ pub fn rgba_u32(rgb: u32) -> Rgba {
     rgba((rgb << 8) | 0xFF)
 }
 
+// ---- the switchable ramp ---------------------------------------------------
+// A palette is a swap of the ramp and the accent family, nothing else: every
+// app draws through these, so switching one switches all of them. Copper is
+// the default and the values here are exactly the constants below, which stay
+// as the family's published reference.
+
+/// One palette: the six surface steps, the three lines, the three inks and the
+/// accent family. Entity hues (branch, changes, pr, …) are fixed across
+/// palettes, so they are not part of it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Ramp {
+    pub key: &'static str,
+    /// The preset's label for the settings control.
+    pub label: &'static str,
+    pub well: Rgba,
+    pub chrome: Rgba,
+    pub base: Rgba,
+    pub panel: Rgba,
+    pub raised: Rgba,
+    pub overlay: Rgba,
+    pub line_soft: Rgba,
+    pub line: Rgba,
+    pub line_strong: Rgba,
+    pub text: Rgba,
+    pub text_dim: Rgba,
+    pub text_muted: Rgba,
+    pub accent: Rgba,
+    pub accent_hover: Rgba,
+    pub accent_ink: Rgba,
+    pub accent_soft: Rgba,
+    pub on_accent: Rgba,
+}
+
+impl Ramp {
+    /// The six steps bottom to top, for the contrast and ordering tests.
+    pub fn surfaces(&self) -> [Rgba; 6] {
+        [
+            self.well,
+            self.chrome,
+            self.base,
+            self.panel,
+            self.raised,
+            self.overlay,
+        ]
+    }
+
+    /// The accent family as the preset system's [`AccentColors`], so a palette
+    /// and an accent preset drive the same code.
+    pub fn accent_colors(&self) -> AccentColors {
+        AccentColors {
+            accent: self.accent,
+            text: self.accent_ink,
+            dim: self.accent_soft,
+            on: self.on_accent,
+            success_dim: self.accent_soft,
+        }
+    }
+}
+
+const fn ramp(key: &'static str, label: &'static str, hexes: [u32; 17]) -> Ramp {
+    Ramp {
+        key,
+        label,
+        well: rgba_hex(hexes[0]),
+        chrome: rgba_hex(hexes[1]),
+        base: rgba_hex(hexes[2]),
+        panel: rgba_hex(hexes[3]),
+        raised: rgba_hex(hexes[4]),
+        overlay: rgba_hex(hexes[5]),
+        line_soft: rgba_hex(hexes[6]),
+        line: rgba_hex(hexes[7]),
+        line_strong: rgba_hex(hexes[8]),
+        text: rgba_hex(hexes[9]),
+        text_dim: rgba_hex(hexes[10]),
+        text_muted: rgba_hex(hexes[11]),
+        accent: rgba_hex(hexes[12]),
+        accent_hover: rgba_hex(hexes[13]),
+        accent_ink: rgba_hex(hexes[14]),
+        accent_soft: rgba_hex(hexes[15]),
+        on_accent: rgba_hex(hexes[16]),
+    }
+}
+
+/// Every palette the settings control offers, in order. Copper first: it is
+/// the default, and a saved key that no longer exists lands on it.
+pub const RAMPS: [Ramp; 4] = [
+    ramp(
+        "copper",
+        "Copper",
+        [
+            0x1C1A18FF, 0x201E1CFF, 0x252321FF, 0x2B2926FF, 0x34312EFF, 0x3A3733FF, 0x2F2C29FF,
+            0x3B3834FF, 0x4F4B46FF, 0xF6F2EBFF, 0xD2CBC0FF, 0xABA397FF, 0xEE9A5FFF, 0xF5AC78FF,
+            0xF2A877FF, 0x43301FFF, 0x24140AFF,
+        ],
+    ),
+    ramp(
+        "plum",
+        "Plum",
+        [
+            0x1C1A21FF, 0x211E27FF, 0x26232DFF, 0x2C2934FF, 0x36323FFF, 0x3C3846FF, 0x302D38FF,
+            0x3C3846FF, 0x524D5CFF, 0xF5F2F7FF, 0xD1CBD8FF, 0xAAA3B3FF, 0xF2907FFF, 0xF7A698FF,
+            0xF5A294FF, 0x452B33FF, 0x2A0F0BFF,
+        ],
+    ),
+    ramp(
+        "pine",
+        "Pine",
+        [
+            0x171C1BFF, 0x1B2120FF, 0x202625FF, 0x262D2BFF, 0x2F3735FF, 0x353E3BFF, 0x2B3331FF,
+            0x36403DFF, 0x4A5551FF, 0xEFF4F1FF, 0xC8D2CDFF, 0x9FABA6FF, 0xE5C066FF, 0xEFCF80FF,
+            0xE9C976FF, 0x3A3620FF, 0x231B05FF,
+        ],
+    ),
+    ramp(
+        "blue",
+        "Blue",
+        [
+            0x181A20FF, 0x1D2027FF, 0x22262EFF, 0x282D36FF, 0x2F3540FF, 0x363C48FF, 0x2A2F38FF,
+            0x363C47FF, 0x49505CFF, 0xF0F4FBFF, 0xC9D2E0FF, 0x9FA9B8FF, 0x5B9DF5FF, 0x77B0F8FF,
+            0x8FBBFAFF, 0x1E2F4AFF, 0x0A1626FF,
+        ],
+    ),
+];
+
+/// The palette a saved key names, or Copper when it names nothing that exists.
+pub fn normalize_ramp(key: Option<&str>) -> &'static Ramp {
+    RAMPS
+        .iter()
+        .find(|r| Some(r.key) == key)
+        .unwrap_or(&RAMPS[0])
+}
+
+/// The live palette. A plain static with interior mutability: every read goes
+/// through [`ramp`], and the settings page is the only writer, so no app can
+/// see a half-switched palette inside one frame.
+static LIVE_RAMP: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// The palette every surface draws in.
+pub fn current_ramp() -> &'static Ramp {
+    let index = LIVE_RAMP.load(std::sync::atomic::Ordering::Relaxed);
+    &RAMPS[index.min(RAMPS.len() - 1)]
+}
+
+/// Switches the palette for every surface that reads [`current_ramp`] after
+/// this call. Returns the ramp now in effect.
+pub fn set_ramp(key: &str) -> &'static Ramp {
+    let ramp = normalize_ramp(Some(key));
+    let index = RAMPS.iter().position(|r| r.key == ramp.key).unwrap_or(0);
+    LIVE_RAMP.store(index, std::sync::atomic::Ordering::Relaxed);
+    ramp
+}
+
 // ---- surfaces --------------------------------------------------------------
 // One warm ramp, every step far enough apart that a panel reads by value alone:
 // well < chrome < base < panel < raised < overlay. The design's names for the
@@ -379,6 +531,101 @@ pub fn highlight_theme() -> Arc<gpui_kit::component::highlighter::HighlightTheme
         .clone()
 }
 
+// ---- live tokens -----------------------------------------------------------
+// What app code actually draws with. Each one reads the live palette, so a
+// settings switch repaints every surface on its next frame. They are
+// functions, not constants: that is the whole point of the move, and it is why
+// `theme::TEXT` became `theme::text()`.
+
+/// The window canvas: the main area under the panes.
+pub fn surface() -> Rgba {
+    current_ramp().base
+}
+/// The titlebar, the rail and the chrome.
+pub fn window_chrome() -> Rgba {
+    current_ramp().chrome
+}
+/// A card, a tile, the detail pane.
+pub fn panel() -> Rgba {
+    current_ramp().panel
+}
+/// The selected row, hover fills, active segments.
+pub fn raised() -> Rgba {
+    current_ramp().raised
+}
+/// Menus, dialogs and tooltips.
+pub fn popup() -> Rgba {
+    current_ramp().overlay
+}
+/// Fields, diffs and code: the recessed step.
+pub fn well() -> Rgba {
+    current_ramp().well
+}
+/// Quiet dividers.
+pub fn border_light() -> Rgba {
+    current_ramp().line_soft
+}
+/// The default separator.
+pub fn hairline() -> Rgba {
+    current_ramp().line
+}
+/// Control borders.
+pub fn line_strong() -> Rgba {
+    current_ramp().line_strong
+}
+/// Names and values.
+pub fn text() -> Rgba {
+    current_ramp().text
+}
+/// Secondary copy.
+pub fn text_dim() -> Rgba {
+    current_ramp().text_dim
+}
+/// Timestamps and hints.
+pub fn text_muted() -> Rgba {
+    current_ramp().text_muted
+}
+/// The quietest ink; the same step as [`text_muted`].
+pub fn text_faint() -> Rgba {
+    current_ramp().text_muted
+}
+/// The primary fill.
+pub fn accent() -> Rgba {
+    current_ramp().accent
+}
+/// The primary fill's hover.
+pub fn accent_hover() -> Rgba {
+    current_ramp().accent_hover
+}
+/// The accent as ink: links, focus rings, active pills.
+pub fn accent_ink() -> Rgba {
+    current_ramp().accent_ink
+}
+/// The tinted tile behind the brand mark.
+pub fn accent_soft() -> Rgba {
+    current_ramp().accent_soft
+}
+/// Text on a filled [`accent`].
+pub fn on_accent() -> Rgba {
+    current_ramp().on_accent
+}
+/// A text field's fill.
+pub fn input() -> Rgba {
+    current_ramp().well
+}
+/// A neutral pill.
+pub fn chip() -> Rgba {
+    current_ramp().raised
+}
+/// The opaque row/pill hover.
+pub fn hover_bg() -> Rgba {
+    current_ramp().raised
+}
+/// The selected row.
+pub fn selected() -> Rgba {
+    current_ramp().raised
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -458,6 +705,98 @@ mod tests {
     #[test]
     fn a_saved_blue_lands_on_copper() {
         assert_eq!(normalize_accent(Some("blue")).key, "copper");
+    }
+
+    /// Every palette must clear AA on every surface, and its steps must
+    /// still read apart — a palette is a swap of values, not of the rules.
+    #[test]
+    fn every_palette_clears_aa_and_orders_its_ramp() {
+        for ramp in &RAMPS {
+            for ink in [ramp.text, ramp.text_dim, ramp.text_muted, ramp.accent_ink] {
+                for surface in ramp.surfaces() {
+                    assert!(
+                        contrast(ink, surface) >= 4.5,
+                        "{}: {ink:?} on {surface:?} is {:.2}:1",
+                        ramp.key,
+                        contrast(ink, surface)
+                    );
+                }
+            }
+            assert!(
+                contrast(ramp.on_accent, ramp.accent) >= 4.5,
+                "{}: text on its primary fill is {:.2}:1",
+                ramp.key,
+                contrast(ramp.on_accent, ramp.accent)
+            );
+            let ramp_steps = ramp.surfaces();
+            for pair in ramp_steps.windows(2) {
+                assert!(
+                    luminance(pair[0]) < luminance(pair[1]),
+                    "{}: {pair:?} does not lift",
+                    ramp.key
+                );
+            }
+        }
+    }
+
+    /// The shipped constants are Copper, so the live default and the published
+    /// reference cannot drift apart.
+    #[test]
+    fn the_default_palette_is_the_copper_constants() {
+        let copper = normalize_ramp(None);
+        assert_eq!(copper.key, "copper");
+        assert_eq!(copper.base, SURFACE);
+        assert_eq!(copper.chrome, WINDOW_CHROME);
+        assert_eq!(copper.panel, CARD);
+        assert_eq!(copper.overlay, POPUP);
+        assert_eq!(copper.well, INPUT);
+        assert_eq!(copper.raised, CHIP);
+        assert_eq!(copper.line, HAIRLINE);
+        assert_eq!(copper.line_soft, BORDER_LIGHT);
+        assert_eq!(copper.line_strong, LINE_STRONG);
+        assert_eq!(copper.text, TEXT);
+        assert_eq!(copper.text_dim, TEXT_DIM);
+        assert_eq!(copper.text_muted, TEXT_MUTED);
+        assert_eq!(copper.accent, ACCENT);
+        assert_eq!(copper.accent_ink, ACCENT_INK);
+        assert_eq!(copper.accent_soft, ACCENT_SOFT);
+        assert_eq!(copper.on_accent, ON_ACCENT);
+    }
+
+    /// The prototype's own tokens (design/v3/source/warp.css) are the source of
+    /// truth for plum and pine; this pins the port to them.
+    #[test]
+    fn plum_and_pine_match_the_design_prototype() {
+        let plum = normalize_ramp(Some("plum"));
+        assert_eq!(plum.well, rgba_hex(0x1C1A21FF));
+        assert_eq!(plum.base, rgba_hex(0x26232DFF));
+        assert_eq!(plum.accent, rgba_hex(0xF2907FFF));
+        assert_eq!(plum.accent_ink, rgba_hex(0xF5A294FF));
+
+        let pine = normalize_ramp(Some("pine"));
+        assert_eq!(pine.well, rgba_hex(0x171C1BFF));
+        assert_eq!(pine.base, rgba_hex(0x202625FF));
+        assert_eq!(pine.accent, rgba_hex(0xE5C066FF));
+        assert_eq!(pine.on_accent, rgba_hex(0x231B05FF));
+    }
+
+    #[test]
+    fn a_saved_key_that_no_longer_exists_lands_on_copper() {
+        assert_eq!(normalize_ramp(Some("chartreuse")).key, "copper");
+        assert_eq!(normalize_ramp(Some("blue")).key, "blue");
+    }
+
+    #[test]
+    fn switching_the_palette_moves_the_live_tokens() {
+        // the process-wide switch is shared, so put it back
+        let before = current_ramp().key;
+        let blue = set_ramp("blue");
+        assert_eq!(current_ramp().key, "blue");
+        assert_eq!(text(), blue.text);
+        assert_eq!(surface(), blue.base);
+        assert_eq!(accent(), blue.accent);
+        set_ramp(before);
+        assert_eq!(current_ramp().key, before);
     }
 
     #[test]

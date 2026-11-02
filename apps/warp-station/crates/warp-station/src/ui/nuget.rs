@@ -89,7 +89,7 @@ impl Render for NugetDrawer {
                     .py_0p5()
                     .text_size(px(theme::font_meta()))
                     .font_family(gpui::SharedString::from(theme::code_font()))
-                    .text_color(theme::TEXT_FAINT)
+                    .text_color(theme::text_faint())
                     .overflow_hidden()
                     .whitespace_nowrap()
                     .child(line.clone()),
@@ -113,9 +113,9 @@ impl Render for NugetDrawer {
             .child(
                 div()
                     .rounded_lg()
-                    .bg(theme::CARD)
+                    .bg(theme::card())
                     .border_1()
-                    .border_color(theme::BORDER_LIGHT)
+                    .border_color(theme::border_light())
                     .p_2()
                     .flex()
                     .flex_col()
@@ -129,14 +129,14 @@ impl Render for NugetDrawer {
                             .child(
                                 div()
                                     .text_size(px(theme::font_meta()))
-                                    .text_color(theme::TEXT_MUTED)
+                                    .text_color(theme::text_muted())
                                     .child("Watch directory"),
                             )
                             .child(div().flex_1())
                             .child(action_button(
                                 "nuget-register",
                                 "Register source",
-                                theme::BLUE_BRIGHT,
+                                theme::blue_bright(),
                                 false,
                                 cx.listener(|this, _, _, cx| this.register(cx)),
                             )),
@@ -145,7 +145,7 @@ impl Render for NugetDrawer {
                     .child(
                         div()
                             .text_size(px(theme::font_control()))
-                            .text_color(theme::TEXT_FAINT)
+                            .text_color(theme::text_faint())
                             .child("Enter applies the folder to a running watch."),
                     )
                     .child(path_row("Local cache", snapshot.copy_folder.as_deref()))
@@ -158,9 +158,9 @@ impl Render for NugetDrawer {
             .child(
                 div()
                     .rounded_lg()
-                    .bg(theme::CARD)
+                    .bg(theme::card())
                     .border_1()
-                    .border_color(theme::BORDER_LIGHT)
+                    .border_color(theme::border_light())
                     .p_2()
                     .flex()
                     .flex_col()
@@ -183,9 +183,9 @@ impl Render for NugetDrawer {
                     .flex_1()
                     .min_h_0()
                     .rounded_lg()
-                    .bg(theme::CARD)
+                    .bg(theme::card())
                     .border_1()
-                    .border_color(theme::BORDER_LIGHT)
+                    .border_color(theme::border_light())
                     .p_2()
                     .flex()
                     .flex_col()
@@ -205,11 +205,11 @@ impl Render for NugetDrawer {
                             .child(
                                 div()
                                     .rounded_full()
-                                    .bg(theme::CHIP)
+                                    .bg(theme::chip())
                                     .px_2()
                                     .py_0p5()
                                     .text_size(px(theme::font_meta()))
-                                    .text_color(theme::TEXT_MUTED)
+                                    .text_color(theme::text_muted())
                                     .child(format!("{} refreshed", snapshot.count)),
                             ),
                     )
@@ -221,7 +221,7 @@ impl Render for NugetDrawer {
                                 .items_center()
                                 .justify_center()
                                 .text_size(px(theme::font_body()))
-                                .text_color(theme::TEXT_FAINT)
+                                .text_color(theme::text_faint())
                                 .child("No activity yet — start the watch and build something."),
                         )
                     })
@@ -264,7 +264,7 @@ fn path_row(label: &str, value: Option<&str>) -> gpui::AnyElement {
             div()
                 .w(px(90.))
                 .text_size(px(theme::font_meta()))
-                .text_color(theme::TEXT_MUTED)
+                .text_color(theme::text_muted())
                 .child(label.to_string()),
         )
         .child(
@@ -272,7 +272,7 @@ fn path_row(label: &str, value: Option<&str>) -> gpui::AnyElement {
                 .flex_1()
                 .min_w_0()
                 .text_size(px(theme::font_meta()))
-                .text_color(theme::TEXT_DIM)
+                .text_color(theme::text_dim())
                 .overflow_hidden()
                 .whitespace_nowrap()
                 .child(value.unwrap_or("Not resolved yet").to_string()),
@@ -283,7 +283,7 @@ fn path_row(label: &str, value: Option<&str>) -> gpui::AnyElement {
 fn explain_line(text: &str) -> gpui::AnyElement {
     div()
         .text_size(px(theme::font_meta()))
-        .text_color(theme::TEXT_DIM)
+        .text_color(theme::text_dim())
         .child(text.to_string())
         .into_any_element()
 }

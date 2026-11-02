@@ -500,14 +500,14 @@ impl Render for SettingsPage {
                         div()
                             .text_size(px(theme::font_name()))
                             .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(theme::TEXT)
+                            .text_color(theme::text())
                             .child(title),
                     )
                     .child(
                         div()
                             .mt_0p5()
                             .text_size(px(theme::font_row_meta()))
-                            .text_color(theme::TEXT_DIM)
+                            .text_color(theme::text_dim())
                             .child(hint),
                     ),
             );
@@ -520,10 +520,10 @@ impl Render for SettingsPage {
                     .pt_3p5()
                     .pb_3()
                     .border_b_1()
-                    .border_color(theme::HAIRLINE)
+                    .border_color(theme::hairline())
                     .text_size(px(theme::font_list_title()))
                     .font_weight(FontWeight::SEMIBOLD)
-                    .text_color(theme::TEXT)
+                    .text_color(theme::text())
                     .child("Settings"),
             )
             .child(rows);
@@ -541,7 +541,7 @@ impl Render for SettingsPage {
             .px(px(warpui_kit_core::shell::DETAIL_PADDING))
             .py_4()
             .border_b_1()
-            .border_color(theme::HAIRLINE)
+            .border_color(theme::hairline())
             .child(
                 div()
                     .flex_1()
@@ -550,14 +550,14 @@ impl Render for SettingsPage {
                         div()
                             .text_size(px(theme::font_screen_title()))
                             .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(theme::TEXT)
+                            .text_color(theme::text())
                             .child(title),
                     )
                     .child(
                         div()
                             .mt_0p5()
                             .text_size(px(theme::font_meta()))
-                            .text_color(theme::TEXT_DIM)
+                            .text_color(theme::text_dim())
                             .child(hint),
                     ),
             )
@@ -578,16 +578,16 @@ impl Render for SettingsPage {
                     .px_3()
                     .rounded(px(6.))
                     .border_1()
-                    .border_color(theme::LINE_STRONG)
-                    .bg(theme::PANEL)
+                    .border_color(theme::line_strong())
+                    .bg(theme::panel())
                     .flex()
                     .flex_row()
                     .items_center()
                     .gap_2()
                     .text_size(px(theme::font_control()))
                     .font_weight(FontWeight::MEDIUM)
-                    .text_color(theme::TEXT)
-                    .hover(|s| s.bg(theme::RAISED))
+                    .text_color(theme::text())
+                    .hover(|s| s.bg(theme::raised()))
                     .on_click(|_, _, _| {
                         let folder = warp_station_core::paths::AppPaths::user_data_root();
                         let _ = std::fs::create_dir_all(&folder);
@@ -596,7 +596,7 @@ impl Render for SettingsPage {
                     .child(crate::ui::icon(
                         "icons/icon-folder.svg",
                         px(theme::icon_small()),
-                        theme::TEXT_DIM,
+                        theme::text_dim(),
                     ))
                     .child("Data folder"),
             )
@@ -828,7 +828,7 @@ impl SettingsPage {
                             .child(
                                 div()
                                     .text_size(px(theme::font_body()))
-                                    .text_color(theme::TEXT)
+                                    .text_color(theme::text())
                                     .child(template.title),
                             )
                             .when(customized, |row| {
@@ -837,8 +837,8 @@ impl SettingsPage {
                                         .id(SharedString::from(format!("template-customized-{id}")))
                                         .debug_selector(move || format!("template-customized-{id}"))
                                         .rounded_full()
-                                        .bg(theme::tint(theme::ACCENT))
-                                        .text_color(theme::BLUE_BRIGHT)
+                                        .bg(theme::tint(theme::accent()))
+                                        .text_color(theme::blue_bright())
                                         .text_size(px(theme::font_control()))
                                         .px_1p5()
                                         .child("customized"),
@@ -961,13 +961,13 @@ impl SettingsPage {
                     .child(
                         div()
                             .text_size(px(theme::font_body()))
-                            .text_color(theme::TEXT)
+                            .text_color(theme::text())
                             .child(title),
                     )
                     .child(
                         div()
                             .text_size(px(theme::font_meta()))
-                            .text_color(theme::TEXT_FAINT)
+                            .text_color(theme::text_faint())
                             .child(if self.template_editor_seeded {
                                 "re-read by every wand run"
                             } else {
@@ -1008,7 +1008,7 @@ impl SettingsPage {
                     .h(px(320.))
                     .rounded_md()
                     .border_1()
-                    .border_color(theme::HAIRLINE)
+                    .border_color(theme::hairline())
                     .p_2()
                     .child(editor),
             )
@@ -1026,8 +1026,8 @@ impl SettingsPage {
             .w_full()
             .rounded_xl()
             .border_1()
-            .border_color(theme::HAIRLINE)
-            .bg(theme::CARD)
+            .border_color(theme::hairline())
+            .bg(theme::card())
             .p_4()
             .flex()
             .flex_col()
@@ -1049,12 +1049,12 @@ fn save_button(cx: &mut Context<SettingsPage>) -> gpui::AnyElement {
         .a11y_button("Save settings")
         .cursor_pointer()
         .rounded_md()
-        .bg(theme::ACCENT)
+        .bg(theme::accent())
         .px_4()
         .py_1p5()
         .text_size(px(theme::font_body()))
         .font_weight(FontWeight::SEMIBOLD)
-        .text_color(theme::ON_ACCENT)
+        .text_color(theme::on_accent())
         .hover(|s| s.opacity(0.9))
         .on_click(cx.listener(|this, _, _, cx| this.save(cx)))
         .child("Save")
@@ -1064,7 +1064,7 @@ fn save_button(cx: &mut Context<SettingsPage>) -> gpui::AnyElement {
 fn label(text: &str) -> impl IntoElement + use<> {
     div()
         .text_size(px(theme::font_body()))
-        .text_color(theme::TEXT_MUTED)
+        .text_color(theme::text_muted())
         .child(text.to_string())
 }
 
@@ -1087,7 +1087,7 @@ fn template_action_button(
         .border_color(if armed {
             theme::DANGER
         } else {
-            theme::HAIRLINE
+            theme::hairline()
         })
         .px_2()
         .py_0p5()
@@ -1095,9 +1095,9 @@ fn template_action_button(
         .text_color(if armed {
             theme::DANGER
         } else {
-            theme::TEXT_DIM
+            theme::text_dim()
         })
-        .hover(|s| s.bg(theme::HOVER_BG))
+        .hover(|s| s.bg(theme::hover_bg()))
         .on_click(on_click)
         .child(text.to_string())
         .into_any_element()
@@ -1110,11 +1110,11 @@ fn placeholder_chips(placeholders: &[&'static str]) -> impl IntoElement + use<> 
         row = row.child(
             div()
                 .rounded_md()
-                .bg(theme::CHIP)
+                .bg(theme::chip())
                 .px_1p5()
                 .py_0p5()
                 .text_size(px(theme::font_control()))
-                .text_color(theme::TEXT_MUTED)
+                .text_color(theme::text_muted())
                 .font_family(SharedString::from(theme::code_font()))
                 .child(placeholder.to_string()),
         );
@@ -1184,7 +1184,7 @@ fn fixed_row(label_text: &str, value: &str) -> gpui::AnyElement {
         .child(
             div()
                 .text_size(px(theme::font_control()))
-                .text_color(theme::TEXT_DIM)
+                .text_color(theme::text_dim())
                 .child(value.to_string()),
         )
         .into_any_element()
@@ -1229,12 +1229,12 @@ fn group_depth_row(this: &SettingsPage, cx: &mut Context<SettingsPage>) -> gpui:
                 .text_size(px(theme::font_body()))
                 .font_weight(FontWeight::SEMIBOLD)
                 .when(selected, |d| {
-                    d.bg(theme::tint(theme::ACCENT))
-                        .text_color(theme::BLUE_BRIGHT)
+                    d.bg(theme::tint(theme::accent()))
+                        .text_color(theme::blue_bright())
                 })
                 .when(!selected, |d| {
-                    d.text_color(theme::TEXT_MUTED)
-                        .hover(|s| s.bg(theme::HOVER_BG))
+                    d.text_color(theme::text_muted())
+                        .hover(|s| s.bg(theme::hover_bg()))
                 })
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.group_depth = level;
@@ -1276,12 +1276,12 @@ fn auto_fetch_row(this: &SettingsPage, cx: &mut Context<SettingsPage>) -> gpui::
                 .text_size(px(theme::font_body()))
                 .font_weight(FontWeight::SEMIBOLD)
                 .when(selected, |d| {
-                    d.bg(theme::tint(theme::ACCENT))
-                        .text_color(theme::BLUE_BRIGHT)
+                    d.bg(theme::tint(theme::accent()))
+                        .text_color(theme::blue_bright())
                 })
                 .when(!selected, |d| {
-                    d.text_color(theme::TEXT_MUTED)
-                        .hover(|s| s.bg(theme::HOVER_BG))
+                    d.text_color(theme::text_muted())
+                        .hover(|s| s.bg(theme::hover_bg()))
                 })
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.auto_fetch_minutes = value;
@@ -1335,14 +1335,14 @@ impl SettingsPage {
                 div()
                     .size(px(11.))
                     .rounded_full()
-                    .bg(theme::ACCENT)
+                    .bg(theme::accent())
                     .into_any_element()
             } else {
                 div()
                     .size(px(11.))
                     .rounded_full()
                     .border_1()
-                    .border_color(theme::TEXT_MUTED)
+                    .border_color(theme::text_muted())
                     .into_any_element()
             };
             let click_id = id.clone();
@@ -1364,7 +1364,7 @@ impl SettingsPage {
                     .child(
                         div()
                             .text_size(px(theme::font_body()))
-                            .text_color(theme::TEXT)
+                            .text_color(theme::text())
                             .child(display),
                     ),
             );
@@ -1402,8 +1402,10 @@ fn picker_spec(
         stop_trigger_mousedown: false,
         visible_rows: 10,
         selected_accent: false,
-        overlay: false,
-        anchor: OverlayAnchor::Rail,
+        // a settings slot floats: the list is taller than the card and must
+        // cover the rows under it, not stretch the form around itself
+        overlay: true,
+        anchor: OverlayAnchor::Field,
         trigger_scale: TriggerScale::Compact,
         trigger_rounded_lg: false,
         trigger_min_h: None,
@@ -1587,7 +1589,7 @@ fn model_data(
         },
         footer: None,
         fonts: theme::active_tokens(),
-        accent: theme::BLUE_BRIGHT,
+        accent: theme::blue_bright(),
         show_tooltips: store.read(cx).settings().general.show_tooltips,
     }
 }
@@ -1663,7 +1665,7 @@ fn variant_data(
         },
         footer: None,
         fonts: theme::active_tokens(),
-        accent: theme::BLUE_BRIGHT,
+        accent: theme::blue_bright(),
         show_tooltips: store.read(cx).settings().general.show_tooltips,
     }
 }

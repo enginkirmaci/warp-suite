@@ -145,8 +145,8 @@ impl Render for MainWindow {
             .size_full()
             .flex()
             .flex_col()
-            .bg(theme::BACKGROUND)
-            .text_color(theme::TEXT)
+            .bg(theme::background())
+            .text_color(theme::text())
             .font_family(theme::ui_font())
             .track_focus(&self.focus_handle)
             // any press outside the page's menus dismisses them; the menus
@@ -311,7 +311,7 @@ impl MainWindow {
                 crate::store::NoticeKind::Success => {
                     ("icons/icon-check.svg", theme::SUCCESS_BRIGHT)
                 }
-                crate::store::NoticeKind::Info => ("icons/icon-info.svg", theme::BLUE_BRIGHT),
+                crate::store::NoticeKind::Info => ("icons/icon-info.svg", theme::blue_bright()),
                 crate::store::NoticeKind::Error => ("icons/icon-alert.svg", theme::DANGER),
             };
             let id = notice.id;
@@ -334,9 +334,9 @@ impl MainWindow {
                     .border_color(if notice.kind == crate::store::NoticeKind::Error {
                         theme::tint(theme::DANGER)
                     } else {
-                        gpui::Hsla::from(theme::HAIRLINE)
+                        gpui::Hsla::from(theme::hairline())
                     })
-                    .bg(theme::POPUP)
+                    .bg(theme::popup())
                     .shadow_lg()
                     .p_2p5()
                     .child(icon(glyph, px(theme::icon_small()), color))
@@ -345,9 +345,9 @@ impl MainWindow {
                             .min_w_0()
                             .text_size(px(theme::font_body()))
                             .text_color(if notice.kind == crate::store::NoticeKind::Error {
-                                theme::TEXT
+                                theme::text()
                             } else {
-                                theme::TEXT_DIM
+                                theme::text_dim()
                             })
                             .child(notice.text.clone()),
                     )
@@ -360,7 +360,7 @@ impl MainWindow {
                             .flex_shrink_0()
                             .rounded_md()
                             .p_0p5()
-                            .hover(|s| s.bg(theme::HOVER_BG))
+                            .hover(|s| s.bg(theme::hover_bg()))
                             .on_click(move |_, _, cx| {
                                 cx.stop_propagation();
                                 store.update(cx, |s, cx| s.dismiss_notice(id, cx));
@@ -368,7 +368,7 @@ impl MainWindow {
                             .child(icon(
                                 "icons/icon-close.svg",
                                 px(theme::icon_small() - 4.),
-                                theme::TEXT_FAINT,
+                                theme::text_faint(),
                             )),
                     ),
             ));
@@ -466,12 +466,12 @@ impl MainWindow {
                     .occlude()
                     .rounded_lg()
                     .border_1()
-                    .border_color(theme::HAIRLINE)
-                    .bg(theme::POPUP)
+                    .border_color(theme::hairline())
+                    .bg(theme::popup())
                     .shadow_lg()
                     .p_2()
                     .text_size(px(theme::font_body()))
-                    .text_color(theme::TEXT_FAINT)
+                    .text_color(theme::text_faint())
                     .child(if pending || code_searching {
                         "Searching…"
                     } else {
@@ -508,8 +508,8 @@ impl MainWindow {
                         index,
                         "search-hit",
                         "icons/icon-folder.svg",
-                        marked_text(name, &query, theme::TEXT_DIM, false),
-                        marked_text(folder, &query, theme::TEXT_FAINT, true),
+                        marked_text(name, &query, theme::text_dim(), false),
+                        marked_text(folder, &query, theme::text_faint(), true),
                     )
                     .on_click(cx.listener(move |this, _, window, cx| {
                         this.activate_search_hit(&hit_for_click, window, cx);
@@ -538,8 +538,8 @@ impl MainWindow {
                         index,
                         "search-note",
                         "icons/icon-note.svg",
-                        marked_text(title, &query, theme::TEXT_DIM, false),
-                        marked_text(excerpt, &query, theme::TEXT_FAINT, false),
+                        marked_text(title, &query, theme::text_dim(), false),
+                        marked_text(excerpt, &query, theme::text_faint(), false),
                     )
                     .on_click(cx.listener(move |this, _, window, cx| {
                         this.activate_search_hit(&hit_for_click, window, cx);
@@ -589,14 +589,14 @@ impl MainWindow {
                     .items_start()
                     .gap_2()
                     .overflow_hidden()
-                    .hover(|s| s.bg(theme::HOVER_BG))
+                    .hover(|s| s.bg(theme::hover_bg()))
                     .on_click(cx.listener(move |this, _, window, cx| {
                         this.activate_code_hit(hit_for_click.clone(), window, cx);
                     }))
                     .child(icon(
                         "icons/icon-code.svg",
                         px(theme::icon_small()),
-                        theme::TEXT_MUTED,
+                        theme::text_muted(),
                     ))
                     .child(
                         div()
@@ -614,14 +614,14 @@ impl MainWindow {
                                     .child(
                                         div()
                                             .text_size(px(theme::font_body()))
-                                            .text_color(theme::TEXT_DIM)
+                                            .text_color(theme::text_dim())
                                             .child(file_name),
                                     )
                                     .when(!dir.is_empty(), |title| {
                                         title.child(
                                             div()
                                                 .text_size(px(theme::font_control()))
-                                                .text_color(theme::TEXT_FAINT)
+                                                .text_color(theme::text_faint())
                                                 .child(dir),
                                         )
                                     }),
@@ -636,15 +636,15 @@ impl MainWindow {
                                     .overflow_hidden()
                                     .whitespace_nowrap()
                                     .text_size(px(theme::font_control()))
-                                    .child(div().text_color(theme::TEXT_FAINT).child(before))
+                                    .child(div().text_color(theme::text_faint()).child(before))
                                     .child(
                                         div()
                                             .rounded(px(2.))
-                                            .bg(theme::ACCENT_SOFT)
-                                            .text_color(theme::ACCENT_INK)
+                                            .bg(theme::accent_soft())
+                                            .text_color(theme::accent_ink())
                                             .child(matched),
                                     )
-                                    .child(div().text_color(theme::TEXT_FAINT).child(after)),
+                                    .child(div().text_color(theme::text_faint()).child(after)),
                             ),
                     )
                     .child(
@@ -652,7 +652,7 @@ impl MainWindow {
                             .flex_shrink_0()
                             .ml_auto()
                             .text_size(px(theme::font_control()))
-                            .text_color(theme::TEXT_FAINT)
+                            .text_color(theme::text_faint())
                             .child(format!(":{}", hit.line)),
                     ),
             );
@@ -667,8 +667,8 @@ impl MainWindow {
             .occlude()
             .rounded_lg()
             .border_1()
-            .border_color(theme::HAIRLINE)
-            .bg(theme::POPUP)
+            .border_color(theme::hairline())
+            .bg(theme::popup())
             .shadow_lg()
             .p_1()
             .child(rows);
@@ -679,7 +679,7 @@ impl MainWindow {
                     .px_2()
                     .py_1()
                     .text_size(px(theme::font_control()))
-                    .text_color(theme::TEXT_FAINT)
+                    .text_color(theme::text_faint())
                     .child("searching code…"),
             );
         }
@@ -767,7 +767,7 @@ fn search_group(title: &'static str) -> gpui::AnyElement {
         .pb_1()
         .text_size(px(theme::font_control()))
         .font_weight(FontWeight::SEMIBOLD)
-        .text_color(theme::TEXT_DIM)
+        .text_color(theme::text_dim())
         .child(title)
         .into_any_element()
 }
@@ -792,8 +792,12 @@ fn search_hit_row(
         .items_start()
         .gap_2()
         .overflow_hidden()
-        .hover(|s| s.bg(theme::HOVER_BG))
-        .child(icon(icon_path, px(theme::icon_small()), theme::TEXT_MUTED))
+        .hover(|s| s.bg(theme::hover_bg()))
+        .child(icon(
+            icon_path,
+            px(theme::icon_small()),
+            theme::text_muted(),
+        ))
         .child(
             div()
                 .min_w_0()
@@ -842,8 +846,8 @@ fn marked_text(text: &str, query: &str, ink: gpui::Rgba, mono: bool) -> gpui::An
                 .child(
                     div()
                         .rounded(px(2.))
-                        .bg(theme::ACCENT_SOFT)
-                        .text_color(theme::ACCENT_INK)
+                        .bg(theme::accent_soft())
+                        .text_color(theme::accent_ink())
                         .child(text[at..at + needle.len()].to_string()),
                 )
                 .child(
@@ -888,7 +892,11 @@ pub(crate) fn window_button(
         .when(show_tooltip, |d| {
             d.tooltip(crate::ui::tooltip_text(tooltip))
         })
-        .child(icon(icon_path, px(theme::icon_medium()), theme::TEXT_MUTED))
+        .child(icon(
+            icon_path,
+            px(theme::icon_medium()),
+            theme::text_muted(),
+        ))
 }
 
 /// A title bar icon button: a control island inside the drag region.
@@ -912,11 +920,11 @@ fn title_icon(
         .flex()
         .items_center()
         .justify_center()
-        .hover(|d| d.bg(theme::RAISED))
+        .hover(|d| d.bg(theme::raised()))
         .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
         .on_click(on_click)
         .when(show_tooltip, |d| d.tooltip(crate::ui::tooltip_text(label)))
-        .child(icon(icon_path, px(theme::icon_medium()), theme::TEXT_DIM))
+        .child(icon(icon_path, px(theme::icon_medium()), theme::text_dim()))
 }
 
 impl MainWindow {
@@ -944,7 +952,7 @@ impl MainWindow {
                         .h(px(28.))
                         .px_2p5()
                         .rounded(px(14.))
-                        .bg(theme::PANEL)
+                        .bg(theme::panel())
                         .flex()
                         .items_center()
                         .gap(px(7.))
@@ -993,7 +1001,7 @@ impl MainWindow {
                     }),
                 ))
             })
-            .child(div().mx_1().h(px(20.)).w(px(1.)).bg(theme::HAIRLINE))
+            .child(div().mx_1().h(px(20.)).w(px(1.)).bg(theme::hairline()))
             .child(
                 // box to box: the row's gap belongs to the buttons before them
                 div()
@@ -1003,7 +1011,7 @@ impl MainWindow {
                     .child(window_button(
                         "minimize-window",
                         "icons/icon-window-minimize.svg",
-                        theme::HOVER_BG.into(),
+                        theme::hover_bg().into(),
                         "Minimize",
                         show_tooltips,
                         |_, window, _| window.minimize_window(),
@@ -1015,7 +1023,7 @@ impl MainWindow {
                         } else {
                             "icons/icon-window-maximize.svg"
                         },
-                        theme::HOVER_BG.into(),
+                        theme::hover_bg().into(),
                         if window.is_maximized() {
                             "Restore"
                         } else {
@@ -1045,9 +1053,9 @@ impl MainWindow {
             .items_center()
             .gap_2()
             .pl(px(14.))
-            .bg(theme::TOPBAR_BG)
+            .bg(theme::topbar_bg())
             .border_b_1()
-            .border_color(theme::HAIRLINE)
+            .border_color(theme::hairline())
             .debug_selector(|| "titlebar-drag".into())
             // the whole bar drags, not just the strips beside the search:
             // Windows turns this hitbox into HTCAPTION, and the buttons and
@@ -1099,18 +1107,18 @@ impl MainWindow {
                             .justify_center()
                             .size(px(28.))
                             .rounded(px(6.))
-                            .bg(theme::ACCENT_SOFT)
+                            .bg(theme::accent_soft())
                             .child(icon(
                                 "icons/icon-code.svg",
                                 px(theme::icon_small()),
-                                theme::ACCENT_INK,
+                                theme::accent_ink(),
                             )),
                     )
                     .child(
                         div()
                             .text_size(px(theme::font_brand()))
                             .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(theme::TEXT)
+                            .text_color(theme::text())
                             .whitespace_nowrap()
                             .child("Warp Station"),
                     ),
@@ -1132,19 +1140,19 @@ impl MainWindow {
                             .prefix(icon(
                                 "icons/icon-search.svg",
                                 px(theme::icon_small()),
-                                theme::TEXT_MUTED,
+                                theme::text_muted(),
                             ))
                             .suffix(
                                 div()
                                     .flex_shrink_0()
                                     .rounded(px(4.))
                                     .border_1()
-                                    .border_color(theme::LINE_STRONG)
+                                    .border_color(theme::line_strong())
                                     .mx_1()
                                     .px_1p5()
                                     .font_family(theme::code_font())
                                     .text_size(px(theme::font_micro()))
-                                    .text_color(theme::TEXT_DIM)
+                                    .text_color(theme::text_dim())
                                     .child("Ctrl K"),
                             ),
                     ),
@@ -1199,13 +1207,13 @@ impl MainWindow {
                             .h(px(16.))
                             .px_1()
                             .rounded(px(8.))
-                            .bg(theme::ACCENT)
+                            .bg(theme::accent())
                             .flex()
                             .items_center()
                             .justify_center()
                             .text_size(px(theme::font_micro()))
                             .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(theme::ON_ACCENT)
+                            .text_color(theme::on_accent())
                             .child(format!("{attention}")),
                     )
                 }),
@@ -1319,14 +1327,14 @@ impl MainWindow {
                         div()
                             .text_size(px(theme::font_name()))
                             .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(theme::TEXT)
+                            .text_color(theme::text())
                             .child(label),
                     )
                     .child(
                         div()
                             .mt_0p5()
                             .text_size(px(theme::font_row_meta()))
-                            .text_color(theme::TEXT_DIM)
+                            .text_color(theme::text_dim())
                             .child(hint),
                     ),
             );
@@ -1339,10 +1347,10 @@ impl MainWindow {
                     .pt_3p5()
                     .pb_3()
                     .border_b_1()
-                    .border_color(theme::HAIRLINE)
+                    .border_color(theme::hairline())
                     .text_size(px(theme::font_list_title()))
                     .font_weight(FontWeight::SEMIBOLD)
-                    .text_color(theme::TEXT)
+                    .text_color(theme::text())
                     .child(SharedString::from("Tools")),
             )
             .child(rows);

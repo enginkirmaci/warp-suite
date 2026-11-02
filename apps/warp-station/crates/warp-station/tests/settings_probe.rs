@@ -192,15 +192,13 @@ fn filtered_picker_filters_and_dismisses(cx: &mut TestAppContext) {
         wcx.debug_bounds("model-row-opencode/model-199").is_none(),
         "the virtualized list still only lays out visible rows"
     );
-    wcx.simulate_click(
-        gpui::Point {
-            x: gpui::px(10.),
-            y: gpui::px(10.),
-        },
-        gpui::Modifiers::default(),
+    // The floating picker covers the window with a catcher, so "outside"
+    // means a press on that catcher rather than a stray coordinate.
+    assert!(
+        wcx.debug_bounds("field-catcher").is_some(),
+        "the floating picker lays a catcher over the form"
     );
-    wcx.run_until_parked();
-    wcx.update(|window, cx| drop(window.draw(cx)));
+    click(&mut wcx, "field-catcher");
     assert!(
         wcx.debug_bounds("model-panel-Model").is_none(),
         "an outside click dismisses the picker"

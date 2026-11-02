@@ -62,18 +62,22 @@ fn read_text_size(file: &Path) -> Option<&'static str> {
 
 /// Keeps whatever else the file holds. Goes through a rename: another app
 /// starting right now must never read it half-written.
-fn write_text_size(file: &Path, size: &str) -> std::io::Result<()> {
+fn write_setting(file: &Path, key: &str, value: &str) -> std::io::Result<()> {
     let mut doc: serde_json::Map<String, serde_json::Value> = fs::read_to_string(file)
         .ok()
         .and_then(|text| serde_json::from_str(&text).ok())
         .unwrap_or_default();
-    doc.insert(TEXT_SIZE_KEY.to_string(), size.into());
+    doc.insert(key.to_string(), value.into());
     if let Some(dir) = file.parent() {
         fs::create_dir_all(dir)?;
     }
     let scratch = file.with_extension(format!("json.{}", std::process::id()));
     fs::write(&scratch, serde_json::to_string_pretty(&doc)?)?;
     fs::rename(&scratch, file)
+}
+
+fn write_text_size(file: &Path, size: &str) -> std::io::Result<()> {
+    write_setting(file, TEXT_SIZE_KEY, size)
 }
 
 fn adopt_from(file: Option<&Path>, legacy: Option<&str>) {
@@ -467,4 +471,126 @@ mod tests {
 
         fonts::set_font_scale(None);
     }
+}
+
+// ---- the shared palette ----------------------------------------------------
+
+const PALETTE_KEY: &str = "palette";
+
+fn read_palette(file: &Path) -> Option<&'static str> {
+    let text = fs::read_to_string(file).ok()?;
+    let doc: serde_json::Value = serde_json::from_str(&text).ok()?;
+    let key = doc.get(PALETTE_KEY)?.as_str()?;
+    Some(palette::normalize_ramp(Some(key)).key)
+}
+
+/// Settles the palette at startup from the shared file; call before the first
+/// kit theme, so the first frame already draws in it. `legacy` seeds the file
+/// on the first run and is ignored afterwards.
+pub fn adopt_palette(legacy: Option<&str>) {
+    let Some(file) = shared_file() else {
+        if let Some(legacy) = legacy {
+            palette::set_ramp(legacy);
+        }
+        return;
+    };
+    let saved = read_palette(&file);
+    let key = saved.or_else(|| legacy.map(|k| palette::normalize_ramp(Some(k)).key));
+    if let (None, Some(key)) = (saved, key)
+        && let Err(err) = write_setting(&file, PALETTE_KEY, key)
+    {
+        tracing::warn!("could not save the palette to {}: {err}", file.display());
+    }
+    if let Some(key) = key {
+        palette::set_ramp(key);
+    }
+}
+
+/// Switches the palette: this app repaints on its next frame, the others read
+/// the value when they next start. The caller re-runs its kit theme, because
+/// the kit's own tokens are derived from the palette too.
+pub fn set_palette(key: &str, cx: &mut App) {
+    let ramp = palette::set_ramp(key);
+    if let Some(file) = shared_file()
+        && let Err(err) = write_setting(&file, PALETTE_KEY, ramp.key)
+    {
+        tracing::warn!("could not save the palette to {}: {err}", file.display());
+    }
+    // the kit's own tokens (input ring, primary, selection) derive from the
+    // palette, so the app re-runs its kit theme through this hook
+    if let Some(host) = PALETTE_HOST.with(|slot| slot.borrow().clone()) {
+        host(cx);
+    }
+}
+
+thread_local! {
+    /// The app's kit-theme re-run, installed by [`follow_palette`].
+    static PALETTE_HOST: std::cell::RefCell<Option<std::rc::Rc<dyn Fn(&mut App)>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Hooks the app up to palette switches: `on_change` re-runs the kit theme and
+/// repaints. Call once at startup, next to `follow_ui_scale`.
+pub fn follow_palette(on_change: impl Fn(&mut App) + 'static) {
+    PALETTE_HOST.with(|slot| *slot.borrow_mut() = Some(std::rc::Rc::new(on_change)));
+}
+
+/// The palette the settings control shows as selected.
+pub fn palette_key() -> &'static str {
+    palette::current_ramp().key
+}
+
+/// The palette picker: one segment per palette, a click applies at once, so a
+/// settings page needs no save path for it. The caller passes the click's app
+/// context through, because a switch re-runs the kit theme.
+pub fn palette_control() -> impl IntoElement {
+    let current = palette_key();
+    let mut trough = div()
+        .flex()
+        .flex_row()
+        .items_center()
+        .gap_0p5()
+        .h(px(34.))
+        .p(px(3.))
+        .rounded(px(8.))
+        .border_1()
+        .border_color(palette::current_ramp().line)
+        .bg(palette::current_ramp().well);
+    for ramp in &palette::RAMPS {
+        let active = ramp.key == current;
+        let id = format!("palette-{}", ramp.key);
+        let selector = id.clone();
+        let key = ramp.key;
+        trough = trough.child(
+            div()
+                .id(SharedString::from(id))
+                .debug_selector(move || selector.clone())
+                .a11y_toggle(format!("Palette {}", ramp.label), active)
+                .cursor_pointer()
+                .h(px(28.))
+                .px(px(12.))
+                .flex()
+                .items_center()
+                .gap(px(6.))
+                .rounded(px(6.))
+                .text_size(px(fonts::font_row_meta()))
+                .font_weight(FontWeight::MEDIUM)
+                .when(active, |d| {
+                    d.bg(ramp.raised).text_color(ramp.text)
+                })
+                .when(!active, |d| {
+                    d.text_color(palette::current_ramp().text_muted)
+                        .hover(|s| s.text_color(palette::current_ramp().text))
+                })
+                .child(
+                    div()
+                        .size(px(10.))
+                        .rounded_full()
+                        .bg(ramp.accent),
+                )
+                .on_click(move |_, _, cx| set_palette(key, cx))
+                .child(ramp.label),
+        );
+    }
+    trough
 }

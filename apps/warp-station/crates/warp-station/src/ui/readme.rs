@@ -72,11 +72,11 @@ impl Render for ReadmeView {
             .px_4()
             .py_2()
             .border_b_1()
-            .border_color(theme::BORDER_LIGHT)
+            .border_color(theme::border_light())
             .child(
                 div()
                     .text_size(px(theme::font_body()))
-                    .text_color(theme::TEXT_MUTED)
+                    .text_color(theme::text_muted())
                     .child(if has_draft {
                         "README.md (unsaved)"
                     } else {
@@ -99,10 +99,10 @@ impl Render for ReadmeView {
                         .items_center()
                         .gap_1()
                         .text_size(px(theme::font_body()))
-                        .text_color(theme::TEXT_DIM)
+                        .text_color(theme::text_dim())
                         .border_1()
-                        .border_color(theme::HAIRLINE)
-                        .hover(|s| s.bg(theme::HOVER_BG))
+                        .border_color(theme::hairline())
+                        .hover(|s| s.bg(theme::hover_bg()))
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.store.update(cx, |s: &mut Store, cx| {
                                 s.readme_draft = None;
@@ -112,7 +112,7 @@ impl Render for ReadmeView {
                         .child(icon(
                             "icons/icon-undo.svg",
                             px(theme::icon_small() - 1.),
-                            theme::TEXT_DIM,
+                            theme::text_dim(),
                         ))
                         .child("Discard"),
                 )
@@ -130,8 +130,8 @@ impl Render for ReadmeView {
                         .gap_1()
                         .text_size(px(theme::font_body()))
                         .font_weight(FontWeight::SEMIBOLD)
-                        .bg(theme::ACCENT)
-                        .text_color(theme::ON_ACCENT)
+                        .bg(theme::accent())
+                        .text_color(theme::on_accent())
                         .hover(|s| s.opacity(0.9))
                         .on_click(cx.listener(move |this, _, _, cx| {
                             let Some(folder) = folder_save.clone() else {
@@ -161,7 +161,7 @@ impl Render for ReadmeView {
                         .child(icon(
                             "icons/icon-save.svg",
                             px(theme::icon_small() - 1.),
-                            theme::ON_ACCENT,
+                            theme::on_accent(),
                         ))
                         .child("Save README"),
                 )
@@ -177,14 +177,14 @@ impl Render for ReadmeView {
                         .p_1()
                         .flex()
                         .items_center()
-                        .hover(|s| s.bg(theme::HOVER_BG))
+                        .hover(|s| s.bg(theme::hover_bg()))
                         .on_click(move |_, _, cx| {
                             store.update(cx, |s, cx| s.run_wand(WandKind::Readme, cx));
                         })
                         .child(icon(
                             "icons/icon-wand.svg",
                             px(theme::icon_small()),
-                            theme::TEXT_MUTED,
+                            theme::text_muted(),
                         ))
                 })
             })
@@ -192,7 +192,7 @@ impl Render for ReadmeView {
                 row.child(div().rounded_md().p_1().flex().items_center().child(icon(
                     "icons/icon-wand.svg",
                     px(theme::icon_small()),
-                    theme::BLUE_BRIGHT,
+                    theme::blue_bright(),
                 )))
             });
 
@@ -226,19 +226,19 @@ impl Render for ReadmeView {
                         .child(icon(
                             "icons/icon-note.svg",
                             px(theme::icon_large() + 10.),
-                            theme::TEXT_FAINT,
+                            theme::text_faint(),
                         ))
                         .child(
                             div()
                                 .text_size(px(theme::font_heading()))
                                 .font_weight(FontWeight::SEMIBOLD)
-                                .text_color(theme::TEXT_DIM)
+                                .text_color(theme::text_dim())
                                 .child("No README yet"),
                         )
                         .child(
                             div()
                                 .text_size(px(theme::font_body()))
-                                .text_color(theme::TEXT_FAINT)
+                                .text_color(theme::text_faint())
                                 .child("Create a README.md in the repository root to see it here."),
                         )
                         .when(ai_available && !wand_active, |column| {
@@ -249,7 +249,7 @@ impl Render for ReadmeView {
                                     .cursor_pointer()
                                     .rounded_md()
                                     .border_1()
-                                    .border_color(theme::ACCENT)
+                                    .border_color(theme::accent())
                                     .px_3()
                                     .py_1p5()
                                     .flex()
@@ -257,8 +257,8 @@ impl Render for ReadmeView {
                                     .items_center()
                                     .gap_1p5()
                                     .text_size(px(theme::font_body()))
-                                    .text_color(theme::BLUE_BRIGHT)
-                                    .hover(|s| s.bg(theme::tint(theme::ACCENT)))
+                                    .text_color(theme::blue_bright())
+                                    .hover(|s| s.bg(theme::tint(theme::accent())))
                                     .on_click(move |_, _, cx| {
                                         store_for_empty
                                             .update(cx, |s, cx| s.run_wand(WandKind::Readme, cx));
@@ -266,7 +266,7 @@ impl Render for ReadmeView {
                                     .child(icon(
                                         "icons/icon-wand.svg",
                                         px(theme::icon_small()),
-                                        theme::BLUE_BRIGHT,
+                                        theme::blue_bright(),
                                     ))
                                     .child("Draft with OpenCode"),
                             )

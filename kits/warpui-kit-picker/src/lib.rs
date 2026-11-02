@@ -25,16 +25,23 @@
 
 use gpui::prelude::*;
 use gpui::{
-    App, Context, Entity, FontWeight, MouseButton, SharedString, Window, div, px, uniform_list,
+    App, Bounds, Context, Entity, FontWeight, MouseButton, Pixels, SharedString, Window, anchored,
+    deferred, div, px, uniform_list,
 };
+use gpui_kit::base::ElementExt as _;
 use gpui_kit::component::Sizable as _;
 use gpui_kit::component::input::{Input, InputState};
+use std::cell::Cell;
+use std::rc::Rc;
 use warpui_kit_core::palette;
 use warpui_kit_core::{A11y as _, FontTokens};
 
 const ROW_HEIGHT: f32 = 28.;
 /// Composer-overlay card width.
 const OVERLAY_WIDTH: f32 = 280.;
+/// The floating field panel's narrowest width: enough for a long model name
+/// beside its provider group header.
+const FIELD_PANEL_MIN_WIDTH: f32 = 260.;
 
 // ---- data model ------------------------------------------------------------
 
@@ -181,6 +188,11 @@ pub enum OverlayAnchor {
     Rail,
     /// Self-rendered catcher with the card anchored to the composer's corner.
     Composer,
+    /// A settings slot: the trigger stays in the form, the panel floats in the
+    /// window layer below it, so a long list covers the rows underneath
+    /// instead of pushing them down. The panel measures the trigger, so a slot
+    /// of any height opens at its own edge.
+    Field,
 }
 
 /// The look, layout and id choices a picker instance is built with.
@@ -230,6 +242,10 @@ pub struct FilteredPicker {
     on_trailing: Option<TrailingFn>,
     filter: Entity<InputState>,
     open: bool,
+    /// The field slot's trigger bounds, written from prepaint and read when
+    /// the floating panel opens. It lives on the entity because a fresh
+    /// `Cell` per render would always be empty.
+    trigger_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
     _subscriptions: Vec<gpui::Subscription>,
 }
 
@@ -253,6 +269,7 @@ impl FilteredPicker {
             on_trailing: None,
             filter,
             open,
+            trigger_bounds: Rc::new(Cell::new(None)),
             _subscriptions: vec![sub_filter],
         }
     }
@@ -774,12 +791,20 @@ impl FilteredPicker {
             .bg(palette::POPUP)
             .flex()
             .flex_col();
-        if self.spec.overlay && self.spec.anchor == OverlayAnchor::Rail {
+        if self.spec.overlay
+            && matches!(self.spec.anchor, OverlayAnchor::Rail | OverlayAnchor::Field)
+        {
             panel = panel
                 // presses inside the popup (filter field, scrollbar, rows)
                 // must not reach the window's outside-click dismissal
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                 .occlude();
+        }
+        if self.spec.overlay && self.spec.anchor == OverlayAnchor::Field {
+            // a floating panel has no parent to inherit width from: it takes
+            // the trigger's measured width and a floor, so a narrow settings
+            // slot still fits the model names
+            panel = panel.min_w(px(FIELD_PANEL_MIN_WIDTH));
         }
         if !self.spec.overlay {
             // the settings-slot popup spans the slot's width
@@ -871,8 +896,78 @@ impl Render for FilteredPicker {
 
         let data = self.read_data(window, cx);
 
-        // Field and rail modes: the trigger; the popup is an in-flow child
-        // below the trigger (field) or host-mounted via overlay_popup (rail).
+        // Field mode floats: the trigger stays in the form, the panel rides the
+        // window layer just under it. The trigger reports its own bounds from
+        // prepaint, so the panel opens at that slot's edge whatever its height,
+        // and a 300px list covers the rows below instead of stretching the
+        // card around them.
+        if self.spec.overlay && self.spec.anchor == OverlayAnchor::Field {
+            let trigger_row = self.build_trigger_row(&data, cx);
+            let measured = self.trigger_bounds.clone();
+            let field = div()
+                .id(SharedString::from(self.root_id()))
+                .relative()
+                .w_full()
+                .child(
+                    div()
+                        .id("field-trigger-bounds")
+                        .w_full()
+                        .on_prepaint(move |bounds, _, _| measured.set(Some(bounds)))
+                        .child(trigger_row),
+                );
+            if !self.open {
+                return field.into_any_element();
+            }
+            let panel = self.build_panel(data, cx).w_full();
+            // the panel hangs off the trigger's bottom edge: `bounds` are
+            // window coordinates from prepaint, and this is the same window
+            // the anchored layer positions in
+            let at = self
+                .trigger_bounds
+                .get()
+                .map(|b| gpui::point(b.origin.x, b.origin.y + b.size.height))
+                .unwrap_or_default();
+            // The catcher is the kit's own menu pattern: a window-sized layer
+            // in the popup priority band, with the card nested in a second
+            // anchored pass. A trigger-sized catcher never sees a click that
+            // lands elsewhere on the form, so the picker would stay open.
+            let window_size = window.bounds().size;
+            return field
+                .child(deferred(
+                    div()
+                        .id("field-catcher")
+                        .debug_selector(|| "field-catcher".into())
+                        .absolute()
+                        .top_0()
+                        .left_0()
+                        .w(window_size.width)
+                        .h(window_size.height)
+                        // geometric hitboxes: without this the form under the
+                        // panel keeps taking the click meant for a row
+                        .occlude()
+                        // click-elsewhere dismiss; the card is a child, so its
+                        // own presses stay above the catcher and keep working
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(|this, _, _, cx| {
+                                this.dismiss(cx);
+                            }),
+                        )
+                        .child(
+                            anchored()
+                                .position(at)
+                                .offset(gpui::point(px(0.), px(4.)))
+                                .snap_to_window_with_margin(px(8.))
+                                // a long list flips up rather than running off
+                                // the bottom of the settings card
+                                .child(panel),
+                        ),
+                ))
+                .into_any_element();
+        }
+
+        // Rail mode: the trigger; the popup is host-mounted via overlay_popup.
+        // In-flow mode (no overlay) keeps the panel under the trigger.
         let trigger_row = self.build_trigger_row(&data, cx);
         let popup = if !self.spec.overlay && self.open {
             Some(self.build_panel(data, cx))

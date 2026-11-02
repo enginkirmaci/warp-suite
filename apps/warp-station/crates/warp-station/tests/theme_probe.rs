@@ -14,10 +14,10 @@ fn palette_survives_the_mode_flip(cx: &mut TestAppContext) {
         use gpui_kit::component::{Theme, ThemeMode};
         let t = Theme::global(cx);
         assert_eq!(t.mode, ThemeMode::Dark);
-        assert_eq!(t.background, gpui::Hsla::from(theme::BACKGROUND));
-        assert_eq!(t.popover, gpui::Hsla::from(theme::POPUP));
-        assert_eq!(t.primary, gpui::Hsla::from(theme::ACCENT));
-        assert_eq!(t.link, gpui::Hsla::from(theme::BLUE_BRIGHT));
+        assert_eq!(t.background, gpui::Hsla::from(theme::background()));
+        assert_eq!(t.popover, gpui::Hsla::from(theme::popup()));
+        assert_eq!(t.primary, gpui::Hsla::from(theme::accent()));
+        assert_eq!(t.link, gpui::Hsla::from(theme::blue_bright()));
     });
 }
 
