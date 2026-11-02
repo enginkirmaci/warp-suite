@@ -59,6 +59,7 @@ Binaries go to `~/.local/bin`, desktop entries + hicolor icons to
 | `scripts/install-root.sh` | install an extracted bundle into `~/.local` |
 | `install.sh` | suite installer: download a release or build locally |
 | `.github/workflows/suite-release.yml` | the combined release pipeline |
+| `design/v3/` | the committed design contract (DESIGN.md + prototype source); the live source is the OpenDesign project `warp-suite-v3` |
 
 The suite never reimplements app builds: it checks out each repo at its pin
 and invokes what the repo already ships (`packaging/windows/build.ps1`, the

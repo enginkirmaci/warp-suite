@@ -35,7 +35,7 @@ warp-snapit app below).
 
 [apps.warp-agent]
 repo = "https://github.com/enginkirmaci/warp-agent.git"
-# main holds the Avalonia prototype; the GPUI app ships on `rust-gpui`
+# the Rust/GPUI app ships on `rust-gpui` (main is kept in step)
 ref = "rust-gpui"
 linux_build = ""
 icon_prefix = "warpagent"

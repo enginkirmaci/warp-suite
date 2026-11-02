@@ -1,0 +1,260 @@
+<!doctype html>
+<html lang="en" data-palette="copper" data-type="inter">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Warp Design System</title>
+<link rel="stylesheet" href="warp.css">
+<style>
+  body { background: var(--base); overflow-y: auto; }
+  .bar { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 10px 24px; background: var(--chrome); border-bottom: 1px solid var(--line); }
+  .bar .name { font-size: 15px; font-weight: 600; margin-right: auto; }
+  main { max-width: 1120px; margin: 0 auto; padding: 32px 24px 80px; }
+  section { padding: 28px 0; border-top: 1px solid var(--line); }
+  section:first-of-type { border-top: 0; padding-top: 0; }
+  h2.sec { font-size: 22px; line-height: 28px; font-weight: 600; margin-bottom: 6px; }
+  .lead { color: var(--text-2); max-width: 720px; margin-bottom: 18px; }
+  .hero { font-size: 32px; line-height: 40px; font-weight: 600; letter-spacing: -.015em; margin-bottom: 10px; }
+  .rules { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+  .rule { background: var(--panel); border: 1px solid var(--line); border-radius: var(--r-m); padding: 14px 16px; }
+  .swatches { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+  .sw { border: 1px solid var(--line); border-radius: var(--r-m); overflow: hidden; background: var(--panel); }
+  .sw i { display: block; height: 56px; border-bottom: 1px solid var(--line); }
+  .sw div { padding: 8px 10px; }
+  h3.sub { font-size: 16px; line-height: 22px; font-weight: 600; margin: 22px 0 10px; }
+  .lead code { font: 400 13px var(--mono); background: var(--well); padding: 1px 5px; border-radius: 4px; color: var(--text); }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th { text-align: left; font-weight: 600; font-size: 13px; color: var(--text-2); padding: 8px 12px 8px 0; border-bottom: 1px solid var(--line); }
+  td { padding: 10px 12px 10px 0; border-bottom: 1px solid var(--line-soft); vertical-align: baseline; }
+  .scroll { overflow-x: auto; }
+  .demo { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 16px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--r-m); }
+  .demo.col { flex-direction: column; align-items: stretch; }
+  .shelldia { display: grid; grid-template-columns: 60px 1fr 2.2fr; grid-template-rows: 34px 34px 170px; gap: 2px; background: var(--line); border: 1px solid var(--line); border-radius: var(--r-m); overflow: hidden; font-size: 13px; }
+  .shelldia > div { padding: 8px 10px; background: var(--panel); color: var(--text-2); }
+  .shelldia .tb { grid-column: 1 / -1; background: var(--chrome); }
+  .shelldia .rl { grid-row: 2 / 4; background: var(--chrome); }
+  .shelldia .ts { grid-column: 2 / -1; background: var(--chrome); }
+  .shelldia .ls { background: var(--base); }
+  .ba { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
+  .ba img { width: 100%; display: block; border-radius: var(--r-m); border: 1px solid var(--line); }
+  .ba figure { margin: 0; }
+  .ba figcaption { margin-top: 8px; font-size: 13px; color: var(--text-2); }
+  .row.demo-row { background: var(--base); border-radius: var(--r-s); }
+  @media (max-width: 640px) { main { padding: 20px 16px 60px; } .hero { font-size: 26px; line-height: 32px; } .bar { padding: 8px 16px; } }
+</style>
+</head>
+<body>
+<div class="bar">
+  <span class="name">Warp Design System · v3</span>
+  <div class="seg" id="pal"></div>
+  <div class="seg" id="typ"></div>
+  <a class="link" href="app.html">Open prototype</a>
+</div>
+<main>
+  <section>
+    <h1 class="hero">One shell, every screen, nothing under 12 px.</h1>
+    <p class="lead">The shared dark language for Warp Station, Warp Agent and Warp Notes. SnapIt has no window of its own and lives under Station, Tools. Every token below is live: switch the palette above and the page follows.</p>
+    <div class="rules">
+      <div class="rule"><div class="t-name">One shell</div><div class="t-meta">Rail, list, detail on every screen of every app.</div></div>
+      <div class="rule"><div class="t-name">One detail surface</div><div class="t-meta">Tabs replace panels. No inspector, no bottom sheet, no drawer.</div></div>
+      <div class="rule"><div class="t-name">Twelve is the floor</div><div class="t-meta">Body 14, names 15/600, titles 22/600. No caps labels.</div></div>
+      <div class="rule"><div class="t-name">Colour means something</div><div class="t-meta">Each entity keeps one hue. Healthy rows stay quiet.</div></div>
+      <div class="rule"><div class="t-name">One primary</div><div class="t-meta">One filled button per view, owned by the open tab.</div></div>
+    </div>
+  </section>
+
+  <section>
+    <h2 class="sec">The shell</h2>
+    <p class="lead">The list decides what you are looking at, the detail shows it. Rail 76 px, list 432 px by default and resizable from 320 to 560, title bar 46 px, tab strip 40 px. The detail takes the rest. A repository opened in a tab is the same detail pane at full width.</p>
+    <div class="shelldia">
+      <div class="tb">Title bar: app name, search, list toggle, window controls</div>
+      <div class="rl">Rail</div>
+      <div class="ts">Tab strip: Repositories, then one tab per opened repository</div>
+      <div class="ls">List: title, summary, filters, rows</div>
+      <div>Detail: title, subtitle, tab strip, content. Tabs own their toolbars and the one primary action.</div>
+    </div>
+    <h3 class="sub">Every app, same shape</h3>
+    <div class="scroll"><table>
+      <tr><th>App</th><th>Rail</th><th>List</th><th>Detail tabs</th></tr>
+      <tr><td class="t-name">Station</td><td>Repos, Summary, Tools, Settings</td><td>Repositories, written summaries, tools, sections</td><td>Overview, Changes, History, Pull requests, Issues, Pipelines, README</td></tr>
+      <tr><td class="t-name">Agent</td><td>Chats, Settings</td><td>The workspace tree</td><td>None: the tile grid fills the pane</td></tr>
+      <tr><td class="t-name">Notes</td><td>Notes, Settings</td><td>The note tree, or search results</td><td>None: one note in the editor</td></tr>
+    </table></div>
+  </section>
+
+  <section>
+    <h2 class="sec">Colour</h2>
+    <p class="lead">Lifted surfaces, separated by value. The darkest step is a recessed well, not the window. Contrast is measured live against the base surface.</p>
+    <h3 class="sub" style="margin-top:0">Surfaces</h3><div class="swatches" id="surfaces"></div>
+    <h3 class="sub">Text and accent</h3><div class="swatches" id="inks"></div>
+    <h3 class="sub">Entities</h3>
+    <p class="lead">Fixed across palettes and apps, always with an icon and a number or word.</p>
+    <div class="swatches" id="entities"></div>
+  </section>
+
+  <section>
+    <h2 class="sec">Type</h2>
+    <p class="lead">Inter for the interface, JetBrains Mono for code, paths and branches. Both have a tall x-height, which matters because GPUI draws grayscale text on Linux. Three weights only.</p>
+    <div class="scroll"><table id="types"></table></div>
+  </section>
+
+  <section>
+    <h2 class="sec">Components</h2>
+    <h3 class="sub" style="margin-top:0">Buttons</h3>
+    <div class="demo" id="d-btn"></div>
+    <h3 class="sub">Entity stats</h3>
+    <div class="demo" id="d-stat"></div>
+    <h3 class="sub">Filters, segmented, switch</h3>
+    <div class="demo">
+      <div class="filters"><button class="filter on">All<b>10</b></button><button class="filter">Needs attention<b>0</b></button><button class="filter">Favorites<b>2</b></button><button class="filter">Archive<b>8</b></button></div>
+      <div class="seg"><button class="on">Open 3</button><button>Closed</button></div>
+      <button class="switch on" role="switch" aria-checked="true" aria-label="On example"></button><button class="switch" role="switch" aria-checked="false" aria-label="Off example"></button>
+    </div>
+    <h3 class="sub">List rows</h3>
+    <div class="demo col" id="d-row"></div>
+    <h3 class="sub">Tiles (Agent)</h3>
+    <p class="lead">The Agent detail pane is a grid of tiles, not a page. Columns are the rounded-up square root of the open chats and the gutter is 12, so one tile fills the pane and three leave one cell empty. A tile is the same card as everywhere else: <code class="t-mono">base</code> on the detail pane, a 44 head on a hairline, the transcript, then the composer as the card foot. The state word carries its entity icon and hue: <code class="t-mono">behind</code> while it runs, <code class="t-mono">changes</code> when it waits on a person. Inside a tile, a card (approval, question) is <code class="t-mono">panel</code> so it lifts off the tile, and a plain button is <code class="t-mono">raised</code>. Under 560 wide the locked harness keeps only its icon and the ring drops the percent; under 440 the state word goes unless it needs you.</p>
+    <div class="demo col" id="d-tile"></div>
+    <h3 class="sub">Repository tabs</h3>
+    <div class="demo col" style="padding:0;overflow:hidden"><div class="tabstrip" id="d-strip"></div></div>
+    <h3 class="sub">Tabs</h3>
+    <div class="demo" style="padding-bottom:0"><div class="tabs" style="margin:0"><button class="tab on">Overview</button><button class="tab">Changes<span class="n">17</span></button><button class="tab">Pull requests<span class="n">2</span></button><button class="tab">Issues<span class="n">3</span></button><button class="tab">README</button></div></div>
+    <h3 class="sub">Pull request parts</h3>
+    <div class="demo col">
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap" id="d-pr-top"></div>
+      <div class="pr-status" id="d-pr-status" style="margin:0 -16px;padding:6px 16px"></div>
+      <section class="card check-card" style="margin-left:0" id="d-pr-checks"></section>
+    </div>
+    <h3 class="sub">Fields</h3>
+    <div class="demo col" id="d-field"></div>
+    <h3 class="sub">List filter and sort</h3>
+    <div class="demo" style="padding:0;display:block;min-height:204px"><div class="toolbar" id="d-sort" style="background:none;border:0"></div></div>
+    <h3 class="sub">Menus</h3>
+    <div class="demo" style="display:block;min-height:232px;padding:0"><div style="position:relative;height:232px"><div class="menu" style="top:12px;left:16px;animation:none" id="d-menu"></div></div></div>
+    <h3 class="sub">Toasts</h3>
+    <p class="lead">Bottom right, stacked. Success and info leave on their own. Errors stay longer, have a close button and take the danger border.</p>
+    <div class="demo col" id="d-toast"></div>
+    <h3 class="sub">Empty states</h3>
+    <p class="lead">Say what is true and offer the next step. An empty state never shows a placeholder or lorem text.</p>
+    <div class="rules" id="d-empty"></div>
+    <h3 class="sub">Dialog</h3>
+    <div class="demo"><div class="dialog" style="box-shadow:none"><h4 class="t-section" style="margin:0 0 4px">Discard 17 changes?</h4><p class="t-meta" style="margin-bottom:14px">This cannot be undone. A dialog is the only overlay in the suite, and it is used for decisions that block.</p><div style="display:flex;justify-content:flex-end;gap:8px"><button class="btn">Cancel</button><button class="btn primary">Discard</button></div></div></div>
+  </section>
+
+  <section>
+    <h2 class="sec">Motion</h2>
+    <p class="lead">Quiet and short. Motion says that something changed or that work is running, it never decorates. Only opacity and transform move, so GPUI can draw all of it.</p>
+    <h3 class="sub" style="margin-top:0">Waiting</h3>
+    <div class="demo" id="d-wait"></div>
+    <h3 class="sub">Tokens</h3>
+    <div class="scroll"><table>
+      <tr><th>Token</th><th>Value</th><th>Use</th></tr>
+      <tr><td class="t-mono">fast</td><td class="t-meta">120 ms</td><td>Hover, press</td></tr>
+      <tr><td class="t-mono">base</td><td class="t-meta">180 ms</td><td>Entrances, switches, toasts, dialogs</td></tr>
+      <tr><td class="t-mono">ease</td><td class="t-meta">cubic-bezier(.2, 0, 0, 1)</td><td>Everything that is not a loop</td></tr>
+      <tr><td class="t-mono">spinner</td><td class="t-meta">800 ms, linear</td><td>Running work</td></tr>
+      <tr><td class="t-mono">progress</td><td class="t-meta">1200 ms, loop</td><td>Line under the list head or the detail head</td></tr>
+    </table></div>
+  </section>
+
+  <section>
+    <h2 class="sec">What this replaces</h2>
+    <p class="lead">The shipped build: a right inspector competing with a bottom sheet that covers most of the window, a near-black blue ramp, and a type ladder of 8 to 11.5 px.</p>
+    <div class="ba">
+      <figure><img src="assets/shots/before-sheet-open.jpeg" alt="Shipped app with the bottom sheet open over most of the window"><figcaption>Before: sheet open, the list is left with two rows.</figcaption></figure>
+      <figure><img src="assets/shots/after-station.png" alt="v3 Station with the list on the left and the detail pane on the right"><figcaption>After: same repository and task, list and detail both stay readable.</figcaption></figure>
+    </div>
+  </section>
+</main>
+<script src="icons.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const root = document.documentElement;
+const v = n => getComputedStyle(root).getPropertyValue('--' + n).trim();
+const lum = h => {
+  const c = [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16) / 255).map(x => x <= .03928 ? x / 12.92 : ((x + .055) / 1.055) ** 2.4);
+  return .2126 * c[0] + .7152 * c[1] + .0722 * c[2];
+};
+const cr = (a, b) => { const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p); return ((x + .05) / (y + .05)).toFixed(1); };
+const sw = (n, role, ratio) => `<div class="sw"><i style="background:var(--${n})"></i><div><div class="t-mono">${n}</div><div class="t-caption">${v(n)}${ratio ? ' · ' + cr(v(n), v('base')) + ':1' : ''}</div><div class="t-caption">${role}</div></div></div>`;
+function paint() {
+  $('surfaces').innerHTML = [['well', 'Inputs, diff, code'], ['chrome', 'Title bar, rail'], ['base', 'List pane'], ['panel', 'Detail pane'], ['raised', 'Selected, hover'], ['overlay', 'Dialogs, menus']].map(([n, r]) => sw(n, r)).join('');
+  $('inks').innerHTML = [['text', 'Names, values'], ['text-2', 'Secondary copy'], ['text-3', 'Timestamps, hints'], ['accent', 'Primary, selection'], ['accent-ink', 'Links, focus']].map(([n, r]) => sw(n, r, true)).join('');
+  $('entities').innerHTML = [['branch', 'Branch'], ['changes', 'Uncommitted, attention'], ['pr', 'Pull requests'], ['issue', 'Issues'], ['behind', 'To pull, running'], ['ahead', 'To push'], ['ok', 'Clean, added'], ['danger', 'Failed, removed']].map(([n, r]) => sw(n, r, true)).join('');
+  const seg = (id, items, cur, attr) => { $(id).innerHTML = items.map(([k, l]) => `<button class="${k === cur ? 'on' : ''}" data-${attr}="${k}">${l}</button>`).join(''); };
+  seg('pal', [['copper', 'Copper'], ['plum', 'Plum'], ['pine', 'Pine']], root.dataset.palette, 'p');
+  seg('typ', [['inter', 'Inter'], ['plex', 'IBM Plex']], root.dataset.type, 't');
+}
+document.addEventListener('click', e => {
+  const b = e.target.closest('[data-p],[data-t]');
+  if (!b) return;
+  if (b.dataset.p) root.dataset.palette = b.dataset.p;
+  if (b.dataset.t) root.dataset.type = b.dataset.t;
+  try { localStorage.setItem('wsv3.palette', root.dataset.palette); localStorage.setItem('wsv3.type', root.dataset.type); } catch { /* preview */ }
+  paint();
+});
+try { root.dataset.palette = localStorage.getItem('wsv3.palette') || 'copper'; root.dataset.type = localStorage.getItem('wsv3.type') || 'inter'; } catch { /* preview */ }
+
+$('types').innerHTML = '<tr><th>Token</th><th>Size / line</th><th>Weight</th><th>Use</th><th>Sample</th></tr>' + [
+  ['title', '22 / 28', 600, 'Detail title', 't-title', 'warp-station'],
+  ['list-title', '20 / 26', 600, 'List title', 't-list-title', 'Repositories'],
+  ['section', '16 / 22', 600, 'Card and group headings', 't-section', 'Needs you'],
+  ['name', '15 / 20', 600, 'Row names, the first thing read', 't-name', 'warpui-kit-core'],
+  ['body', '14 / 20', 400, 'Copy, controls at 500', 't-body', 'Settings don\'t persist on Wayland'],
+  ['meta', '13 / 18', 400, 'Second lines, counts', 't-meta', '3/3 checks · review requested'],
+  ['mono', '13 / 18', 400, 'Paths, branches, diffs', 't-mono', '~/Developments/warp-agent'],
+  ['caption', '12 / 16', 500, 'Rail labels, the floor', 't-caption', 'Settings'],
+].map(([n, s, w, u, c, x]) => `<tr><td class="t-mono">${n}</td><td class="t-meta">${s}</td><td class="t-meta">${w}</td><td class="t-meta">${u}</td><td class="${c}">${x}</td></tr>`).join('');
+
+$('d-btn').innerHTML = `<button class="btn primary">${I('code', 16)}Open in VS Code</button><button class="btn">${I('tabnew', 16)}Open in tab</button><button class="btn">${I('down', 16)}Pull <span style="color:var(--behind)">2</span></button><button class="btn ghost">${I('history', 16)}History</button><button class="btn icon" title="More">${I('more', 18)}</button><button class="btn" disabled>Disabled</button><button class="link">Review</button>`;
+const st = (c, i, t) => `<span class="stat ${c}">${I(i, 14)}${t}</span>`;
+$('d-stat').innerHTML = `<span class="stat branch">${I('branch', 14)}<span>rust-gpui</span></span>` + st('changes', 'changes', '17 changes') + st('issue', 'issue', '3 issues') + st('pr', 'pr', '2 PRs') + st('behind', 'down', '2') + st('ahead', 'up', '1') + `<span class="stat ok">${I('check', 14)}<span>clean</span></span>` + st('danger', 'x', '1 failing');
+const row = (on, name, t, sub, fav) => `<div class="row demo-row ${on ? 'on' : ''}"><div class="row-top"><span class="starbtn ${fav ? 'on' : ''}">${I('star', 15, fav ? 'fill' : '')}</span><span class="t-name clip grow">${name}</span><span class="when">${t}</span></div><div class="row-sub stats" style="padding-left:30px">${sub}</div></div>`;
+$('d-row').innerHTML = row(true, 'warp-station', 'now', `<span class="stat branch">${I('branch', 14)}<span>rust</span></span>` + st('changes', 'changes', '17 changes') + st('issue', 'issue', '3') + st('pr', 'pr', '2') + st('ahead', 'up', '1'), true)
+  + row(false, 'warp-snapit', '3h', `<span class="stat branch">${I('branch', 14)}<span>main</span></span><span class="stat ok">${I('check', 14)}<span>clean</span></span>`, false);
+const spinner = (size = 16) => `<span class="spinning">${I('arc', size)}</span>`;
+/* tiles: the Agent detail pane is a grid of cards */
+const tileRing = pct => { const r = 7, c = 2 * Math.PI * r; return `<svg class="ring" width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><circle cx="9" cy="9" r="${r}" fill="none" stroke="var(--line-strong)" stroke-width="2.4"/><circle cx="9" cy="9" r="${r}" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-dasharray="${(Math.max(pct, 3) / 100 * c).toFixed(1)} ${c.toFixed(1)}" transform="rotate(-90 9 9)"/></svg>`; };
+const tileHead = (title, state, pct, used) => `<header class="tile-head"><button class="rowact" title="Close" aria-label="Close example">${I('x', 16)}</button><h3 class="tile-title clip">${title}</h3>${state}<span class="grow"></span><span class="ctx" title="Context used">${tileRing(pct)}<span class="ctx-text"><span class="ctx-pct">${pct}% · </span>${used}</span></span></header>`;
+const tileComposer = h => `<div class="tile-composer"><textarea class="area" rows="2" placeholder="Ask ${h}..." aria-label="Composer example"></textarea><div class="pills"><button class="rowact" title="Attach files">${I('plus', 16)}</button><button class="rowact lit" title="Auto-allow tool permissions">${I('shield', 16)}</button><button class="rowact" title="Toggle MCP servers">${I('plug', 16)}</button><span class="pill-gap"></span><span class="pill-btn p-harness locked">${I('wand', 14)}<span class="p-word">${h}</span></span><span class="pill-btn">build${I('chevd', 12)}</span><span class="pill-btn p-model"><span class="clip">glm-5.3-flash</span>${I('chevd', 12)}</span><span class="pill-btn">${I('gauge', 14)}<span class="p-word">max</span>${I('chevd', 12)}</span><span class="grow"></span><button class="btn icon send" title="Send" aria-label="Send example">${I('up', 16)}</button></div></div>`;
+const demoBubble = (text, meta) => `<div class="msg"><div class="bubble says"><p>${text}</p><div class="msg-meta">${meta}</div></div></div>`;
+$('d-tile').innerHTML = `<div class="tile-grid" style="--cols:2;--rows:1;width:100%;height:470px;flex:none">
+  <section class="tile on" aria-label="Focused tile example">${tileHead('Port the v3 palette', `<span class="stat tile-state need changes" title="Needs your approval">${I('shield', 14)}<span>Needs approval</span></span>`, 13, '26.1k / 200.0k')}
+    <div class="tile-scroll"><div class="tile-col">${demoBubble('I read the ramp and the aliases. The change stays inside <code>palette.rs</code>, and I need your go-ahead to write it.', '↑26.0k ↓412 09:42')}
+      <div class="perm" role="group" aria-label="Permission example"><div class="card-kind">${I('shield', 16)}edit</div><div class="t-mono perm-detail">src/palette.rs</div><button class="fold">${I('chevr', 14)}<span>View diff</span><span class="fold-n"><span class="num-add">+42</span> <span class="num-del">−18</span></span></button>
+        <div class="perm-acts"><button class="btn primary">Allow</button><button class="btn">Always</button><button class="btn">Deny</button></div></div></div></div>
+    ${tileComposer('opencode')}</section>
+  <section class="tile" aria-label="Running tile example">${tileHead('Review the door protocol', `<span class="stat tile-state behind" title="Running">${spinner(14)}<span>Running</span></span>`, 3, '29.6k / 1.00M')}
+    <div class="tile-scroll"><div class="tile-col"><div class="tool"><div class="tool-line"><span class="tool-chip">bash</span><span class="clip grow">cargo test ipc</span><span class="tool-st bad">failed</span></div><div class="tool-err clip">test door_rejects_a_stale_token ... FAILED</div></div>
+      ${demoBubble('The stale token test fails because the door reads the file once. Fixing that next.', '↑29.6k ↓134 09:36')}
+      <div class="dots" aria-hidden="true"><i></i><i></i><i></i></div></div></div>
+    ${tileComposer('dsh')}</section>
+</div>`;
+function waitDemo(state) {
+  const pull = state === 'busy' ? `<button class="btn busy" disabled>${spinner()}Pulling…</button>` : state === 'done' ? `<button class="btn done" disabled>${I('check', 16)}Pulled</button>` : `<button class="btn" id="try">${I('down', 16)}Pull <span style="color:var(--behind)">2</span></button>`;
+  $('d-wait').innerHTML = `<div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;width:100%">${pull}<span class="btn busy primary" aria-hidden="true">${spinner()}Committing…</span><span class="busy-tag">${spinner(14)}Fetching</span><span class="activity">${spinner(14)}Pulling warp-agent</span><span class="dots" aria-hidden="true"><i></i><i></i><i></i></span></div><div class="progress" style="width:100%"></div>`;
+}
+document.addEventListener('click', e => {
+  if (!e.target.closest('#try')) return;
+  waitDemo('busy');
+  setTimeout(() => { waitDemo('done'); setTimeout(() => waitDemo('idle'), 1100); }, 1800);
+});
+waitDemo('idle');
+$('d-pr-top').innerHTML = `<span class="pill">${I('pr', 14)}Open</span><span class="avatar">EK</span><span class="avatar s">MB</span><span class="pr-lines"><span class="num-add">+284</span> <span class="num-del">−61</span></span>`;
+$('d-pr-status').innerHTML = `<span class="stat ok">${I('check', 14)}Ready to merge</span><span>1 approval</span><span>No conflicts</span><span>Base <span class="t-mono">main</span></span><span>Updated 2h ago</span>`;
+$('d-pr-checks').innerHTML = `<div class="card-head"><span class="stat danger">${I('x', 16)}</span><h3 class="t-section">Checks</h3><span class="t-meta">2 passed · 1 failed · 1 running</span></div>
+  <div class="check-row"><span class="stat ok">${I('check', 16)}</span><span class="grow">build (linux)</span><span class="t-mono faint">1m 42s</span></div>
+  <div class="check-row failed"><span class="stat danger">${I('x', 16)}</span><span class="grow">clippy</span><span class="t-mono faint">38s</span></div>
+  <div class="check-row"><span class="stat behind">${spinner()}</span><span class="grow">cargo test</span><span class="t-mono faint">running</span></div>`;
+$('d-sort').innerHTML = `<label class="field">${I('search', 16)}<input placeholder="Filter issues" aria-label="Filter issues example"></label>
+  <div class="menu-wrap"><span class="sort">Sort: <b>Updated</b>${I('chevd', 14)}</span><div class="menu">${['Updated', 'Newest', 'Oldest', 'Most comments'].map((l, i) => `<button>${i ? '<span class="tick"></span>' : I('check', 16)}${l}</button>`).join('')}</div></div>`;
+$('d-menu').innerHTML = [['refresh', 'Refresh repository', ''], ['copy', 'Copy folder path', ''], ['ext', 'Open in GitHub', ''], ['terminal', 'Open terminal', 'T'], ['bot', 'Open in warp-agent', 'A']].map(([i, l, k]) => `<button>${I(i, 16)}${l}${k ? `<span class="kbd">${k}</span>` : ''}</button>`).join('') + `<hr><button class="danger">${I('trash', 16)}Remove from repositories</button>`;
+$('d-toast').innerHTML = `<div class="toast" style="align-self:flex-start;animation:none">${I('check', 16)}<span>Pulled warp-agent</span></div><div class="toast info" style="align-self:flex-start;animation:none">${I('issue', 16)}<span>Switched to feat/v3-shell</span></div><div class="toast error" style="align-self:flex-start;animation:none">${I('x', 16)}<span>Pull failed: local changes to Cargo.lock would be overwritten</span><button aria-label="Dismiss notification example">${I('x', 14)}</button></div>`;
+$('d-empty').innerHTML = [['No repositories yet', 'Add a folder to scan and your repositories appear here.', 'Add repo'], ['Working tree clean', 'Last commit 2h ago.', ''], ['No repositories match the current filter', '', 'Clear filters'], ['No README yet', 'Create a README.md in the repository root to see it here.', 'Draft with OpenCode'], ['No matches.', '', '']].map(([t, m, a]) => `<div class="rule"><div class="t-name">${t}</div>${m ? `<div class="t-meta">${m}</div>` : ''}${a ? `<div style="margin-top:8px"><span class="link">${a}</span></div>` : ''}</div>`).join('');
+const wt = (n, c, on) => `<div class="wtab ${on ? 'on' : ''}"><span class="clip">${n}</span>${c ? `<span class="stat changes">${I('changes', 14)}${c}</span>` : ''}<span class="wtab-x">${I('x', 14)}</span></div>`;
+$('d-strip').innerHTML = `<div class="wtab home">${I('repos', 16)}Repositories</div>` + wt('warp-agent', 2, true) + wt('warp-notes', 0, false);
+$('d-field').innerHTML =`<label class="field" style="max-width:420px">${I('search', 16)}<input placeholder="Search" aria-label="Search example"><span class="kbd">Ctrl K</span></label><textarea class="area" style="max-width:420px" rows="2" placeholder="Commit message, or leave empty to generate" aria-label="Commit message example"></textarea>`;
+paint();
+</script>
+</body>
+</html>
