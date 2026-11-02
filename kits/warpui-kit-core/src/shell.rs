@@ -296,6 +296,42 @@ pub fn list_row(id: impl Into<ElementId>, selected: bool) -> Stateful<Div> {
         .when(!selected, |d| d.hover(|s| s.bg(palette::PANEL)))
 }
 
+/// The one field height, at the live text size. A kit `Input` sizes itself to
+/// `h_6` (24 px) whatever `with_size` says, because `Sizable` only stores the
+/// text size and `input_h` falls through to the small control; the family's
+/// fields are 36, so every field goes through [`field_height`] to say so.
+pub fn field_height() -> gpui::Pixels {
+    px(scaled(FIELD_HEIGHT))
+}
+
+/// The one control height, at the live text size.
+pub fn control_height() -> gpui::Pixels {
+    px(scaled(CONTROL_HEIGHT))
+}
+
+/// One field, at the family's metric: the kit `Input` inside a box of the
+/// shared height. The height cannot go on the `Input` itself — a single-line
+/// input applies its own `input_h` after any `.h()`, so a 36 would render at
+/// 24 — and putting it on the box also gives the field one width and one
+/// border to draw on.
+pub fn field(id: impl Into<gpui::ElementId>, input: impl IntoElement) -> gpui::Stateful<gpui::Div> {
+    div()
+        .id(id)
+        .h(field_height())
+        .w_full()
+        .min_w_0()
+        .child(input)
+}
+
+/// [`field`] for a slot that sets its own width (a row's trailing control).
+pub fn field_at_width(
+    id: impl Into<gpui::ElementId>,
+    width: gpui::Pixels,
+    input: impl IntoElement,
+) -> gpui::Stateful<gpui::Div> {
+    field(id, input).w(width)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

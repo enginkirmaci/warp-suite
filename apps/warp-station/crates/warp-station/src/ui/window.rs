@@ -1109,7 +1109,7 @@ impl MainWindow {
                             .rounded(px(6.))
                             .bg(theme::accent_soft())
                             .child(icon(
-                                "icons/icon-code.svg",
+                                "icons/logo-glyph.svg",
                                 px(theme::icon_small()),
                                 theme::accent_ink(),
                             )),

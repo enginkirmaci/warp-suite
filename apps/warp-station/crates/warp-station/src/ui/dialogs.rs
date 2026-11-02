@@ -17,6 +17,7 @@ use gpui::prelude::*;
 use gpui::{Context, Entity, FontWeight, SharedString, Window, div, px};
 use gpui_kit::component::Sizable as _;
 use gpui_kit::component::input::{Input, InputEvent, InputState};
+use warpui_kit_core::shell;
 
 use crate::ui::repos::ReposPage;
 
@@ -173,20 +174,21 @@ fn field_label(label: &str) -> gpui::Div {
         .child(label.to_string())
 }
 
-/// The dialogs' text field: the kit input pulled down to the design's field
-/// metric — 30px high, 10.5px type, the recessed search fill and its border —
-/// instead of the kit's default 38px/16px, which was the loudest leftover of
-/// the old look inside the new chrome.
+/// The dialogs' text field: the family field metric — the shared 36px height,
+/// the body step's type, the recessed search fill and its border. It used to
+/// pin 30px, which made a dialog field shorter than every other field in the
+/// suite; the shell owns the height now.
 fn dialog_field(id: &'static str, input: &Entity<InputState>) -> gpui::Stateful<gpui::Div> {
     div().id(id).debug_selector(move || id.into()).child(
-        Input::new(input)
-            .with_size(theme::field_size())
-            .h(px(30.))
-            .px(px(8.))
-            .rounded(px(4.))
-            .bg(theme::search_bg())
-            .border_color(theme::search_border())
-            .text_size(px(theme::font_sub())),
+        shell::field(
+            SharedString::from(id),
+            Input::new(input).with_size(theme::field_size()),
+        )
+        .px(px(8.))
+        .rounded(px(4.))
+        .bg(theme::search_bg())
+        .border_color(theme::search_border())
+        .text_size(px(theme::font_sub())),
     )
 }
 

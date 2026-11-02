@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128" role="img" aria-label="Warp Snapit">
+  <rect width="128" height="128" rx="28" fill="#6B6157"/>
+  <g fill="#C9BFAF">
+    <rect x="35" y="35" width="26" height="26" rx="6"/>
+    <rect x="35" y="67" width="26" height="26" rx="6"/>
+    <rect x="67" y="67" width="26" height="26" rx="6"/>
+  </g>
+  <rect x="71" y="31" width="26" height="26" rx="6" fill="#F5EFE4"/>
+</svg>

@@ -21,7 +21,8 @@ When the prototype and this file disagree, this file wins.
    A repository tab is that same pane at full width.
 3. **Tabs replace panels.** What used to be a panel is a tab. A tab owns its
    toolbar and its one primary action.
-4. **Twelve is the floor.** No text below 12 px, at any text size setting.
+4. **Twelve is the floor.** No text below 12 px, at any text size setting. The
+   clamp lives in `fonts::scaled_by`, so even Small (×0.875) cannot breach it.
 5. **Colour means something.** Each entity has one hue everywhere. A healthy row
    stays quiet, so a row that needs you stands out without being read.
 6. **One overlay.** A blocking dialog is the only thing that floats over content,
@@ -97,6 +98,35 @@ same structure, so a palette is a swap of these values only. Copper is the defau
 | `accent-ink` | Links, focus | `#F2A877` | `#F5A294` | `#E9C976` |
 | `accent-soft` | Brand mark, active zone | `#43301F` | `#452B33` | `#3A3620` |
 
+**Blue** is the fourth palette, shipped with the others. Its ramp is the same
+structure on a cool slate field, so every step keeps the same role and the same
+contrast relationships:
+
+| Token | Role | Blue |
+|---|---|---|
+| `well` | Inputs, diff, code | `#181A20` |
+| `chrome` | Title bar, rail | `#1D2027` |
+| `base` | List pane, cards | `#22262E` |
+| `panel` | Detail pane | `#282D36` |
+| `raised` | Selected, hover, active | `#2F3540` |
+| `overlay` | Dialogs, menus | `#363C48` |
+| `line-soft` | Row separators | `#2A2F38` |
+| `line` | Pane edges | `#363C47` |
+| `line-strong` | Control borders | `#49505C` |
+| `text` | Names, values | `#F0F4FB` |
+| `text-2` | Secondary copy | `#C9D2E0` |
+| `text-3` | Timestamps, hints | `#9FA9B8` |
+| `accent` | Primary fill, selection | `#5B9DF5` |
+| `accent-hover` | Primary hover | `#77B0F8` |
+| `on-accent` | Text on primary | `#0A1626` |
+| `accent-ink` | Links, focus | `#8FBBFA` |
+| `accent-soft` | Brand mark, active zone | `#1E2F4A` |
+
+Measured: `text` 10.0:1, `text-2` 7.3:1, `text-3` 4.7:1 and `accent-ink` 5.6:1
+on the darkest surface; the primary label is 6.6:1 on its fill. Every palette
+is checked by `palette::tests::every_palette_clears_aa_and_orders_its_ramp`, so
+a new one cannot ship unmeasured.
+
 Measured contrast (WCAG): `text` is at least 9.9:1 and `text-2` at least 7.1:1 on
 every surface, `text-3` at least 4.6:1, primary label at least 7.7:1.
 
@@ -136,8 +166,11 @@ ladder was 8 to 11.5 px, so most of the interface sat under 12 px.
 | `caption` | 12 / 16 | 500 | Rail labels. The floor |
 | `note` | 16 / 26 | 400 | Note editor. README and summary at 15 / 25 |
 
-No all-caps, no tracked micro labels. Text size offers Normal, Large and Larger at
-1.0, 1.12 and 1.25. There is no Small: any factor under 1 breaks the floor.
+No all-caps, no tracked micro labels. Text size offers Small, Normal, Large and
+Larger at 0.875, 1.0, 1.12 and 1.25. Small is the one step under 1, and it is
+safe because the floor is enforced in the scaling math, not in the table: every
+step is clamped at 12 px, so Small tightens chrome, padding and icon sizes while
+the smallest text stays at the floor. The old `compact` spelling reads as Normal.
 
 ## 5. Components
 
@@ -343,9 +376,13 @@ pages, and the History pane inside Changes becomes its own tab.
 
 ## 8. Porting to warpui-kit-core
 
-**Copper is the shipped palette**, with Inter and JetBrains Mono. Plum and Pine stay
-in the prototype for comparison only: the kit keeps Copper as constants, so switching
-palettes at runtime would first need them turned into a struct. The shell lives in
+**Copper is the shipped palette**, with Inter and JetBrains Mono. All four
+palettes now ship: `palette::RAMPS` holds Copper, Plum, Pine and Blue as one
+`Ramp` struct each, the live palette is a process-wide switch (`set_ramp`), and
+the settings control writes the shared `~/.warp/ui.json` under `palette` so the
+apps agree on their next start. The published `SURFACE`/`TEXT`/`ACCENT`
+constants stay as Copper's reference values and are pinned to it by
+`the_default_palette_is_the_copper_constants`. The shell lives in
 `warpui_kit_core::shell` (`title_bar`, `rail`, `tab_strip`, `list_pane`, `detail_pane`,
 their tabs and rows) so an app cannot drift from it, and `motion` holds the durations
 and the spinner.

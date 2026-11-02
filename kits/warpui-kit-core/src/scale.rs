@@ -29,7 +29,8 @@ static HEARD: AtomicU32 = AtomicU32::new(0);
 const TEXT_SIZE_KEY: &str = "text_size";
 
 /// The choices, in the order the control shows them.
-pub const TEXT_SIZES: [(&str, &str); 3] = [
+pub const TEXT_SIZES: [(&str, &str); 4] = [
+    (fonts::FONT_SMALL, "Small"),
     (fonts::FONT_NORMAL, "Normal"),
     (fonts::FONT_LARGE, "Large"),
     (fonts::FONT_LARGER, "Larger"),
@@ -523,9 +524,11 @@ pub fn set_palette(key: &str, cx: &mut App) {
     }
 }
 
+/// The app's kit-theme re-run, installed by [`follow_palette`].
+type PaletteHost = std::rc::Rc<dyn Fn(&mut App)>;
+
 thread_local! {
-    /// The app's kit-theme re-run, installed by [`follow_palette`].
-    static PALETTE_HOST: std::cell::RefCell<Option<std::rc::Rc<dyn Fn(&mut App)>>> =
+    static PALETTE_HOST: std::cell::RefCell<Option<PaletteHost>> =
         const { std::cell::RefCell::new(None) };
 }
 
@@ -575,19 +578,12 @@ pub fn palette_control() -> impl IntoElement {
                 .rounded(px(6.))
                 .text_size(px(fonts::font_row_meta()))
                 .font_weight(FontWeight::MEDIUM)
-                .when(active, |d| {
-                    d.bg(ramp.raised).text_color(ramp.text)
-                })
+                .when(active, |d| d.bg(ramp.raised).text_color(ramp.text))
                 .when(!active, |d| {
                     d.text_color(palette::current_ramp().text_muted)
                         .hover(|s| s.text_color(palette::current_ramp().text))
                 })
-                .child(
-                    div()
-                        .size(px(10.))
-                        .rounded_full()
-                        .bg(ramp.accent),
-                )
+                .child(div().size(px(10.)).rounded_full().bg(ramp.accent))
                 .on_click(move |_, _, cx| set_palette(key, cx))
                 .child(ramp.label),
         );

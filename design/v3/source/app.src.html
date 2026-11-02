@@ -337,7 +337,7 @@ function searchPop() {
 function renderChrome() {
   seg('r-app', Object.entries(APPS).map(([k, a]) => [k, a.name.replace('Warp ', '')]), S.app, 'app');
   const root = document.documentElement;
-  seg('r-palette', [['copper', 'Copper'], ['plum', 'Plum'], ['pine', 'Pine']], root.dataset.palette, 'palette');
+  seg('r-palette', [['copper', 'Copper'], ['plum', 'Plum'], ['pine', 'Pine'], ['blue', 'Blue']], root.dataset.palette, 'palette');
   seg('r-type', [['inter', 'Inter + JetBrains'], ['plex', 'IBM Plex']], root.dataset.type, 'type');
   const a = APPS[S.app], launch = S.app === 'station'
     ? `<button class="winbtn" title="Open warp-notes" data-act="app" data-arg="notes">${I('notes', 18)}</button><button class="winbtn" title="Open warp-agent" data-act="app" data-arg="agent">${I('bot', 18)}</button>`
@@ -752,7 +752,7 @@ const subhead = t => `<h3 class="t-section" style="margin:22px 0 2px">${t}</h3>`
 function appearance() {
   const root = document.documentElement;
   const mini = (items, v, act) => `<div class="seg">${items.map(([a, l]) => `<button class="${a === v ? 'on' : ''}" data-act="${act}" data-arg="${a}">${l}</button>`).join('')}</div>`;
-  return choice('Palette', 'Shared by every app in the suite', mini([['copper', 'Copper'], ['plum', 'Plum'], ['pine', 'Pine']], root.dataset.palette, 'palette'))
+  return choice('Palette', 'Shared by every app in the suite', mini([['copper', 'Copper'], ['plum', 'Plum'], ['pine', 'Pine'], ['blue', 'Blue']], root.dataset.palette, 'palette'))
     + choice('Text size', 'Also shared by every app', mini([['normal', 'Normal'], ['large', 'Large'], ['larger', 'Larger']], S.opt.size, 'size'))
     + choice('Typeface', 'Interface and code fonts', mini([['inter', 'Inter'], ['plex', 'IBM Plex']], root.dataset.type, 'type'))
     + setting('reduce', 'Reduce motion', 'Turns off transitions and keeps spinners still. Busy labels stay');

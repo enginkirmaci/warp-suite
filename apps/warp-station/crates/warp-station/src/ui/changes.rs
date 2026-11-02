@@ -2112,9 +2112,15 @@ fn new_branch_form(
         .flex()
         .flex_col()
         .gap_1()
-        .child(div().debug_selector(|| "new-branch-name".into()).child(
-            gpui_kit::component::input::Input::new(new_branch_name).with_size(theme::field_size()),
-        ))
+        .child(
+            div()
+                .debug_selector(|| "new-branch-name".into())
+                .child(warpui_kit_core::shell::field(
+                    "new-branch-name-field",
+                    gpui_kit::component::input::Input::new(new_branch_name)
+                        .with_size(theme::field_size()),
+                )),
+        )
         .child(
             div()
                 .flex()

@@ -107,15 +107,19 @@ pub fn code_font() -> &'static str {
 
 // ---- font scale ------------------------------------------------------------
 
-/// The settings text-size values ("normal" | "large" | "larger"). There is no
-/// smaller one: any factor under 1 would break the 12px floor, so a saved
-/// "compact" reads as normal.
+/// The settings text-size values, smallest first: "small" | "normal" |
+/// "large" | "larger". Small multiplies the ladder by 0.875; the 12px floor
+/// still holds, because every step is clamped in `scaled_by`, so a small
+/// setting tightens chrome and spacing without dropping text under the floor.
+/// The old "compact" spelling reads as normal.
+pub const FONT_SMALL: &str = "small";
 pub const FONT_NORMAL: &str = "normal";
 pub const FONT_LARGE: &str = "large";
 pub const FONT_LARGER: &str = "larger";
 
 pub fn normalize_font_scale(scale: Option<&str>) -> &'static str {
     match scale {
+        Some(s) if s == FONT_SMALL => FONT_SMALL,
         Some(s) if s == FONT_LARGE => FONT_LARGE,
         Some(s) if s == FONT_LARGER => FONT_LARGER,
         _ => FONT_NORMAL,
@@ -190,6 +194,7 @@ pub(crate) const BASE_TOKENS: FontTokens = FontTokens {
 
 fn variant_factor(scale: Option<&str>) -> f32 {
     match normalize_font_scale(scale) {
+        FONT_SMALL => 0.875,
         FONT_LARGE => 1.12,
         FONT_LARGER => 1.25,
         _ => 1.0,
@@ -240,8 +245,18 @@ pub fn system_factor() -> f32 {
     bits(SYSTEM_FACTOR.load(std::sync::atomic::Ordering::Relaxed))
 }
 
+/// The smallest text the family ever draws. Small multiplies the ladder down,
+/// so the floor is applied here, in the one place every step passes through:
+/// a step that would land under it lands on it.
+pub const TEXT_FLOOR: f32 = 12.0;
+
 fn scaled_by(factor: f32, v: f32) -> f32 {
-    (v * factor * 100.0).round() / 100.0
+    let scaled = (v * factor * 100.0).round() / 100.0;
+    if v >= TEXT_FLOOR {
+        scaled.max(TEXT_FLOOR)
+    } else {
+        scaled
+    }
 }
 
 fn tokens_at(factor: f32) -> FontTokens {
@@ -429,5 +444,48 @@ mod tests {
             panic!("a custom size carries its pixels");
         };
         assert!((f32::from(size) * FIELD_TEXT_SHARE - 11.5).abs() < 0.01);
+    }
+}
+
+#[cfg(test)]
+mod small_step_tests {
+    use super::*;
+
+    /// Small is a real step down, but no step may cross the floor.
+    #[test]
+    fn small_tightens_the_ladder_without_breaking_the_floor() {
+        let small = font_tokens(Some(FONT_SMALL), 1.0);
+        let normal = font_tokens(Some(FONT_NORMAL), 1.0);
+        assert!(small.font_body < normal.font_body, "small is smaller");
+        assert_eq!(small.font_body, 12.25, "14 × 0.875");
+        for step in [
+            small.font_micro,
+            small.font_mono_meta,
+            small.font_row_meta,
+            small.font_control,
+            small.font_label,
+            small.font_sub,
+            small.font_meta,
+            small.font_body,
+        ] {
+            assert!(step >= TEXT_FLOOR, "{step} is under the floor");
+        }
+        // the two steps that started at the floor cannot go under it
+        assert_eq!(small.font_micro, TEXT_FLOOR);
+    }
+
+    /// A user who already runs the desktop scale up keeps the small step
+    /// useful: the two factors multiply, and the floor still holds.
+    #[test]
+    fn small_survives_a_desktop_scale() {
+        let small = font_tokens(Some(FONT_SMALL), 1.1667);
+        assert!(small.font_body >= TEXT_FLOOR);
+        assert!(small.font_body > 12.0);
+    }
+
+    #[test]
+    fn the_old_compact_spelling_is_normal() {
+        assert_eq!(normalize_font_scale(Some("compact")), FONT_NORMAL);
+        assert_eq!(normalize_font_scale(Some(FONT_SMALL)), FONT_SMALL);
     }
 }

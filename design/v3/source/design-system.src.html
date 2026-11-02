@@ -182,7 +182,7 @@ function paint() {
   $('inks').innerHTML = [['text', 'Names, values'], ['text-2', 'Secondary copy'], ['text-3', 'Timestamps, hints'], ['accent', 'Primary, selection'], ['accent-ink', 'Links, focus']].map(([n, r]) => sw(n, r, true)).join('');
   $('entities').innerHTML = [['branch', 'Branch'], ['changes', 'Uncommitted, attention'], ['pr', 'Pull requests'], ['issue', 'Issues'], ['behind', 'To pull, running'], ['ahead', 'To push'], ['ok', 'Clean, added'], ['danger', 'Failed, removed']].map(([n, r]) => sw(n, r, true)).join('');
   const seg = (id, items, cur, attr) => { $(id).innerHTML = items.map(([k, l]) => `<button class="${k === cur ? 'on' : ''}" data-${attr}="${k}">${l}</button>`).join(''); };
-  seg('pal', [['copper', 'Copper'], ['plum', 'Plum'], ['pine', 'Pine']], root.dataset.palette, 'p');
+  seg('pal', [['copper', 'Copper'], ['plum', 'Plum'], ['pine', 'Pine'], ['blue', 'Blue']], root.dataset.palette, 'p');
   seg('typ', [['inter', 'Inter'], ['plex', 'IBM Plex']], root.dataset.type, 't');
 }
 document.addEventListener('click', e => {

@@ -43,6 +43,14 @@
   --accent: #E5C066; --accent-hover: #EFCF80; --on-accent: #231B05;
   --accent-ink: #E9C976; --accent-soft: #3A3620;
 }
+[data-palette="blue"] {
+  --well: #181A20; --chrome: #1D2027; --base: #22262E; --panel: #282D36;
+  --raised: #2F3540; --overlay: #363C48;
+  --line-soft: #2A2F38; --line: #363C47; --line-strong: #49505C;
+  --text: #F0F4FB; --text-2: #C9D2E0; --text-3: #9FA9B8;
+  --accent: #5B9DF5; --accent-hover: #77B0F8; --on-accent: #0A1626;
+  --accent-ink: #8FBBFA; --accent-soft: #1E2F4A;
+}
 
 :root {
   /* entity hues: one meaning each, the same in every palette and app */
@@ -1044,7 +1052,7 @@ function searchPop() {
 function renderChrome() {
   seg('r-app', Object.entries(APPS).map(([k, a]) => [k, a.name.replace('Warp ', '')]), S.app, 'app');
   const root = document.documentElement;
-  seg('r-palette', [['copper', 'Copper'], ['plum', 'Plum'], ['pine', 'Pine']], root.dataset.palette, 'palette');
+  seg('r-palette', [['copper', 'Copper'], ['plum', 'Plum'], ['pine', 'Pine'], ['blue', 'Blue']], root.dataset.palette, 'palette');
   seg('r-type', [['inter', 'Inter + JetBrains'], ['plex', 'IBM Plex']], root.dataset.type, 'type');
   const a = APPS[S.app], launch = S.app === 'station'
     ? `<button class="winbtn" title="Open warp-notes" data-act="app" data-arg="notes">${I('notes', 18)}</button><button class="winbtn" title="Open warp-agent" data-act="app" data-arg="agent">${I('bot', 18)}</button>`
@@ -1459,7 +1467,7 @@ const subhead = t => `<h3 class="t-section" style="margin:22px 0 2px">${t}</h3>`
 function appearance() {
   const root = document.documentElement;
   const mini = (items, v, act) => `<div class="seg">${items.map(([a, l]) => `<button class="${a === v ? 'on' : ''}" data-act="${act}" data-arg="${a}">${l}</button>`).join('')}</div>`;
-  return choice('Palette', 'Shared by every app in the suite', mini([['copper', 'Copper'], ['plum', 'Plum'], ['pine', 'Pine']], root.dataset.palette, 'palette'))
+  return choice('Palette', 'Shared by every app in the suite', mini([['copper', 'Copper'], ['plum', 'Plum'], ['pine', 'Pine'], ['blue', 'Blue']], root.dataset.palette, 'palette'))
     + choice('Text size', 'Also shared by every app', mini([['normal', 'Normal'], ['large', 'Large'], ['larger', 'Larger']], S.opt.size, 'size'))
     + choice('Typeface', 'Interface and code fonts', mini([['inter', 'Inter'], ['plex', 'IBM Plex']], root.dataset.type, 'type'))
     + setting('reduce', 'Reduce motion', 'Turns off transitions and keeps spinners still. Busy labels stay');

@@ -36,6 +36,14 @@
   --accent: #E5C066; --accent-hover: #EFCF80; --on-accent: #231B05;
   --accent-ink: #E9C976; --accent-soft: #3A3620;
 }
+[data-palette="blue"] {
+  --well: #181A20; --chrome: #1D2027; --base: #22262E; --panel: #282D36;
+  --raised: #2F3540; --overlay: #363C48;
+  --line-soft: #2A2F38; --line: #363C47; --line-strong: #49505C;
+  --text: #F0F4FB; --text-2: #C9D2E0; --text-3: #9FA9B8;
+  --accent: #5B9DF5; --accent-hover: #77B0F8; --on-accent: #0A1626;
+  --accent-ink: #8FBBFA; --accent-soft: #1E2F4A;
+}
 
 :root {
   /* entity hues: one meaning each, the same in every palette and app */
