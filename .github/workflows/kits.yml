@@ -94,7 +94,12 @@ jobs:
   apps:
     runs-on: ubuntu-latest
     steps:
+      # Full history on purpose: warp-station's changes_probe/git_parity probes
+      # read this repository itself and assert on its commit log. With the
+      # default fetch-depth 1 they see a single commit and fail.
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
 
       - name: Install GPUI build dependencies
         run: |
