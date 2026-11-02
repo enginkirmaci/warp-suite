@@ -52,6 +52,18 @@ dist_root="$root/dist"
 bundle="$dist_root/warp-suite-$version-linux"
 rm -rf "$bundle"
 mkdir -p "$bundle/bin" "$bundle/applications" "$bundle/icons/hicolor"
+
+# The apps depend on the warpui-kit crates as path siblings. The kit repos are
+# not published yet, so the suite carries their snapshot under vendor/ and
+# stages it next to the app clones before cargo resolves the workspaces.
+for kit in warpui-kit-core warpui-kit-diff warpui-kit-markdown warpui-kit-picker; do
+    [ -d "$root/vendor/$kit/src" ] || {
+        echo "missing vendored kit: $root/vendor/$kit (run scripts/sync-kits.sh)" >&2
+        exit 1
+    }
+    mkdir -p "$build_dir/$kit"
+    rsync -a --delete "$root/vendor/$kit/" "$build_dir/$kit/"
+done
 # One shared target dir for all suite clones: warp-station and warp-agent share
 # most of the GPUI dependency tree, so repeated suite builds reuse artifacts.
 export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$build_dir/target}"
@@ -115,6 +127,15 @@ while read -r app; do
             "$bundle/icons/hicolor/scalable/apps/$icon_prefix.svg"
     fi
 done < <(python3 "$here/manifest.py" list | awk '{print $1}')
+
+# The vendored kit snapshot is part of the build, so it belongs in the record.
+if [ -f "$root/vendor/REVISIONS.txt" ]; then
+    {
+        echo
+        echo "# vendored warpui-kit snapshot (vendor/REVISIONS.txt)"
+        grep -v '^#' "$root/vendor/REVISIONS.txt" | sed 's/^/lib /'
+    } >> "$bundle/REVISIONS.txt"
+fi
 
 cp "$here/install-root.sh" "$bundle/"
 tar -czf "$dist_root/warp-suite-$version-linux.tar.gz" -C "$dist_root" "warp-suite-$version-linux"

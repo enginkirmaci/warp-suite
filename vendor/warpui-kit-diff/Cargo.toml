@@ -1,0 +1,35 @@
+[package]
+name = "warpui-kit-diff"
+version = "0.1.0"
+edition = "2024"
+description = "Zed-style unified diff and line-numbered code renderer for gpui-kit applications, tree-sitter highlighted"
+license = "MIT"
+
+[features]
+# forwarded to gpui-kit's grammar features — enable the languages callers render
+tree-sitter-bash = ["gpui-kit/tree-sitter-bash"]
+tree-sitter-c = ["gpui-kit/tree-sitter-c"]
+tree-sitter-cpp = ["gpui-kit/tree-sitter-cpp"]
+tree-sitter-css = ["gpui-kit/tree-sitter-css"]
+tree-sitter-go = ["gpui-kit/tree-sitter-go"]
+tree-sitter-html = ["gpui-kit/tree-sitter-html"]
+tree-sitter-python = ["gpui-kit/tree-sitter-python"]
+tree-sitter-rust = ["gpui-kit/tree-sitter-rust"]
+tree-sitter-toml = ["gpui-kit/tree-sitter-toml"]
+tree-sitter-typescript = ["gpui-kit/tree-sitter-typescript"]
+tree-sitter-tsx = ["gpui-kit/tree-sitter-tsx"]
+tree-sitter-yaml = ["gpui-kit/tree-sitter-yaml"]
+tree-sitter-javascript = ["gpui-kit/tree-sitter-javascript"]
+
+[dependencies]
+# gpui-pre: crates.io snapshots of zed's gpui, pinned to the exact rev
+# gpui-kit 0.7 is built against (=zed@1a28cff). Bump together with gpui-kit.
+gpui = { package = "gpui-pre", version = "=0.3.7" }
+gpui-kit = { version = "0.7" }
+warpui-kit-core = { path = "../warpui-kit-core" }
+serde_json = { version = "1", default-features = false, features = ["std"] }
+
+[profile.release]
+lto = "thin"
+strip = true
+codegen-units = 1

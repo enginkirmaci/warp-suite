@@ -55,6 +55,8 @@ Binaries go to `~/.local/bin`, desktop entries + hicolor icons to
 | `apps.toml` | the manifest: per app `repo`, `ref`, build knobs (`linux_build`, `icon_prefix`, `scalable_svg`) and contract notes |
 | `scripts/manifest.py` | apps.toml reader/writer shared by all scripts + CI |
 | `scripts/set-pin.sh` | verify a ref against the remote, write it into the manifest |
+| `scripts/sync-kits.sh` | refresh `vendor/warpui-kit-*` from the sibling kit checkouts |
+| `vendor/warpui-kit-*` | the kit crates the apps depend on as path siblings, vendored because the kit repos are not published yet |
 | `scripts/bundle-linux.sh` | clone at pins → `cargo build --release` → stage `dist/warp-suite-<v>-linux/` + tarball (the exact bundle CI publishes) |
 | `scripts/install-root.sh` | install an extracted bundle into `~/.local` |
 | `install.sh` | suite installer: download a release or build locally |
@@ -129,3 +131,9 @@ C#/.NET SnapIt repo would join the same way if ever wanted.
 - The apt dependency list in `suite-release.yml` covers GPUI's Linux needs
   (wayland, xkbcommon, vulkan, fontconfig); expect to touch it when GPUI's
   requirements grow.
+- **Kit crates:** the apps depend on `warpui-kit-core`/`-diff`/`-markdown`/`-picker`
+  as path siblings, and those repos are local-only for now. The suite vendors
+  their snapshot under `vendor/` (recorded in `vendor/REVISIONS.txt`) and stages
+  it beside the app clones in `bundle-linux.sh` and the Windows CI job, so a
+  release builds from this repo alone. Run `scripts/sync-kits.sh` after changing
+  a kit, before pinning a release — the app pins do not describe the libraries.

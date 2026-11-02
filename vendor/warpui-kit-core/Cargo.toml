@@ -1,0 +1,25 @@
+[package]
+name = "warpui-kit-core"
+version = "0.1.0"
+edition = "2024"
+description = "Theme palette, bundled fonts, type scale and shared control helpers for the warpui-kit GPUI components"
+license = "MIT"
+
+[dependencies]
+# gpui-pre: crates.io snapshots of zed's gpui, pinned to the exact rev
+# gpui-kit 0.7 is built against (=zed@1a28cff). Bump together with gpui-kit.
+gpui = { package = "gpui-pre", version = "=0.3.7" }
+gpui-kit = { version = "0.7" }
+serde_json = "1"
+tracing = { version = "0.1", default-features = false, features = ["std"] }
+
+[dev-dependencies]
+# headless UI probes (tests/); feature-unifies with the normal gpui-kit dep
+# only under `cargo test`
+gpui-kit = { version = "0.7", features = ["test-support"] }
+gpui = { package = "gpui-pre", version = "=0.3.7", features = ["test-support"] }
+
+[profile.release]
+lto = "thin"
+strip = true
+codegen-units = 1

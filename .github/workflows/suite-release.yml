@@ -117,6 +117,16 @@ jobs:
           path: .build/warp-station
           token: ${{ secrets.APPS_TOKEN }}
 
+      # The apps resolve the warpui-kit crates as path siblings; the kit repos
+      # are not published, so the suite carries their snapshot under vendor/
+      # and stages it beside the app clones before the first cargo call.
+      - name: Stage the vendored warpui-kit crates
+        run: |
+          New-Item -ItemType Directory -Force .build | Out-Null
+          foreach ($lib in 'warpui-kit-core','warpui-kit-diff','warpui-kit-markdown','warpui-kit-picker') {
+            Copy-Item -Recurse -Force "vendor/$lib" ".build/$lib"
+          }
+
       # The repo's own script: builds warp-station.exe into packaging\windows\out\
       - name: Build warp-station
         run: '& "$env:WARP_STATION_DIR\packaging\windows\build.ps1"'
@@ -248,6 +258,9 @@ jobs:
             | warp-agent | ${{ needs.resolve.outputs.warp_agent_repo }} | ${{ needs.resolve.outputs.warp_agent_ref }} | ${{ needs.resolve.outputs.warp_agent_sha }} |
             | warp-snapit | ${{ needs.resolve.outputs.warp_snapit_repo }} | ${{ needs.resolve.outputs.warp_snapit_ref }} | ${{ needs.resolve.outputs.warp_snapit_sha }} |
             | warp-notes | ${{ needs.resolve.outputs.warp_notes_repo }} | ${{ needs.resolve.outputs.warp_notes_ref }} | ${{ needs.resolve.outputs.warp_notes_sha }} |
+
+            Libraries: the vendored `warpui-kit-*` snapshot listed in `vendor/REVISIONS.txt`
+            (also recorded in the Linux tarball's `REVISIONS.txt`).
           # upload-artifact keeps each artifact's internal structure (the
           # setup exes sit in out/), so match at any depth.
           files: |

@@ -1,0 +1,46 @@
+//! warpui-kit-core: the foundation crate of the warpui-kit family.
+//!
+//! One palette, one font stack, one set of shared control helpers for the
+//! desktop clients built on [gpui-kit](https://crates.io/crates/gpui-kit):
+//!
+//! - [`palette`] — the Copper ramp, one hue per entity, the accent preset
+//!   system and the syntax highlight theme
+//! - [`fonts`] — the bundled Inter and JetBrains Mono faces, font resolution
+//!   and the type scale
+//! - [`scale`] — the UI scale every app shares: one text size setting and
+//!   control, times the desktop text scaling
+//! - [`shell`] — the one window shape: rail, tab strip, list and detail
+//! - [`motion`] — durations and the spinner
+//! - [`kit`] — maps the palette onto gpui-kit's shadcn-style theme tokens
+//! - [`a11y`] — the role/label trait every hand-rolled control passes through
+//! - [`mod@icon`] — tinted svg icon builder
+//! - [`tooltip`] and [`tooltip_overlay`] — the two tooltip mechanisms
+//!
+//! The component crates (`warpui-kit-diff`, `warpui-kit-markdown`,
+//! `warpui-kit-picker`) build on this crate so every consumer renders in the
+//! same family.
+
+pub mod a11y;
+pub mod fonts;
+pub mod icon;
+pub mod kit;
+pub mod motion;
+pub mod palette;
+pub mod scale;
+pub mod shell;
+pub mod tooltip;
+pub mod tooltip_overlay;
+
+pub use a11y::A11y;
+pub use fonts::{
+    CODE_FONT, FONT_LARGE, FONT_LARGER, FONT_NORMAL, FONT_UI, FontTokens, active_tokens, code_font,
+    font_factor, font_tokens, normalize_font_scale, resolve_fonts, set_font_scale,
+    set_system_factor, system_factor, ui_font,
+};
+pub use icon::icon;
+pub use kit::apply_kit_theme;
+pub use palette::{
+    ACCENT_PRESETS, AccentColors, AccentPreset, highlight_theme, normalize_accent, rgba_hex,
+    rgba_u32, selection, tint,
+};
+pub use scale::{adopt_text_size, follow_ui_scale, set_text_size, text_size_control};
