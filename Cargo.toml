@@ -1,0 +1,44 @@
+# The warp-suite cargo workspace.
+#
+# Every app under apps/ and every kit crate under kits/ is a member, so the
+# suite resolves ONE dependency graph from ONE Cargo.lock and builds into one
+# target dir (.cargo/config.toml). That is what lets a single gpui-pre compile
+# serve all four apps: cargo fingerprints a crate over its whole dependency
+# graph, so separate workspaces that resolve different versions (or enable
+# different features on a shared leaf) each paid for their own 228 MB copy.
+#
+# Before this, the four apps were four workspaces with four lockfiles that
+# disagreed on 129 packages (addr2line 0.25.1 vs 0.27.1, ...). They are now
+# unified here; the per-app Cargo.lock files are gone.
+#
+# Individual builds stay per-app: `cargo build -p warp-notes`, or from the app
+# directory (cargo finds this workspace by walking up).
+#
+# resolver = "3" (edition 2024 semantics): dev-dependency features do NOT leak
+# into normal builds, which is what keeps `test-support` out of release
+# binaries even though every app lists it in [dev-dependencies].
+
+[workspace]
+resolver = "3"
+members = [
+    "kits/warpui-kit-core",
+    "kits/warpui-kit-diff",
+    "kits/warpui-kit-markdown",
+    "kits/warpui-kit-picker",
+    "apps/warp-station/crates/warp-station",
+    "apps/warp-station/crates/warp-station-core",
+    "apps/warp-agent",
+    "apps/warp-notes",
+    "apps/warp-snapit",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+
+# One release profile for the whole suite (cargo reads these only from the
+# workspace root; per-member [profile.*] tables are ignored).
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true

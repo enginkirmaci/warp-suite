@@ -53,31 +53,15 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
-      # The five app workspaces share ONE target dir (.cargo/config.toml
-      # redirects every one of them to .build/target), so the cache config has
-      # to be picked around that:
-      #
-      #  - rust-cache defaults a workspace's target to `<root>/target`, which
-      #    never exists here, so the target dir MUST be named explicitly or the
-      #    entry is registry-only and every run compiles from scratch.
-      #  - it also prunes a target dir down to that workspace's own dependency
-      #    closure. Listing all five would run five prune passes over the same
-      #    tree and the last one wins - warp-snapit keeps ~31 of ~816 packages,
-      #    so it would delete everything the others just built.
-      #  - caching .build/target whole via cache-directories avoids the pruning
-      #    but uploads the apps' own artifacts too (~4.5 GB per OS against a
-      #    10 GB repo limit).
-      #
-      # So: two anchor workspaces. warp-station + warp-notes together cover 812
-      # of the 816 packages the four apps need; the four that remain
-      # (data-encoding, sha1, tokio-tungstenite, tungstenite) belong to
-      # warp-agent alone. What pruning drops is the apps' own binaries, which
-      # cargo rebuilds from source anyway.
+      # ONE workspace covers kits + all four apps (root Cargo.toml), so one
+      # cache entry covers the whole graph and the pruning problem that forced
+      # the old "two anchor workspaces" split is gone. The target dir is still
+      # named explicitly: rust-cache would otherwise default to `<root>/target`,
+      # which does not exist here, leaving a registry-only entry and a full
+      # compile every run.
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: |
-            apps/warp-station -> ../../.build/target
-            apps/warp-notes -> ../../.build/target
+          workspaces: . -> .build/target
           shared-key: release-linux
           cache-on-failure: true
 
@@ -105,13 +89,10 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
-      # Same shared-target-dir rule as the Linux job: two anchor workspaces,
-      # target dir named explicitly.
+      # Same rule as the Linux job: one workspace, target dir named explicitly.
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: |
-            apps/warp-station -> ../../.build/target
-            apps/warp-notes -> ../../.build/target
+          workspaces: . -> .build/target
           shared-key: release-windows
           cache-on-failure: true
 

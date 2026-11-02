@@ -45,12 +45,16 @@ if (-not $Version) {
     }
 }
 
-$appDirs = @(Get-ChildItem (Join-Path $root 'apps') -Directory |
-    Where-Object { Test-Path (Join-Path $_.FullName 'Cargo.toml') } |
-    Sort-Object Name)
+# The suite is ONE cargo workspace (root Cargo.toml): apps/ subdirectories are
+# no longer package roots, and apps/warp-station is not even a crate directory
+# (its crates live in crates/). Drive the loop off apps.toml instead, which
+# carries the cargo package name per app.
+$manifest = Join-Path $here 'manifest.py'
+$appNames = @(& python3 $manifest list)
+if ($LASTEXITCODE -ne 0 -or $appNames.Count -eq 0) { throw "manifest.py list failed" }
 if ($App) {
-    $appDirs = @($appDirs | Where-Object { $App -contains $_.Name })
-    if ($appDirs.Count -eq 0) { throw "no app matched: $($App -join ', ')" }
+    $appNames = @($appNames | Where-Object { $App -contains $_ })
+    if ($appNames.Count -eq 0) { throw "no app matched: $($App -join ', ')" }
 }
 
 $sha = 'unknown'
@@ -61,23 +65,22 @@ if (Test-Path (Join-Path $root '.git')) {
 New-Item -ItemType Directory -Force -Path $dist | Out-Null
 $revisions = @()
 
-foreach ($dir in $appDirs) {
-    $name = $dir.Name
+foreach ($name in $appNames) {
+    $dir = Get-Item (Join-Path (Join-Path $root 'apps') $name)
+    # The cargo package name; differs from the directory for warp-snapit.
+    $package = (& python3 $manifest get $name package 2>$null)
+    if ($LASTEXITCODE -ne 0 -or -not $package) { $package = $name }
     Write-Host "== $name"
 
-    Push-Location $dir.FullName
-    try {
-        $meta = & cargo metadata --no-deps --format-version 1 | ConvertFrom-Json
-        if ($LASTEXITCODE -ne 0 -or -not $meta) { throw "cargo metadata failed in $($dir.FullName)" }
-    } finally {
-        Pop-Location
-    }
+    $meta = & cargo metadata --no-deps --format-version 1 --manifest-path (Join-Path $root 'Cargo.toml') | ConvertFrom-Json
+    if ($LASTEXITCODE -ne 0 -or -not $meta) { throw "cargo metadata failed at $root" }
 
-    $bins = @($meta.packages | ForEach-Object { $_.targets } |
-        Where-Object { $_.kind -contains 'bin' } | ForEach-Object { $_.name })
+    $pkg = $meta.packages | Where-Object { $_.name -eq $package } | Select-Object -First 1
+    if (-not $pkg) { throw "$name (package $package) is not a workspace member" }
+    $bins = @($pkg.targets | Where-Object { $_.kind -contains 'bin' } | ForEach-Object { $_.name })
     if ($bins.Count -eq 0) { throw "$name has no bin target" }
-    # The binary name is not always the directory name (warp-snapit -> snapit).
-    $bin = if ($bins -contains $name) { $name } else { $bins[0] }
+    # The bin target is not always the package name (warp-snapit -> snapit).
+    $bin = if ($bins -contains $package) { $package } else { $bins[0] }
 
     $stage = Join-Path $dist $name
     $zip = Join-Path $dist "$name-$Version-windows-portable.zip"
@@ -85,7 +88,7 @@ foreach ($dir in $appDirs) {
     $hasInstaller = (Test-Path $iss) -and -not $NoPackage
 
     if ($DryRun) {
-        Write-Host "+ cargo build --release (in $($dir.FullName))"
+        Write-Host "+ cargo build --release -p $package (at $root)"
         Write-Host "+ stage $($meta.target_directory)\release\${bin}.exe -> $stage"
         Write-Host "+ Compress-Archive $stage\* -> $zip"
         if ($hasInstaller) {
@@ -95,10 +98,10 @@ foreach ($dir in $appDirs) {
         continue
     }
 
-    Push-Location $dir.FullName
+    Push-Location $root
     try {
-        & cargo build --release
-        if ($LASTEXITCODE -ne 0) { throw "cargo build failed in $($dir.FullName)" }
+        & cargo build --release -p $package
+        if ($LASTEXITCODE -ne 0) { throw "cargo build failed for $package" }
     } finally {
         Pop-Location
     }

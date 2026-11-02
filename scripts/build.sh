@@ -82,22 +82,27 @@ while read -r app; do
     fi
 
     app_dir="$root/apps/$app"
+    # The cargo package name; differs from the directory for warp-snapit.
+    package="$(python3 "$here/manifest.py" get "$app" package 2>/dev/null || echo "$app")"
     build_args="$(python3 "$here/manifest.py" get "$app" linux_build 2>/dev/null || true)"
     icon_prefix="$(python3 "$here/manifest.py" get "$app" icon_prefix 2>/dev/null || echo "$app")"
     svg_rel="$(python3 "$here/manifest.py" get "$app" scalable_svg 2>/dev/null || true)"
 
     echo "== $app"
+    # The suite is one workspace (root Cargo.toml), so builds run from the root
+    # with a package selector; -p also picks the right member when a directory
+    # is not a package root (apps/warp-station/crates/...).
     # shellcheck disable=SC2086
-    (cd "$app_dir" && cargo build --release $build_args)
+    (cd "$root" && cargo build --release -p "$package" $build_args)
 
-    meta="$(cd "$app_dir" && cargo metadata --no-deps --format-version 1)"
+    meta="$(cd "$root" && cargo metadata --no-deps --format-version 1)"
     target_dir="$(jq -r '.target_directory' <<<"$meta")"
-    # The binary name is not always the directory name (warp-snapit -> snapit).
-    bin_name="$(jq -r --arg app "$app" \
-        '[.packages[].targets[] | select(.kind | index("bin")) | .name]
-         | (if index($app) then $app else .[0] end)' <<<"$meta")"
+    # The bin target is not always the package name (warp-snapit -> snapit).
+    bin_name="$(jq -r --arg pkg "$package" \
+        '[.packages[] | select(.name == $pkg) | .targets[]
+          | select(.kind | index("bin")) | .name] | .[0]' <<<"$meta")"
     if [ -z "$bin_name" ] || [ "$bin_name" = "null" ]; then
-        echo "$app has no bin target" >&2; exit 1
+        echo "$app (package $package) has no bin target" >&2; exit 1
     fi
 
     install -m755 "$target_dir/release/$bin_name" "$bundle/bin/$bin_name"

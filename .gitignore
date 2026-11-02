@@ -1,8 +1,8 @@
 .build/
 dist/
 out/
-kits/target/
-# kits/Cargo.lock IS committed on purpose: CI runs `cargo --locked` against it,
-# so kit builds resolve identical dependency versions and the cache key stops
-# moving whenever a transitive dependency publishes a new release.
+# One workspace, one lockfile: /Cargo.lock is committed on purpose so CI runs
+# `cargo --locked` against identical dependency versions and the rust-cache key
+# stops moving whenever a transitive dependency publishes a new release.
+# (The per-app and kits/ lockfiles this replaced are gone.)
 __pycache__/

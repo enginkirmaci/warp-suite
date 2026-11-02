@@ -1,25 +1,10 @@
 # The warpui-kit crates shared by the suite's apps.
 #
-# The apps under apps/ depend on them as path deps (../../kits/warpui-kit-*),
-# so a suite release builds from this repo alone and the suite commit is the
-# kits' provenance.
+# These are members of the suite workspace (see ../Cargo.toml), NOT a workspace
+# of their own: that is what lets one gpui-pre compile serve every app, and it
+# is why kits/Cargo.lock no longer exists (the suite lock covers it).
 #
-#   cargo test          # all four crates, headless GPUI probes included
-#   cargo fmt --check
-#   cargo clippy --all-targets
-
-[workspace]
-resolver = "3"
-members = [
-    "warpui-kit-core",
-    "warpui-kit-diff",
-    "warpui-kit-markdown",
-    "warpui-kit-picker",
-]
-
-# The apps build these crates through their own workspace profiles, so this
-# only shapes standalone cargo runs in kits/ (tests, clippy, a manual build).
-[profile.release]
-lto = "thin"
-strip = true
-codegen-units = 1
+# From this directory (cargo walks up to ../Cargo.toml):
+#   cargo test  -p warpui-kit-core -p warpui-kit-diff -p warpui-kit-markdown -p warpui-kit-picker
+#   cargo fmt --all --check
+#   cargo clippy --all-targets -- -D warnings

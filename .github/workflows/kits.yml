@@ -47,7 +47,6 @@ jobs:
         with:
           components: rustfmt
       - name: cargo fmt --check
-        working-directory: kits
         run: cargo fmt --all --check
 
   test:
@@ -75,22 +74,31 @@ jobs:
       # hand-rolled actions/cache this replaced never restored anything.
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: kits -> ../.build/target
+          workspaces: . -> .build/target
           shared-key: kits
           cache-on-failure: true
 
+      # kits/ is a member directory of the suite workspace (root Cargo.toml),
+      # not a workspace of its own: select the kit crates by package.
+      # -p selectors go BEFORE `--`: anything after it is passed to rustc.
       - name: cargo clippy
-        working-directory: kits
-        run: cargo clippy --all-targets --locked -- -D warnings
+        run: |
+          cargo clippy --locked --all-targets \
+            -p warpui-kit-core -p warpui-kit-diff \
+            -p warpui-kit-markdown -p warpui-kit-picker \
+            -- -D warnings
 
       - name: cargo test
-        working-directory: kits
-        run: cargo test --locked
+        run: |
+          cargo test --locked \
+            -p warpui-kit-core -p warpui-kit-diff \
+            -p warpui-kit-markdown -p warpui-kit-picker
 
-  # The apps are separate cargo workspaces with their own lockfiles, so the
-  # kit job above cannot see a break in them (a renamed kit export, a feature
-  # the app does not enable). This is a typecheck + unit-test gate only: no
-  # release profile, no packaging - the release workflow owns those.
+  # One workspace now covers kits + apps, so this job typechecks the app
+  # crates against the kit crates as built - a renamed kit export or a feature
+  # an app does not enable still fails here rather than at release time.
+  # This is a typecheck + unit-test gate only: no release profile, no
+  # packaging - the release workflow owns those.
   apps:
     runs-on: ubuntu-latest
     steps:
@@ -111,31 +119,22 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
-      # The four app workspaces share ONE target dir (.cargo/config.toml), and
-      # rust-cache both defaults the target to `<root>/target` (which does not
-      # exist here) and prunes a target dir to the workspaces listed - so
-      # listing them all would have each prune pass delete what the previous
-      # kept (warp-snapit keeps 31 of 816 packages).
-      # warp-station + warp-notes together cover 812 of the 816 packages the
-      # four apps need; the four that remain (data-encoding, sha1,
-      # tokio-tungstenite, tungstenite) belong to warp-agent alone.
+      # ONE workspace and ONE lockfile, so a single cache entry covers every
+      # app: the old "two anchor workspaces" split (listing apps/* separately
+      # because each was its own workspace and rust-cache pruned per entry) is
+      # gone with the per-app lockfiles.
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: |
-            apps/warp-station -> ../../.build/target
-            apps/warp-notes -> ../../.build/target
+          workspaces: . -> .build/target
           shared-key: apps
           cache-on-failure: true
 
       # warp-snapit is Windows-only (its engine is cfg(windows)-gated) but its
-      # platform-neutral modules test on Linux; warp-station is a 2-crate
-      # workspace and needs the package selector.
+      # platform-neutral modules test on Linux; its package is `snapit`.
+      # Every app is a member of the root workspace, so -p selects it.
       - name: Test apps
         run: |
           set -euo pipefail
-          cargo test --locked -p warp-station-core -p warp-station \
-            --manifest-path apps/warp-station/Cargo.toml
-          for app in warp-agent warp-notes warp-snapit; do
-            echo "== $app"
-            cargo test --locked --manifest-path "apps/$app/Cargo.toml"
-          done
+          cargo test --locked \
+            -p warp-station-core -p warp-station \
+            -p warp-agent -p warp-notes -p snapit
