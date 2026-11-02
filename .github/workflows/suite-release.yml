@@ -144,8 +144,12 @@ jobs:
             ${{ runner.os }}-cargo-${{ hashFiles('apps.toml') }}-
             ${{ runner.os }}-cargo-
 
+      # windows-latest normally ships Inno Setup; only install when absent.
       - name: Install Inno Setup
-        run: choco install innosetup -y --no-progress
+        run: |
+          if (-not (Get-Command iscc -ErrorAction SilentlyContinue)) {
+            choco install innosetup -y --no-progress
+          }
 
       - name: Checkout warp-station @ pin
         uses: actions/checkout@v4
