@@ -49,6 +49,7 @@ Binaries go to `~/.local/bin`, desktop entries + hicolor icons to
 | `apps/<name>/` | the app sources, each with its own history (imported with `git subtree`) |
 | `apps.toml` | per-app build knobs (`linux_build`, `linux_skip`, `icon_prefix`, `scalable_svg`) and contract notes |
 | `scripts/manifest.py` | apps.toml reader shared by the scripts + CI |
+| `.cargo/config.toml` | one cargo target dir for the whole suite: `.build/target` for every app, `warpui-kits` and `bundle-linux.sh` |
 | `warpui-kits/` | cargo workspace of the four `warpui-kit-*` crates the apps depend on (`../../warpui-kits`) |
 | `scripts/bundle-linux.sh` | `cargo build --release` each app → stage `dist/warp-suite-<v>-linux/` + tarball (the exact bundle CI publishes) |
 | `scripts/install-root.sh` | install an extracted bundle into `~/.local` |

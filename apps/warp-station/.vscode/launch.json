@@ -23,7 +23,7 @@
             "name": "Rust: warp-station (Linux — gdb)",
             "type": "gdb",
             "request": "launch",
-            "target": "${workspaceFolder}/target/debug/warp-station",
+            "target": "${workspaceFolder}/../../.build/target/debug/warp-station",
             "cwd": "${workspaceFolder}",
             "preLaunchTask": "cargo build (warp-station)"
         },
@@ -31,7 +31,7 @@
             "name": "Rust: warp-station (lldb — wedges on NVIDIA)",
             "type": "lldb",
             "request": "launch",
-            "program": "${workspaceFolder}/target/debug/warp-station",
+            "program": "${workspaceFolder}/../../.build/target/debug/warp-station",
             "args": [],
             "cwd": "${workspaceFolder}",
             "preLaunchTask": "cargo build (warp-station)"
