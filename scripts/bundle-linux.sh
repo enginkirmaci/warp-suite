@@ -53,25 +53,17 @@ bundle="$dist_root/warp-suite-$version-linux"
 rm -rf "$bundle"
 mkdir -p "$bundle/bin" "$bundle/applications" "$bundle/icons/hicolor"
 
-# The apps depend on the warpui-kit crates as path siblings. The crates live
-# in this repo under warpui-kits/ (a cargo workspace), so stage every member
-# next to the app clones before cargo resolves the app workspaces.
-for kit_toml in "$root"/warpui-kits/*/Cargo.toml; do
-    kit_dir="$(dirname "$kit_toml")"
-    kit="$(basename "$kit_dir")"
-    [ -d "$kit_dir/src" ] || {
-        echo "missing kit crate sources: $kit_dir" >&2
-        exit 1
-    }
-    mkdir -p "$build_dir/$kit"
-    rsync -a --delete "$kit_dir/" "$build_dir/$kit/"
-done
-# Drop staged crates that left the workspace, so cargo cannot resolve a stale
-# copy from an earlier build.
-for staged in "$build_dir"/warpui-kit-*; do
-    [ -d "$staged" ] || continue
-    [ -f "$root/warpui-kits/$(basename "$staged")/Cargo.toml" ] || rm -rf "$staged"
-done
+# The apps resolve the crates as ../warp-suite/warpui-kits/<crate> from
+# their checkout (../../../ from warp-station's crate), so stage the whole
+# workspace at that relative path beside the app clones.
+[ -d "$root/warpui-kits/warpui-kit-core/src" ] || {
+    echo "missing kit workspace: $root/warpui-kits" >&2
+    exit 1
+}
+rm -rf "$build_dir/warp-suite/warpui-kits" "$build_dir"/warpui-kit-*
+mkdir -p "$build_dir/warp-suite/warpui-kits"
+rsync -a --delete --exclude target --exclude Cargo.lock \
+    "$root/warpui-kits/" "$build_dir/warp-suite/warpui-kits/"
 # One shared target dir for all suite clones: warp-station and warp-agent share
 # most of the GPUI dependency tree, so repeated suite builds reuse artifacts.
 export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$build_dir/target}"

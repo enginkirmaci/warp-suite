@@ -159,18 +159,19 @@ jobs:
           path: .build/warp-station
           token: ${{ secrets.APPS_TOKEN }}
 
-      # The apps resolve the warpui-kit crates as path siblings; the crates
-      # live in this repo under warpui-kits/, so stage the four crate dirs
-      # beside the app clones before the first cargo call.
-      - name: Stage the warpui-kit crates
+      # The apps resolve the crates as ../warp-suite/warpui-kits/<crate>
+      # from their checkout, so stage the whole workspace at that path before
+      # the first cargo call.
+      - name: Stage the warpui-kit workspace
         run: |
           New-Item -ItemType Directory -Force .build | Out-Null
-          # Drop crates that left the workspace, so a stale copy cannot resolve.
+          Remove-Item -Recurse -Force .build/warp-suite -ErrorAction SilentlyContinue
+          # Drop the old flat staging layout, so nothing resolves a stale copy.
           Get-ChildItem .build -Directory -Filter 'warpui-kit-*' -ErrorAction SilentlyContinue |
             Remove-Item -Recurse -Force
-          Get-ChildItem warpui-kits -Directory | Where-Object { Test-Path "$($_.FullName)\Cargo.toml" } | ForEach-Object {
-            Copy-Item -Recurse -Force $_.FullName ".build/$($_.Name)"
-          }
+          New-Item -ItemType Directory -Force .build/warp-suite | Out-Null
+          Copy-Item -Recurse -Force warpui-kits .build/warp-suite/warpui-kits
+          Remove-Item -Recurse -Force .build/warp-suite/warpui-kits/target -ErrorAction SilentlyContinue
 
       # The repo's own script: builds warp-station.exe into packaging\windows\out\
       - name: Build warp-station

@@ -55,7 +55,7 @@ Binaries go to `~/.local/bin`, desktop entries + hicolor icons to
 | `apps.toml` | the manifest: per app `repo`, `ref`, build knobs (`linux_build`, `icon_prefix`, `scalable_svg`) and contract notes |
 | `scripts/manifest.py` | apps.toml reader/writer shared by all scripts + CI |
 | `scripts/set-pin.sh` | verify a ref against the remote, write it into the manifest |
-| `warpui-kits/` | cargo workspace of the four `warpui-kit-*` crates the apps depend on as path siblings; the release jobs stage them beside the app clones |
+| `warpui-kits/` | cargo workspace of the four `warpui-kit-*` crates the apps depend on; the release jobs stage it at `.build/warp-suite/warpui-kits` |
 | `scripts/bundle-linux.sh` | clone at pins → `cargo build --release` → stage `dist/warp-suite-<v>-linux/` + tarball (the exact bundle CI publishes) |
 | `scripts/install-root.sh` | install an extracted bundle into `~/.local` |
 | `install.sh` | suite installer: download a release or build locally |
@@ -109,7 +109,7 @@ together. When one changes, update the other side and re-pin both apps in the
    sets `linux_skip = true` and needs a build + package block in
    `suite-release.yml` mirroring the existing ones).
 2. If it needs a shared library crate, add it to the `warpui-kits/`
-   workspace; both release jobs stage every crate they find there.
+   workspace; both release jobs stage the whole workspace.
 3. Document its contracts in [Cross-app contracts](#cross-app-contracts).
 
 That is exactly how warp-snapit joined (Windows-only: `linux_skip = true`,
@@ -133,9 +133,12 @@ C#/.NET SnapIt repo would join the same way if ever wanted.
   (wayland, xkbcommon, vulkan, fontconfig); expect to touch it when GPUI's
   requirements grow.
 - **Kit crates:** the apps depend on `warpui-kit-core`/`-diff`/`-markdown`/`-picker`
-  as path siblings. They live in this repo as the `warpui-kits/` cargo
-  workspace (not separate repos yet), and `bundle-linux.sh` + the Windows CI
-  job stage every crate found there beside the app clones, so a release builds
-  from this repo alone. The suite commit is the kits' provenance — no sync
-  step, no second copy. Run `cargo test` in `warpui-kits/` after changing one;
-  the app pins alone do not describe the libraries.
+  through `../warp-suite/warpui-kits/*` path deps. They live in this repo as
+  the `warpui-kits/` cargo workspace (not separate repos yet), and
+  `bundle-linux.sh` + the Windows CI job stage the whole workspace at
+  `.build/warp-suite/warpui-kits`, the same relative path from every app
+  clone, so a release builds from this repo alone. The suite commit is the
+  kits' provenance — no sync step, no second copy. A local app checkout needs
+  this repo as a sibling; no symlinks or extra copies. Run `cargo test` in
+  `warpui-kits/` after changing one; the app pins alone do not describe the
+  libraries.
