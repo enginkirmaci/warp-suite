@@ -447,6 +447,20 @@ mod tests {
     }
 }
 
+/// The factors are process-wide, so any test that reads or moves them takes
+/// its turn. Shared across modules: a shell test reading `font_factor()` races
+/// a scale test that sets it, and that race is a flake, not a pass.
+#[cfg(test)]
+pub(crate) mod factor_lock {
+    use std::sync::{Mutex, MutexGuard};
+
+    static SERIAL: Mutex<()> = Mutex::new(());
+
+    pub(crate) fn serial() -> MutexGuard<'static, ()> {
+        SERIAL.lock().unwrap_or_else(|poison| poison.into_inner())
+    }
+}
+
 #[cfg(test)]
 mod small_step_tests {
     use super::*;

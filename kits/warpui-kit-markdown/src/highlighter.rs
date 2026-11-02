@@ -63,7 +63,7 @@ impl MarkdownLiveHighlighter {
         let mut style = HighlightStyle::default();
         match kind {
             MarkdownLiveKind::HeadingMarker => {
-                style.color = Some(palette::BLUE_BRIGHT.into());
+                style.color = Some(palette::accent_ink().into());
                 style.font_weight = Some(FontWeight::SEMIBOLD);
             }
             MarkdownLiveKind::HeadingText => {
@@ -84,40 +84,40 @@ impl MarkdownLiveHighlighter {
                 if strike {
                     style.strikethrough = Some(StrikethroughStyle {
                         thickness: px(1.),
-                        color: Some(palette::TEXT_MUTED.into()),
+                        color: Some(palette::text_muted().into()),
                     });
-                    style.color = Some(palette::TEXT_MUTED.into());
+                    style.color = Some(palette::text_muted().into());
                 }
                 if highlight {
-                    style.background_color = Some(palette::tint(palette::GOLD_BRIGHT));
+                    style.background_color = Some(palette::tint(palette::accent_ink()));
                 }
             }
             MarkdownLiveKind::InlineCode => {
-                style.background_color = Some(palette::CHIP.into());
-                style.color = Some(palette::GOLD_BRIGHT.into());
+                style.background_color = Some(palette::raised().into());
+                style.color = Some(palette::accent_ink().into());
             }
             MarkdownLiveKind::CodeFence => {
                 style.background_color = Some(hsla(0., 0., 0., 0.16));
-                style.color = Some(palette::TEXT_FAINT.into());
+                style.color = Some(palette::text_muted().into());
             }
             MarkdownLiveKind::CodeBlock => {
                 style.background_color = Some(hsla(0., 0., 0., 0.16));
             }
             MarkdownLiveKind::LinkText | MarkdownLiveKind::WikiLink | MarkdownLiveKind::Embed => {
-                style.color = Some(palette::BLUE_BRIGHT.into());
+                style.color = Some(palette::accent_ink().into());
                 style.underline = Some(UnderlineStyle {
                     thickness: px(1.),
-                    color: Some(palette::BLUE_BRIGHT.into()),
+                    color: Some(palette::accent_ink().into()),
                     wavy: false,
                 });
             }
             MarkdownLiveKind::QuoteText => {
                 style.font_style = Some(FontStyle::Italic);
-                style.color = Some(palette::TEXT_DIM.into());
+                style.color = Some(palette::text_dim().into());
             }
             MarkdownLiveKind::Tag => {
-                style.color = Some(palette::BLUE_BRIGHT.into());
-                style.background_color = Some(palette::tint(palette::BLUE_BRIGHT));
+                style.color = Some(palette::accent_ink().into());
+                style.background_color = Some(palette::tint(palette::accent_ink()));
             }
             MarkdownLiveKind::TaskDone => {
                 style.color = Some(palette::SUCCESS_BRIGHT.into());
@@ -131,7 +131,7 @@ impl MarkdownLiveHighlighter {
             | MarkdownLiveKind::FootnoteRef
             | MarkdownLiveKind::Comment
             | MarkdownLiveKind::HorizontalRule => {
-                style.color = Some(palette::TEXT_FAINT.into());
+                style.color = Some(palette::text_muted().into());
             }
             MarkdownLiveKind::Plain => {}
         }

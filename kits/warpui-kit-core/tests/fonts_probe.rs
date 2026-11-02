@@ -10,7 +10,7 @@ fn apply(tokens: warpui_kit_core::FontTokens, cx: &mut gpui::App) {
     apply_kit_theme(
         AccentColors::default_colors(),
         &tokens,
-        palette::BACKGROUND,
+        palette::surface(),
         cx,
     );
 }

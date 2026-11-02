@@ -65,11 +65,11 @@ impl Render for Tip {
             .py_1()
             .rounded_md()
             .border_1()
-            .border_color(palette::HAIRLINE)
-            .bg(palette::POPUP)
+            .border_color(palette::hairline())
+            .bg(palette::popup())
             .shadow_md()
             .text_size(px(size))
-            .text_color(palette::TEXT_DIM)
+            .text_color(palette::text_dim())
             .child(self.text.clone())
     }
 }

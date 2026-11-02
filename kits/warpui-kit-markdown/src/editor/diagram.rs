@@ -355,9 +355,9 @@ pub(super) mod backend {
         let colors = &look.colors;
         let family = format!("\"{}\", sans-serif", look.family);
         let surface = css(colors.background);
-        let raised = css(palette::CHIP);
-        let well = css(palette::POPUP);
-        let quiet = css(palette::INPUT);
+        let raised = css(palette::raised());
+        let well = css(palette::popup());
+        let quiet = css(palette::well());
         let line = css(colors.muted);
         let text = css(colors.text);
         let accent = css(colors.accent);
@@ -367,10 +367,10 @@ pub(super) mod backend {
             css(palette::SUCCESS_BRIGHT),
             css(palette::AMBER_BRIGHT),
             css(palette::PURPLE_BRIGHT),
-            css(palette::BLUE_BRIGHT),
+            css(palette::accent_ink()),
             css(palette::WARN),
             css(palette::DANGER),
-            css(palette::GOLD_BRIGHT),
+            css(palette::accent_ink()),
         ];
         let fixed: [(&str, &str); 61] = [
             ("background", &surface),

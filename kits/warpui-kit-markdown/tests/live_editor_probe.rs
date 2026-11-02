@@ -399,7 +399,7 @@ fn colors_follow_the_apps_accent_preset(tcx: &mut TestAppContext) {
     let tokens = warpui_kit_core::font_tokens(None, 1.);
     let apply = |preset: &str, cx: &mut gpui::App| {
         let accent = palette::AccentColors::for_preset(palette::normalize_accent(Some(preset)));
-        warpui_kit_core::apply_kit_theme(accent, &tokens, palette::BACKGROUND, cx);
+        warpui_kit_core::apply_kit_theme(accent, &tokens, palette::surface(), cx);
         accent
     };
     for preset in ["blue", "green", "amber", "salmon", "gray"] {
@@ -414,9 +414,9 @@ fn colors_follow_the_apps_accent_preset(tcx: &mut TestAppContext) {
             assert_eq!(colors.selection, selection, "{preset}: selection");
             assert_eq!(colors.tag_wash.h, want.h, "{preset}: tags wash the accent");
             // what never follows a preset comes from the family palette
-            assert_eq!(colors.faint, palette::TEXT_FAINT.into());
-            assert_eq!(colors.code_well, palette::DIFF_BG.into());
-            assert_eq!(colors.text, palette::TEXT.into());
+            assert_eq!(colors.faint, palette::text_muted().into());
+            assert_eq!(colors.code_well, palette::well().into());
+            assert_eq!(colors.text, palette::text().into());
         });
     }
 }

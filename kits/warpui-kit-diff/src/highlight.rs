@@ -154,13 +154,13 @@ fn diff_styles(code: &str) -> Vec<(Range<usize>, HighlightStyle)> {
         offset += line.len() + 1;
         let style = if line.starts_with("@@") {
             Some(HighlightStyle {
-                color: Some(palette::TEXT_MUTED.into()),
+                color: Some(palette::text_muted().into()),
                 background_color: Some(palette::DIFF_HUNK_BG),
                 ..Default::default()
             })
         } else if is_meta(line) {
             Some(HighlightStyle {
-                color: Some(palette::TEXT_MUTED.into()),
+                color: Some(palette::text_muted().into()),
                 ..Default::default()
             })
         } else if line.starts_with('+') {

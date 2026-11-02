@@ -76,7 +76,7 @@ fn data(_filter: &str, _window: &Window, _cx: &App) -> PickerData {
         },
         footer: None,
         fonts,
-        accent: palette::ACCENT,
+        accent: palette::accent(),
         show_tooltips: false,
     }
 }

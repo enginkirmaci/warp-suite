@@ -187,8 +187,8 @@ pub fn text_size_control() -> impl IntoElement {
         .p(px(3.))
         .rounded(px(8.))
         .border_1()
-        .border_color(palette::SEG_BORDER)
-        .bg(palette::SEG_BG);
+        .border_color(palette::hairline())
+        .bg(palette::well());
     for (size, label) in TEXT_SIZES {
         let active = size == current;
         let id = format!("text-size-{size}");
@@ -207,11 +207,11 @@ pub fn text_size_control() -> impl IntoElement {
                 .text_size(px(fonts::font_row_meta()))
                 .font_weight(FontWeight::MEDIUM)
                 .when(active, |d| {
-                    d.bg(palette::SEG_ACTIVE).text_color(palette::SEG_ACTIVE_FG)
+                    d.bg(palette::raised()).text_color(palette::text())
                 })
                 .when(!active, |d| {
-                    d.text_color(palette::TEXT_MUTED)
-                        .hover(|s| s.text_color(palette::TEXT))
+                    d.text_color(palette::text_muted())
+                        .hover(|s| s.text_color(palette::text()))
                 })
                 .on_click(move |_, _, cx| set_text_size(size, cx))
                 .child(label),
@@ -345,15 +345,8 @@ mod desktop {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::fonts::factor_lock::serial;
     use std::cell::Cell;
-    use std::sync::{Mutex, MutexGuard};
-
-    /// The factors are process-wide, so the tests that move them take turns.
-    static SERIAL: Mutex<()> = Mutex::new(());
-
-    fn serial() -> MutexGuard<'static, ()> {
-        SERIAL.lock().unwrap_or_else(|poison| poison.into_inner())
-    }
 
     fn scratch_file(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("warp-scale-{}-{name}", std::process::id()));

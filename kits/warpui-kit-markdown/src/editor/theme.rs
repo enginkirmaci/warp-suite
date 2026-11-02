@@ -46,19 +46,19 @@ impl LiveColors {
         Self {
             background: theme.background,
             text: theme.foreground,
-            muted: palette::TEXT_MUTED.into(),
-            faint: palette::TEXT_FAINT.into(),
+            muted: palette::text_muted().into(),
+            faint: palette::text_muted().into(),
             accent: theme.primary,
             on_accent: theme.primary_foreground,
             link: theme.link,
             selection: theme.selection,
             caret: theme.caret,
-            border: palette::HAIRLINE.into(),
-            code_well: palette::DIFF_BG.into(),
-            code_pill: palette::CHIP.into(),
+            border: palette::hairline().into(),
+            code_well: palette::well().into(),
+            code_pill: palette::raised().into(),
             highlight: Hsla {
                 a: HIGHLIGHT_ALPHA,
-                ..palette::GOLD_BRIGHT.into()
+                ..palette::accent_ink().into()
             },
             tag_wash: Hsla {
                 a: TAG_ALPHA,
@@ -94,7 +94,7 @@ impl LiveColors {
     /// A callout family's hue.
     pub fn tone(&self, tone: Tone) -> Hsla {
         match tone {
-            Tone::Blue => palette::BLUE_BRIGHT.into(),
+            Tone::Blue => palette::accent_ink().into(),
             // callout titles are ink, so they take the accent's text shade
             Tone::Accent => self.link,
             Tone::Green => palette::SUCCESS_BRIGHT.into(),

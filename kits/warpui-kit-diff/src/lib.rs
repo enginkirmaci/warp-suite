@@ -67,7 +67,7 @@ pub fn render_diff(
     };
 
     let style = code_style(window, font_detail, palette::CODE_FG);
-    let muted_style = code_style(window, font_detail, palette::TEXT_MUTED);
+    let muted_style = code_style(window, font_detail, palette::text_muted());
     let num_style = HighlightStyle {
         color: Some(palette::DIFF_GUTTER.into()),
         ..Default::default()

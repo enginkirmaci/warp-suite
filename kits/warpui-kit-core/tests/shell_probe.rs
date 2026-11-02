@@ -36,7 +36,7 @@ impl Render for Shell {
                                             "tab-list",
                                             "Repositories",
                                             true,
-                                            palette::SURFACE,
+                                            palette::surface(),
                                         )
                                         .child("Repositories"),
                                     )
@@ -45,7 +45,7 @@ impl Render for Shell {
                                             "tab-item",
                                             "warp-agent",
                                             false,
-                                            palette::PANEL,
+                                            palette::panel(),
                                         )
                                         .child("warp-agent"),
                                     ),

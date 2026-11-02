@@ -12,6 +12,15 @@ gpui = { package = "gpui-pre", version = "=0.3.7" }
 gpui-kit = { version = "0.7" }
 serde_json = "1"
 tracing = { version = "0.1", default-features = false, features = ["std"] }
+# `media`: attachment mime guesses and inline images from bytes. Feature-scoped
+# so an app that draws no images does not pull the decoders in.
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp"], optional = true }
+smallvec = { version = "1", optional = true }
+
+[features]
+# the media helpers; on by default because every suite app draws images
+default = ["media"]
+media = ["dep:image", "dep:smallvec"]
 
 [dev-dependencies]
 # headless UI probes (tests/); feature-unifies with the normal gpui-kit dep

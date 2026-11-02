@@ -67,9 +67,9 @@ pub fn title_bar() -> Div {
         .items_center()
         .gap_2()
         .h(px(scaled(TITLE_BAR_HEIGHT)))
-        .bg(palette::WINDOW_CHROME)
+        .bg(palette::window_chrome())
         .border_b_1()
-        .border_color(palette::HAIRLINE)
+        .border_color(palette::hairline())
 }
 
 /// The app's sections. A spacer child pins Settings to the bottom.
@@ -82,9 +82,9 @@ pub fn rail() -> Div {
         .w(px(scaled(RAIL_WIDTH)))
         .h_full()
         .p_2()
-        .bg(palette::WINDOW_CHROME)
+        .bg(palette::window_chrome())
         .border_r_1()
-        .border_color(palette::HAIRLINE)
+        .border_color(palette::hairline())
 }
 
 /// One section: an icon over its label, the selected one lifted and inked.
@@ -94,7 +94,7 @@ pub fn rail_item(
     label: impl Into<SharedString>,
     selected: bool,
 ) -> Stateful<Div> {
-    rail_item_inked(id, icon_path, label, selected, palette::ACCENT_INK)
+    rail_item_inked(id, icon_path, label, selected, palette::accent_ink())
 }
 
 /// [`rail_item`] in an accent the user picked: an app with presets passes its own.
@@ -107,9 +107,9 @@ pub fn rail_item_inked(
 ) -> Stateful<Div> {
     let label = label.into();
     let (ink, glyph) = if selected {
-        (palette::TEXT, accent_ink)
+        (palette::text(), accent_ink)
     } else {
-        (palette::TEXT_MUTED, palette::TEXT_MUTED)
+        (palette::text_muted(), palette::text_muted())
     };
     div()
         .id(id)
@@ -125,9 +125,9 @@ pub fn rail_item_inked(
         .text_size(px(fonts::font_micro()))
         .font_weight(FontWeight::MEDIUM)
         .text_color(ink)
-        .when(selected, |d| d.bg(palette::RAISED))
+        .when(selected, |d| d.bg(palette::raised()))
         .when(!selected, |d| {
-            d.hover(|s| s.bg(palette::PANEL).text_color(palette::TEXT))
+            d.hover(|s| s.bg(palette::panel()).text_color(palette::text()))
         })
         .child(icon(icon_path, px(scaled(22.)), glyph))
         .child(label)
@@ -153,13 +153,13 @@ pub fn tab_strip() -> Div {
         .gap_0p5()
         .h(px(scaled(TAB_STRIP_HEIGHT)))
         .px_2()
-        .bg(palette::WINDOW_CHROME)
+        .bg(palette::window_chrome())
         .border_b_1()
-        .border_color(palette::HAIRLINE)
+        .border_color(palette::hairline())
 }
 
 /// One tab of the strip. It joins the surface under it: pass the list's
-/// [`palette::SURFACE`] for the list tab and the detail's [`palette::PANEL`] for
+/// [`palette::surface()`] for the list tab and the detail's [`palette::panel()`] for
 /// an item.
 pub fn strip_tab(
     id: impl Into<ElementId>,
@@ -184,7 +184,7 @@ pub fn strip_tab(
         .text_size(px(fonts::font_body()))
         .when(selected, |d| {
             d.bg(surface)
-                .text_color(palette::TEXT)
+                .text_color(palette::text())
                 .font_weight(FontWeight::SEMIBOLD)
                 .child(
                     div()
@@ -193,13 +193,13 @@ pub fn strip_tab(
                         .left_0()
                         .right_0()
                         .h(px(MARK))
-                        .bg(palette::ACCENT),
+                        .bg(palette::accent()),
                 )
         })
         .when(!selected, |d| {
-            d.text_color(palette::TEXT_DIM)
+            d.text_color(palette::text_dim())
                 .font_weight(FontWeight::MEDIUM)
-                .hover(|s| s.bg(palette::PANEL).text_color(palette::TEXT))
+                .hover(|s| s.bg(palette::panel()).text_color(palette::text()))
         })
 }
 
@@ -213,9 +213,9 @@ pub fn list_pane(width: f32) -> Div {
         .w(px(width))
         .h_full()
         .min_h_0()
-        .bg(palette::SURFACE)
+        .bg(palette::surface())
         .border_r_1()
-        .border_color(palette::HAIRLINE)
+        .border_color(palette::hairline())
 }
 
 /// The detail: the selected item, the one place it ever opens.
@@ -227,7 +227,7 @@ pub fn detail_pane() -> Div {
         .min_w_0()
         .h_full()
         .min_h_0()
-        .bg(palette::PANEL)
+        .bg(palette::panel())
 }
 
 /// One tab of a detail pane's strip. Its count goes in as a child.
@@ -250,7 +250,7 @@ pub fn detail_tab(
         .px_3()
         .text_size(px(fonts::font_body()))
         .when(selected, |d| {
-            d.text_color(palette::TEXT)
+            d.text_color(palette::text())
                 .font_weight(FontWeight::SEMIBOLD)
                 .child(
                     div()
@@ -261,14 +261,14 @@ pub fn detail_tab(
                         .h(px(MARK))
                         .child(crate::motion::grow_mark(
                             SharedString::from(format!("detail-tab-mark-{label}")),
-                            palette::ACCENT,
+                            palette::accent(),
                         )),
                 )
         })
         .when(!selected, |d| {
-            d.text_color(palette::TEXT_DIM)
+            d.text_color(palette::text_dim())
                 .font_weight(FontWeight::MEDIUM)
-                .hover(|s| s.text_color(palette::TEXT))
+                .hover(|s| s.text_color(palette::text()))
         })
         .child(label)
 }
@@ -283,17 +283,17 @@ pub fn list_row(id: impl Into<ElementId>, selected: bool) -> Stateful<Div> {
         .px_4()
         .py_2p5()
         .when(selected, |d| {
-            d.bg(palette::RAISED).child(
+            d.bg(palette::raised()).child(
                 div()
                     .absolute()
                     .top_0()
                     .bottom_0()
                     .left_0()
                     .w(px(MARK + 1.))
-                    .bg(palette::ACCENT),
+                    .bg(palette::accent()),
             )
         })
-        .when(!selected, |d| d.hover(|s| s.bg(palette::PANEL)))
+        .when(!selected, |d| d.hover(|s| s.bg(palette::panel())))
 }
 
 /// The one field height, at the live text size. A kit `Input` sizes itself to
@@ -336,10 +336,16 @@ pub fn field_at_width(
 mod tests {
     use super::*;
 
+    /// The bounds ride the text size, and the factor is process-wide: the
+    /// scale tests move it, so this takes its turn and reads the factor once,
+    /// instead of assuming 1.0 or reading it twice across a change.
     #[test]
     fn a_saved_list_width_stays_between_the_bounds() {
-        assert_eq!(clamp_list_width(10.), LIST_MIN_WIDTH);
-        assert_eq!(clamp_list_width(5000.), LIST_MAX_WIDTH);
-        assert_eq!(clamp_list_width(LIST_WIDTH), LIST_WIDTH);
+        let _turn = crate::fonts::factor_lock::serial();
+        let factor = fonts::font_factor();
+        let at = |v: f32| v * factor;
+        assert_eq!(clamp_list_width(10.), at(LIST_MIN_WIDTH));
+        assert_eq!(clamp_list_width(5000.), at(LIST_MAX_WIDTH));
+        assert_eq!(clamp_list_width(LIST_WIDTH), at(LIST_WIDTH));
     }
 }

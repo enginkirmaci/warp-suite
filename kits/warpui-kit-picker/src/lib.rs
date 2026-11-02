@@ -436,7 +436,7 @@ impl FilteredPicker {
             .items_center()
             .text_size(px(font_meta))
             .font_weight(FontWeight::SEMIBOLD)
-            .text_color(palette::TEXT_FAINT);
+            .text_color(palette::text_muted());
         if let Some(selector) = selector {
             let selector = selector.to_string();
             row = row.debug_selector(move || selector.clone());
@@ -453,7 +453,7 @@ impl FilteredPicker {
             .flex()
             .items_center()
             .text_size(px(font_body))
-            .text_color(palette::TEXT_FAINT)
+            .text_color(palette::text_muted())
             .child(label.to_string())
             .into_any_element()
     }
@@ -471,11 +471,11 @@ impl FilteredPicker {
         let color = if item.selected && spec.selected_accent {
             accent
         } else if item.muted {
-            palette::TEXT_FAINT
+            palette::text_muted()
         } else if spec.selected_accent {
-            palette::TEXT_DIM
+            palette::text_dim()
         } else {
-            palette::TEXT
+            palette::text()
         };
         let weight = if item.selected && spec.selected_accent {
             FontWeight::SEMIBOLD
@@ -579,7 +579,7 @@ impl FilteredPicker {
                         if armed {
                             palette::DANGER
                         } else {
-                            palette::TEXT_MUTED
+                            palette::text_muted()
                         },
                     )),
                 show_tooltips,
@@ -657,15 +657,15 @@ impl FilteredPicker {
             .border_color(if self.open {
                 data.accent
             } else {
-                palette::HAIRLINE
+                palette::hairline()
             })
-            .bg(palette::INPUT)
+            .bg(palette::well())
             .px_2()
             .py_1()
             .flex()
             .items_center()
             .gap_2()
-            .hover(|s| s.border_color(palette::TEXT_MUTED));
+            .hover(|s| s.border_color(palette::text_muted()));
         if self.spec.stop_trigger_mousedown {
             trigger = trigger.on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation());
         }
@@ -682,7 +682,7 @@ impl FilteredPicker {
                         row.child(warpui_kit_core::icon(
                             icon_path,
                             px(fonts.icon_small),
-                            palette::TEXT_MUTED,
+                            palette::text_muted(),
                         ))
                     })
                     .when(self.spec.provider_badge, |row| match &data.selected.badge {
@@ -691,9 +691,9 @@ impl FilteredPicker {
                                 .px_1p5()
                                 .py_0p5()
                                 .rounded_sm()
-                                .bg(palette::CHIP)
+                                .bg(palette::raised())
                                 .text_size(px(badge_size))
-                                .text_color(palette::TEXT_MUTED)
+                                .text_color(palette::text_muted())
                                 .child(badge.clone()),
                         ),
                         _ => row,
@@ -703,9 +703,9 @@ impl FilteredPicker {
                             .truncate()
                             .text_size(px(label_size))
                             .text_color(if data.selected.value.is_empty() {
-                                palette::TEXT_MUTED
+                                palette::text_muted()
                             } else {
-                                palette::TEXT
+                                palette::text()
                             })
                             .child(data.selected.label.clone()),
                     ),
@@ -713,7 +713,7 @@ impl FilteredPicker {
             .child(warpui_kit_core::icon(
                 self.spec.icons.chevron_down,
                 px(fonts.icon_small),
-                palette::TEXT_MUTED,
+                palette::text_muted(),
             ));
         trigger
     }
@@ -737,9 +737,9 @@ impl FilteredPicker {
             .flex()
             .items_center()
             .text_size(px(fonts.font_body))
-            .text_color(palette::TEXT_MUTED)
+            .text_color(palette::text_muted())
             .border_1()
-            .border_color(palette::HAIRLINE)
+            .border_color(palette::hairline())
             .hover(|s| s.bg(palette::HOVER))
             .on_click(cx.listener(|this, _, _, cx| {
                 if let Some(on_refresh) = &this.on_refresh {
@@ -750,7 +750,7 @@ impl FilteredPicker {
             .child(warpui_kit_core::icon(
                 self.spec.icons.refresh,
                 px(fonts.icon_small),
-                palette::TEXT_MUTED,
+                palette::text_muted(),
             ))
     }
 
@@ -787,8 +787,8 @@ impl FilteredPicker {
             .p_1()
             .gap_1()
             .border_1()
-            .border_color(palette::HAIRLINE)
-            .bg(palette::POPUP)
+            .border_color(palette::hairline())
+            .bg(palette::popup())
             .flex()
             .flex_col();
         if self.spec.overlay

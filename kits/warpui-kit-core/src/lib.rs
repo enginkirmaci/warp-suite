@@ -3,8 +3,8 @@
 //! One palette, one font stack, one set of shared control helpers for the
 //! desktop clients built on [gpui-kit](https://crates.io/crates/gpui-kit):
 //!
-//! - [`palette`] — the Copper ramp, one hue per entity, the accent preset
-//!   system and the syntax highlight theme
+//! - [`palette`] — the switchable ramps (Copper, Plum, Pine, Blue), one hue
+//!   per entity, the accent preset system and the syntax highlight theme
 //! - [`fonts`] — the bundled Inter and JetBrains Mono faces, font resolution
 //!   and the type scale
 //! - [`scale`] — the UI scale every app shares: one text size setting and
@@ -14,6 +14,8 @@
 //! - [`kit`] — maps the palette onto gpui-kit's shadcn-style theme tokens
 //! - [`a11y`] — the role/label trait every hand-rolled control passes through
 //! - [`mod@icon`] — tinted svg icon builder
+//! - [`controls`] — the one button look, menu row, popover card and fold body
+//! - [`media`] — attachment mime guesses and inline images from bytes
 //! - [`tooltip`] and [`tooltip_overlay`] — the two tooltip mechanisms
 //!
 //! The component crates (`warpui-kit-diff`, `warpui-kit-markdown`,
@@ -21,9 +23,12 @@
 //! same family.
 
 pub mod a11y;
+pub mod controls;
 pub mod fonts;
 pub mod icon;
 pub mod kit;
+#[cfg(feature = "media")]
+pub mod media;
 pub mod motion;
 pub mod palette;
 pub mod scale;
@@ -32,6 +37,7 @@ pub mod tooltip;
 pub mod tooltip_overlay;
 
 pub use a11y::A11y;
+pub use controls::{BtnKind, button, fold_body, menu_row, popover_card};
 pub use fonts::{
     CODE_FONT, FONT_LARGE, FONT_LARGER, FONT_NORMAL, FONT_UI, FontTokens, active_tokens, code_font,
     font_factor, font_tokens, normalize_font_scale, resolve_fonts, set_font_scale,
@@ -39,6 +45,8 @@ pub use fonts::{
 };
 pub use icon::icon;
 pub use kit::apply_kit_theme;
+#[cfg(feature = "media")]
+pub use media::{decode_png_render, mime_for_path};
 pub use palette::{
     ACCENT_PRESETS, AccentColors, AccentPreset, highlight_theme, normalize_accent, rgba_hex,
     rgba_u32, selection, tint,
