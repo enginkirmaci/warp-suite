@@ -1,0 +1,66 @@
+[package]
+name = "warp-station"
+version.workspace = true
+edition.workspace = true
+description = "Warp Station — repository workbench"
+
+[lib]
+name = "warp_station"
+path = "src/lib.rs"
+
+[[bin]]
+name = "warp-station"
+path = "src/main.rs"
+
+[dev-dependencies]
+# headless UI probes (tests/); feature-unifies with the normal gpui-kit dep
+# only under `cargo test`
+gpui-kit = { version = "0.7", features = ["test-support"] }
+# the warp watcher cycle test's throwaway endpoint dir
+tempfile = "3"
+
+[target.'cfg(windows)'.build-dependencies]
+winresource = "0.1"
+
+[dependencies]
+warp-station-core = { path = "../warp-station-core" }
+
+# gpui-pre: crates.io snapshots of zed's gpui, pinned to the exact rev
+# gpui-kit 0.7 is built against (=zed@1a28cff). Bump together with gpui-kit.
+gpui = { package = "gpui-pre", version = "=0.3.7" }
+gpui_platform = { package = "gpui-pre-platform", version = "=0.3.7", features = ["wayland", "x11"] }
+gpui-kit = { version = "0.7" }
+
+# the shared component family (local sibling repos; swap to version deps to publish)
+warpui-kit-core = { path = "../../../warp-suite/warpui-kits/warpui-kit-core" }
+warpui-kit-diff = { path = "../../../warp-suite/warpui-kits/warpui-kit-diff", features = [
+    "tree-sitter-bash",
+    "tree-sitter-c",
+    "tree-sitter-cpp",
+    "tree-sitter-css",
+    "tree-sitter-go",
+    "tree-sitter-html",
+    "tree-sitter-javascript",
+    "tree-sitter-python",
+    "tree-sitter-rust",
+    "tree-sitter-toml",
+    "tree-sitter-typescript",
+    "tree-sitter-tsx",
+    "tree-sitter-yaml",
+] }
+warpui-kit-markdown = { path = "../../../warp-suite/warpui-kits/warpui-kit-markdown" }
+warpui-kit-picker = { path = "../../../warp-suite/warpui-kits/warpui-kit-picker" }
+
+anyhow = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+async-channel = "2"
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "process", "time", "io-util", "net", "sync"] }
+futures-util = "0.3"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+tracing-appender = "0.2"
+# the Add-Repositories Browse… button; portal backend shares gpui's ashpd
+# stack on Linux (no GTK dependency), IFileDialog on Windows
+rfd = { version = "0.17", default-features = false, features = ["xdg-portal"] }

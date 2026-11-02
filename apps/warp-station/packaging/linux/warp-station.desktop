@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Warp Station
+GenericName=Repository workbench
+Comment=Repositories, git changes, pull requests and notes
+Exec=$HOME/Developments/warp-station/packaging/linux/out/warp-station
+Icon=warp-station
+Terminal=false
+Categories=Development;RevisionControl;
+StartupWMClass=warp-station

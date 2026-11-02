@@ -1,0 +1,304 @@
+//! The README view: the repo's README rendered as markdown (the kit's
+//! TextView). The wand generates a draft that renders in place with
+//! Save/Discard; Save writes README.md.
+
+use crate::net::WandKind;
+use crate::store::Store;
+use crate::theme;
+use crate::ui::A11y;
+use crate::ui::icon;
+use gpui::prelude::*;
+use gpui::{Context, Entity, FontWeight, SharedString, Window, div, px};
+use gpui_kit::base::text::TextView;
+
+pub struct ReadmeView {
+    pub store: Entity<Store>,
+    /// SharedString: every render hands the TextView a refcount, never a
+    /// full copy of the README.
+    readme: Option<SharedString>,
+    loaded_for: Option<String>,
+}
+
+impl ReadmeView {
+    pub fn new(store: Entity<Store>, cx: &mut Context<Self>) -> Self {
+        cx.observe(&store, |this, _, cx| this.follow_selection(cx))
+            .detach();
+        let mut view = Self {
+            store,
+            readme: None,
+            loaded_for: None,
+        };
+        view.follow_selection(cx);
+        view
+    }
+
+    /// Reads the README once per selected repo.
+    fn follow_selection(&mut self, cx: &mut Context<Self>) {
+        let selected = self.store.read(cx).selected_repo.clone();
+        if selected == self.loaded_for {
+            return;
+        }
+        self.readme = selected
+            .as_deref()
+            .and_then(read_readme)
+            .map(SharedString::from);
+        self.loaded_for = selected;
+        cx.notify();
+    }
+}
+
+impl Render for ReadmeView {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl gpui::IntoElement {
+        let folder = self.store.read(cx).selected_repo.clone();
+        let draft = self.store.read(cx).readme_draft.clone();
+        let wand_active = {
+            let state = self.store.read(cx);
+            state.wand_busy == Some(WandKind::Readme)
+                && state.wand_repo.as_deref() == state.selected_repo.as_deref()
+        };
+        let ai_available = self.store.read(cx).wand_available();
+        let has_draft = draft.is_some();
+        let shown: Option<SharedString> = draft
+            .as_ref()
+            .map(|d| SharedString::from(d.as_str()))
+            .or_else(|| self.readme.clone());
+
+        let header = div()
+            .id("readme-header")
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap_2()
+            .px_4()
+            .py_2()
+            .border_b_1()
+            .border_color(theme::BORDER_LIGHT)
+            .child(
+                div()
+                    .text_size(px(theme::font_body()))
+                    .text_color(theme::TEXT_MUTED)
+                    .child(if has_draft {
+                        "README.md (unsaved)"
+                    } else {
+                        "README.md"
+                    }),
+            )
+            .child(div().flex_1())
+            .when(has_draft, |row| {
+                let folder_save = folder.clone();
+                row.child(
+                    div()
+                        .id("readme-discard")
+                        .debug_selector(|| "readme-discard".into())
+                        .a11y_button("Discard README draft")
+                        .cursor_pointer()
+                        .rounded_md()
+                        .px_2()
+                        .py_0p5()
+                        .flex()
+                        .items_center()
+                        .gap_1()
+                        .text_size(px(theme::font_body()))
+                        .text_color(theme::TEXT_DIM)
+                        .border_1()
+                        .border_color(theme::HAIRLINE)
+                        .hover(|s| s.bg(theme::HOVER_BG))
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.store.update(cx, |s: &mut Store, cx| {
+                                s.readme_draft = None;
+                                cx.notify();
+                            });
+                        }))
+                        .child(icon(
+                            "icons/icon-undo.svg",
+                            px(theme::icon_small() - 1.),
+                            theme::TEXT_DIM,
+                        ))
+                        .child("Discard"),
+                )
+                .child(
+                    div()
+                        .id("readme-save")
+                        .debug_selector(|| "readme-save".into())
+                        .a11y_button("Save README")
+                        .cursor_pointer()
+                        .rounded_md()
+                        .px_2()
+                        .py_0p5()
+                        .flex()
+                        .items_center()
+                        .gap_1()
+                        .text_size(px(theme::font_body()))
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .bg(theme::ACCENT)
+                        .text_color(theme::ON_ACCENT)
+                        .hover(|s| s.opacity(0.9))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            let Some(folder) = folder_save.clone() else {
+                                return;
+                            };
+                            let draft = this
+                                .store
+                                .update(cx, |s: &mut Store, _| s.readme_draft.take());
+                            if let Some(draft) = draft {
+                                let path = std::path::Path::new(&folder).join("README.md");
+                                match std::fs::write(&path, format!("{draft}\n")) {
+                                    Ok(()) => {
+                                        this.readme = Some(draft.into());
+                                        tracing::info!("saved {}", path.display());
+                                    }
+                                    Err(err) => {
+                                        tracing::warn!("README save failed: {err}");
+                                        this.store.update(cx, |s: &mut Store, cx| {
+                                            s.notify_error("Could not save README.md");
+                                            cx.notify();
+                                        });
+                                    }
+                                }
+                            }
+                            cx.notify();
+                        }))
+                        .child(icon(
+                            "icons/icon-save.svg",
+                            px(theme::icon_small() - 1.),
+                            theme::ON_ACCENT,
+                        ))
+                        .child("Save README"),
+                )
+            })
+            .when(!wand_active && shown.is_some() && ai_available, |row| {
+                row.child({
+                    let store = self.store.clone();
+                    div()
+                        .id("readme-wand")
+                        .a11y_button("Draft README with OpenCode")
+                        .cursor_pointer()
+                        .rounded_md()
+                        .p_1()
+                        .flex()
+                        .items_center()
+                        .hover(|s| s.bg(theme::HOVER_BG))
+                        .on_click(move |_, _, cx| {
+                            store.update(cx, |s, cx| s.run_wand(WandKind::Readme, cx));
+                        })
+                        .child(icon(
+                            "icons/icon-wand.svg",
+                            px(theme::icon_small()),
+                            theme::TEXT_MUTED,
+                        ))
+                })
+            })
+            .when(wand_active, |row| {
+                row.child(div().rounded_md().p_1().flex().items_center().child(icon(
+                    "icons/icon-wand.svg",
+                    px(theme::icon_small()),
+                    theme::BLUE_BRIGHT,
+                )))
+            });
+
+        let store_for_empty = self.store.clone();
+        let pane = div()
+            .id("readme-pane")
+            .debug_selector(|| "readme-pane".into())
+            .flex_1()
+            .min_w_0()
+            .min_h_0()
+            .overflow_y_scroll()
+            .px_5()
+            .py_4()
+            .when(shown.is_some(), |pane| {
+                // reading content keeps the design's 760 measure
+                pane.child(
+                    div()
+                        .max_w(px(warpui_kit_core::shell::READING_WIDTH))
+                        .child(render_markdown(shown.clone().unwrap_or_default())),
+                )
+            })
+            .when(shown.is_none(), |pane| {
+                pane.child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .items_center()
+                        .justify_center()
+                        .gap_2()
+                        .h_full()
+                        .child(icon(
+                            "icons/icon-note.svg",
+                            px(theme::icon_large() + 10.),
+                            theme::TEXT_FAINT,
+                        ))
+                        .child(
+                            div()
+                                .text_size(px(theme::font_heading()))
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .text_color(theme::TEXT_DIM)
+                                .child("No README yet"),
+                        )
+                        .child(
+                            div()
+                                .text_size(px(theme::font_body()))
+                                .text_color(theme::TEXT_FAINT)
+                                .child("Create a README.md in the repository root to see it here."),
+                        )
+                        .when(ai_available && !wand_active, |column| {
+                            column.child(
+                                div()
+                                    .id("readme-empty-wand")
+                                    .a11y_button("Draft README with OpenCode")
+                                    .cursor_pointer()
+                                    .rounded_md()
+                                    .border_1()
+                                    .border_color(theme::ACCENT)
+                                    .px_3()
+                                    .py_1p5()
+                                    .flex()
+                                    .flex_row()
+                                    .items_center()
+                                    .gap_1p5()
+                                    .text_size(px(theme::font_body()))
+                                    .text_color(theme::BLUE_BRIGHT)
+                                    .hover(|s| s.bg(theme::tint(theme::ACCENT)))
+                                    .on_click(move |_, _, cx| {
+                                        store_for_empty
+                                            .update(cx, |s, cx| s.run_wand(WandKind::Readme, cx));
+                                    })
+                                    .child(icon(
+                                        "icons/icon-wand.svg",
+                                        px(theme::icon_small()),
+                                        theme::BLUE_BRIGHT,
+                                    ))
+                                    .child("Draft with OpenCode"),
+                            )
+                        }),
+                )
+            });
+
+        div()
+            .size_full()
+            .flex()
+            .flex_col()
+            .min_h_0()
+            .child(header)
+            .child(pane)
+    }
+}
+
+fn read_readme(folder: &str) -> Option<String> {
+    for name in [
+        "README.md",
+        "readme.md",
+        "Readme.md",
+        "README.markdown",
+        "README",
+    ] {
+        if let Ok(text) = std::fs::read_to_string(std::path::Path::new(folder).join(name)) {
+            return Some(text);
+        }
+    }
+    None
+}
+
+fn render_markdown(source: SharedString) -> impl IntoElement + use<> {
+    TextView::markdown(gpui::ElementId::Name("readme".into()), source).selectable(true)
+}

@@ -1,0 +1,23 @@
+[package]
+name = "warp-station-core"
+version.workspace = true
+edition.workspace = true
+description = "Headless Warp Station services — no gpui dependencies"
+
+[dependencies]
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tracing = "0.1"
+async-channel = "2"
+futures-util = "0.3"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std", "serde"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "process", "time", "io-util", "sync", "net"] }
+git2 = { version = "0.21", default-features = false }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[dev-dependencies]
+tempfile = "3"

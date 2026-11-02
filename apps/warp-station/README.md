@@ -1,0 +1,55 @@
+# Warp Station
+
+Compact developer utilities collection — Rust/GPUI app.
+
+## Quick start
+
+```sh
+cargo run            # debug run
+cargo test           # unit + live git parity + headless UI probes
+```
+
+User data lives in `~/.warp` (settings, repos cache, notes, `assistant/`
+with the prompt templates, and `models.cache.json` for the model catalog). An
+old `opencode/` folder — or a stray `ai/` from a development build — is split
+into those on startup, and a legacy `~/.devtools` root is absorbed into
+`~/.warp` on first launch.
+
+## warp-agent integration
+
+The AI surface (commit-message / README wands, the daily summary, the
+harness/model/variant catalog) runs in [warp-agent](../warp-agent) over its
+loopback door (`~/.warp-agent/ipc.port` + `ipc.token`) — Warp Station no longer
+spawns `opencode serve` itself. Rules: a missing warp-agent binary turns the
+AI features off; a merely closed one is launched on demand. Wand runs happen
+as visible warp-agent chats in the repo's workspace (added when missing), the
+daily summary runs in warp-agent's General workspace, and tool-permission
+asks are answered in warp-agent's own UI. Settings picks the harness (the
+door reports the options), one model and that model's variant; commit-message
+generation uses the same selection as every other wand.
+
+The switches are independent: **Enable warp-agent** arms the whole AI
+surface (wands, summary, the catalog), while **Enable OpenCode** and
+**Enable DeepSeek** only show the repo rows' CLI buttons, which launch the
+`opencode` / `dsh` CLIs themselves in a terminal (`opencode` with
+`--model <model>` when the opencode harness is selected; `dsh` boots its own
+profile and takes no model) — that launch never goes through warp-agent, and
+the AI features never need the CLI binaries.
+
+## Package
+
+- Linux: `packaging/linux/install.sh` installs the desktop entry + hicolor
+  icons so the launcher shows the app; `Exec` points at the staged
+  `packaging/linux/out/warp-station`.
+- Windows (build on a Windows box — GPUI has no Linux→Windows cross build):
+  `packaging/windows/build.ps1` stages the runnable file under
+  `packaging/windows/out`: `warp-station.exe`. The app icon is
+  embedded into the exe by `build.rs` from `packaging/windows/warp-station.ico`.
+
+## SnapIt
+
+The Windows zone snapper lives in its own repo,
+[enginkirmaci/warp-snapit](https://github.com/enginkirmaci/warp-snapit), and
+reads the same `~/.warp/snapit` settings/layouts. `snapit.exe` is
+distributed through [warp-suite](https://github.com/enginkirmaci/warp-suite)
+releases (`SnapIt.Executable` in the settings points Warp Station at the exe).
