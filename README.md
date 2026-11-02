@@ -114,6 +114,9 @@ C#/.NET SnapIt repo would join the same way if ever wanted.
 - The apps are imported with `git subtree` and keep their own histories. Do
   not `git subtree pull`/`push`: warp-suite is the source of truth, and the
   old per-app repos are read-only.
+- Each imported tip is kept as a local ref, `refs/imports/<app>/main`
+  (`git show refs/imports/warp-agent/main`). They are not branches, so they
+  do not appear in `git branch` and a normal `git push` does not send them.
 - A release builds whatever is committed on the dispatched ref; the release
   body records the suite commit, and `REVISIONS.txt` records it per app.
 - The apt dependency list in `suite-release.yml` covers GPUI's Linux needs
