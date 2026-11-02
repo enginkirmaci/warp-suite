@@ -78,6 +78,7 @@ Both builds default the version to `git describe --tags --always
 | `scripts/bundle-install.sh` | runs inside an extracted bundle; installs into `~/.local` and records what it wrote |
 | `install.sh` | shim over `scripts/deploy.sh` for the documented one-liner |
 | `.github/workflows/suite-release.yml` | the combined release pipeline |
+| `.github/workflows/kits.yml` | CI gate: kit fmt/clippy/tests + the apps' tests on every push that touches `kits/`, `apps/` or `.cargo/` |
 | `design/v3/` | the committed design contract (DESIGN.md + prototype source); the live source is the OpenDesign project `warp-suite-v3` |
 
 Each app keeps only packaging assets (`packaging/linux/{*.desktop,icons}`,
@@ -151,4 +152,24 @@ C#/.NET SnapIt repo would join the same way if ever wanted.
   `kits/` cargo workspace, so a release builds from this repo alone.
   The suite commit is the kits' provenance — no sync step, no second copy.
   Run `cargo test` in `kits/` after changing one; the apps' lock files
-  alone do not describe the libraries.
+  alone do not describe the libraries. `kits/Cargo.lock` is committed (the
+  only workspace that keeps one) so `cargo --locked` in CI resolves the same
+  versions every run.
+
+## CI caching
+
+Both workflows use `Swatinem/rust-cache`, and both must name the target dir
+explicitly (`workspaces: <workspace> -> <target>`):
+
+- `.cargo/config.toml` sends every workspace to `.build/target`, so the
+  action's default `<workspace>/target` does not exist. A bare
+  `workspaces: kits` caches only the registry, and the build stays cold.
+- The five app workspaces share that one target dir. The action prunes a
+  target dir down to the owning workspace's dependency closure, so listing
+  several workspaces runs several prune passes over the same tree and the
+  last one wins — warp-snapit keeps ~31 of ~816 packages and would delete
+  everything the others built. Each job therefore uses one anchor workspace
+  (`apps/warp-notes`, whose closure covers ~98% of the others').
+
+The target dir is ~4.5 GB release / ~2.9 GB debug, so the caches are pruned
+rather than uploaded whole (the repo cache limit is 10 GB).

@@ -5,6 +5,13 @@ name: suite-release
 #
 # Both jobs call the same scripts a local build uses - scripts/build.sh on
 # Linux, scripts/build.ps1 on Windows - so CI cannot drift from a local build.
+#
+# Cache notes (why this is fast now):
+#   - .cargo/config.toml redirects every workspace to .build/target, so the
+#     cache must name that path explicitly (a bare `target` restores nothing).
+#   - Swatinem/rust-cache keys on rustc + the lockfiles and prunes the target
+#     dir down to dependencies before saving, so the entry stays small instead
+#     of re-uploading the apps' own multi-GB artifacts on every run.
 
 on:
   workflow_dispatch:
@@ -13,68 +20,95 @@ on:
         description: 'Suite version (release tag will be v<version>)'
         required: true
         default: '0.1.0'
+      skip_windows:
+        description: 'Build Linux only (skips the Windows installers)'
+        type: boolean
+        default: false
 
 permissions:
   contents: write
+
+# A release is never cancelled by a newer dispatch, but a queued one waits.
+concurrency:
+  group: suite-release
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: '0'
 
 jobs:
   linux:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install GPUI build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
+          sudo apt-get install -y --no-install-recommends \
             build-essential pkg-config jq \
             libwayland-dev libxkbcommon-dev libxkbcommon-x11-dev libxcb1-dev \
             libvulkan-dev libfontconfig1-dev
 
       - uses: dtolnay/rust-toolchain@stable
 
-      - name: Cache cargo registry and release artifacts
-        uses: actions/cache@v4
+      # The five app workspaces share ONE target dir (.cargo/config.toml
+      # redirects every one of them to .build/target), so the cache config has
+      # to be picked around that:
+      #
+      #  - rust-cache defaults a workspace's target to `<root>/target`, which
+      #    never exists here, so the target dir MUST be named explicitly or the
+      #    entry is registry-only and every run compiles from scratch.
+      #  - it also prunes a target dir down to that workspace's own dependency
+      #    closure. Listing all five would run five prune passes over the same
+      #    tree and the last one wins - warp-snapit keeps ~31 of ~816 packages,
+      #    so it would delete everything the others just built.
+      #  - caching .build/target whole via cache-directories avoids the pruning
+      #    but uploads the apps' own artifacts too (~4.5 GB per OS against a
+      #    10 GB repo limit).
+      #
+      # So: one anchor workspace. warp-notes pulls in the kit crates plus
+      # merman/git2/rfd and keeps ~98% of the union of every app's dependency
+      # closure; what pruning drops is the apps' own binaries, which cargo
+      # rebuilds from source anyway.
+      - uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            .build/target/release
-          key: ${{ runner.os }}-cargo-${{ hashFiles('apps/**/Cargo.lock', 'kits/**', 'apps.toml') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-${{ hashFiles('apps/**/Cargo.lock', 'kits/**') }}-
-            ${{ runner.os }}-cargo-
+          workspaces: apps/warp-notes -> ../../.build/target
+          shared-key: release-linux
+          cache-on-failure: true
 
       - name: Build Linux bundle
         run: scripts/build.sh --version "${{ inputs.version }}"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: warp-suite-linux
           path: dist/linux/*.tar.gz
           if-no-files-found: error
+          compression-level: 0
 
   windows:
+    # warp-snapit is Windows-only and the .iss installers only build there, so
+    # this job is what makes the release complete. skip_windows is for the
+    # quick Linux-only iteration loop.
+    if: ${{ !inputs.skip_windows }}
     runs-on: windows-latest
     defaults:
       run:
         shell: pwsh
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: dtolnay/rust-toolchain@stable
 
-      - name: Cache cargo registry and release artifacts
-        uses: actions/cache@v4
+      # Same single-shared-target-dir rule as the Linux job: one anchor
+      # workspace, and the target dir named explicitly.
+      - uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            .build/target/release
-          key: ${{ runner.os }}-cargo-${{ hashFiles('apps/**/Cargo.lock', 'kits/**', 'apps.toml') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-${{ hashFiles('apps/**/Cargo.lock', 'kits/**') }}-
-            ${{ runner.os }}-cargo-
+          workspaces: apps/warp-notes -> ../../.build/target
+          shared-key: release-windows
+          cache-on-failure: true
 
       # windows-latest normally ships Inno Setup; only install when absent.
       - name: Install Inno Setup
@@ -86,7 +120,7 @@ jobs:
       - name: Build Windows deliverables
         run: scripts/build.ps1 -Version "${{ inputs.version }}"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: warp-suite-windows
           path: |
@@ -94,17 +128,20 @@ jobs:
             dist/windows/*.exe
             dist/windows/REVISIONS.txt
           if-no-files-found: error
+          compression-level: 0
 
   release:
     needs: [linux, windows]
+    # `needs` plus a skipped Windows job would otherwise skip the release too.
+    if: ${{ always() && needs.linux.result == 'success' && (needs.windows.result == 'success' || needs.windows.result == 'skipped') }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: artifacts
           merge-multiple: true
 
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           tag_name: v${{ inputs.version }}
           name: warp-suite v${{ inputs.version }}

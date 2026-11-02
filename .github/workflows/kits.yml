@@ -1,54 +1,132 @@
 name: kits
 
-# The release workflow only runs on dispatch, so this is the only PR gate for
-# the kit workspace. Keep fmt/clippy/tests green before a suite tag picks the
-# crates up.
+# The kit workspace gate. The release workflow only runs on dispatch, so this
+# is what keeps kits/ honest between suite tags.
+#
+# Two jobs on purpose: fmt is seconds and does not need a toolchain cache, so
+# a formatting slip fails fast while clippy/tests warm their cache.
 
 on:
   push:
     paths:
       - 'kits/**'
+      - 'apps/**'
+      - '.cargo/**'
       - '.github/workflows/kits.yml'
   pull_request:
     paths:
       - 'kits/**'
+      - 'apps/**'
+      - '.cargo/**'
       - '.github/workflows/kits.yml'
+  workflow_dispatch:
 
 permissions:
   contents: read
 
+# One in-flight run per ref; a new push supersedes the queued one.
+concurrency:
+  group: kits-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  # Debuginfo is most of a cargo target dir and none of what these probes
+  # assert on: 9.5 GB -> 2.9 GB and 53s -> 39s on a cold build. Smaller cache,
+  # faster restore, same test signal.
+  CARGO_PROFILE_DEV_DEBUG: '0'
+  CARGO_PROFILE_TEST_DEBUG: '0'
+  CARGO_INCREMENTAL: '0'
+
 jobs:
+  fmt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - name: cargo fmt --check
+        working-directory: kits
+        run: cargo fmt --all --check
+
   test:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: kits
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install GPUI build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
+          sudo apt-get install -y --no-install-recommends \
             build-essential pkg-config \
             libwayland-dev libxkbcommon-dev libxkbcommon-x11-dev libxcb1-dev \
             libvulkan-dev libfontconfig1-dev
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          components: rustfmt, clippy
+          components: clippy
 
-      - name: Cache cargo registry and target
-        uses: actions/cache@v4
+      # rust-cache keys on the rustc version, the lockfiles and
+      # .cargo/config.toml, so a toolchain or dependency bump is a fresh key and
+      # an unchanged one restores. The target dir is named explicitly because
+      # kits/ builds into the suite target dir (.cargo/config.toml), not the
+      # `kits/target` the action would assume by default - which is why the
+      # hand-rolled actions/cache this replaced never restored anything.
+      - uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            kits/target
-          key: ${{ runner.os }}-kits-${{ hashFiles('kits/**') }}
-          restore-keys: |
-            ${{ runner.os }}-kits-
+          workspaces: kits -> ../.build/target
+          shared-key: kits
+          cache-on-failure: true
 
-      - run: cargo fmt --check
-      - run: cargo clippy --all-targets -- -D warnings
-      - run: cargo test
+      - name: cargo clippy
+        working-directory: kits
+        run: cargo clippy --all-targets --locked -- -D warnings
+
+      - name: cargo test
+        working-directory: kits
+        run: cargo test --locked
+
+  # The apps are separate cargo workspaces with their own lockfiles, so the
+  # kit job above cannot see a break in them (a renamed kit export, a feature
+  # the app does not enable). This is a typecheck + unit-test gate only: no
+  # release profile, no packaging - the release workflow owns those.
+  apps:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install GPUI build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config \
+            libwayland-dev libxkbcommon-dev libxkbcommon-x11-dev libxcb1-dev \
+            libvulkan-dev libfontconfig1-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      # The four app workspaces share ONE target dir (.cargo/config.toml), and
+      # rust-cache both defaults the target to `<root>/target` (which does not
+      # exist here) and prunes a target dir to the workspace that owns it, so
+      # listing them all would have each pass delete what the previous kept.
+      # warp-notes is the anchor: its dependency closure covers ~98% of every
+      # app's, kit crates included, so one prune pass keeps the useful part.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/warp-notes -> ../../.build/target
+          shared-key: apps
+          cache-on-failure: true
+
+      # warp-snapit is Windows-only (its engine is cfg(windows)-gated) but its
+      # platform-neutral modules test on Linux; warp-station is a 2-crate
+      # workspace and needs the package selector.
+      - name: Test apps
+        run: |
+          set -euo pipefail
+          cargo test --locked -p warp-station-core -p warp-station \
+            --manifest-path apps/warp-station/Cargo.toml
+          for app in warp-agent warp-notes warp-snapit; do
+            echo "== $app"
+            cargo test --locked --manifest-path "apps/$app/Cargo.toml"
+          done

@@ -2,5 +2,7 @@
 dist/
 out/
 kits/target/
-kits/Cargo.lock
+# kits/Cargo.lock IS committed on purpose: CI runs `cargo --locked` against it,
+# so kit builds resolve identical dependency versions and the cache key stops
+# moving whenever a transitive dependency publishes a new release.
 __pycache__/
