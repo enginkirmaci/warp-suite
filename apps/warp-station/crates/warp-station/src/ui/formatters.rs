@@ -246,10 +246,12 @@ impl Render for FormattersDrawer {
                             .min_w_0()
                             .debug_selector(|| "fmt-input".into())
                             .child(
-                                // the kit's own `h` only sizes multi-line fields
-                                Input::new(&self.input)
-                                    .with_size(theme::field_size())
-                                    .min_h(px(warpui_kit_core::shell::CONTROL_HEIGHT)),
+                                // the shell owns the field height: a kit input's own
+                                // `h` only sizes multi-line fields
+                                warpui_kit_core::shell::field(
+                                    "fmt-input-field",
+                                    Input::new(&self.input).with_size(theme::field_size()),
+                                ),
                             ),
                     )
                     .child(run_button(
@@ -327,7 +329,9 @@ fn run_button(enabled: bool, cx: &mut Context<FormattersDrawer>) -> gpui::AnyEle
         .flex()
         .items_center()
         .flex_shrink_0()
-        .h(px(warpui_kit_core::shell::CONTROL_HEIGHT))
+        // a button in a field's row takes the field's height: the family has
+        // controls at 34 and fields at 36, and this one sits beside the input
+        .h(warpui_kit_core::shell::field_height())
         .rounded_md()
         .px_3()
         .text_size(px(theme::font_control()))

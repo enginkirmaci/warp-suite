@@ -163,7 +163,12 @@ impl Render for ClipboardPasswordDrawer {
                             .text_color(theme::text_muted())
                             .child("Password"),
                     )
-                    .child(Input::new(&self.password).with_size(theme::field_size()).mask_toggle()),
+                    .child(warpui_kit_core::shell::field(
+                        "password-field",
+                        Input::new(&self.password)
+                            .with_size(theme::field_size())
+                            .mask_toggle(),
+                    )),
             )
             .child(
                 div()

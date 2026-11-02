@@ -590,11 +590,10 @@ fn tag_row(
         row = row.child(tag_chip(tag, entities, folder));
     }
     if let Some(input) = tag_draft {
-        row = row.child(
-            div()
-                .w(px(120.))
-                .child(Input::new(input).with_size(theme::field_size())),
-        );
+        row = row.child(div().w(px(120.)).child(warpui_kit_core::shell::field(
+            "tag-draft-field",
+            Input::new(input).with_size(theme::field_size()),
+        )));
     } else {
         let target = page.clone();
         row = row.child(

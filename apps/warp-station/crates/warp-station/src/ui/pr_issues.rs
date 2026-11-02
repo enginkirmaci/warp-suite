@@ -145,11 +145,10 @@ impl ItemListView {
                     div()
                         .w(px(240.))
                         .debug_selector(|| "issue-filter".into())
-                        .child(
-                            Input::new(&self.filter)
-                                .with_size(theme::field_size())
-                                .min_h(px(shell::CONTROL_HEIGHT)),
-                        ),
+                        .child(warpui_kit_core::shell::field(
+                            "issue-filter-field",
+                            Input::new(&self.filter).with_size(theme::field_size()),
+                        )),
                 )
                 .child(
                     div()

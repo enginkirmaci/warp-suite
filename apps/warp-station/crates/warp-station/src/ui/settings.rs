@@ -1136,11 +1136,15 @@ fn field_row(label_text: &str, field: &Entity<InputState>) -> impl IntoElement +
         .min_h(px(60.))
         .child(div().flex_1().min_w_0().child(label(label_text)))
         .child(
-            div().w(px(240.)).flex_shrink_0().child(
-                Input::new(field)
-                    .with_size(theme::field_size())
-                    .aria_label(label_text),
-            ),
+            div()
+                .w(px(240.))
+                .flex_shrink_0()
+                .child(warpui_kit_core::shell::field(
+                    "settings-field",
+                    Input::new(field)
+                        .with_size(theme::field_size())
+                        .aria_label(label_text),
+                )),
         )
 }
 
