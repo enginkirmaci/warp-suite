@@ -112,11 +112,14 @@ together. When one changes, update the other side in the **same** commit.
   `~/.devtools/notes` renames over on whichever app runs first. Missing
   warp-notes binary = the notes surfaces fail with a toast, nothing else
   breaks.
-- **Shared text size** (`~/.warp/ui.json`, key `text_size`: `compact`, `normal`
-  or `large`): `warpui-kit-core` owns the file and the one control that writes
-  it. A click applies in that app at once; the other apps read the value when
-  they next start. The apps' old `font_scale` settings only seed the file on
-  its first run, so every app must be on the same `warpui-kit-core`.
+- **Shared text size and palette** (`~/.warp/ui.json`: `text_size` is `small`,
+  `normal`, `large` or `larger` — the old `compact` spelling reads as normal —
+  and `palette` is `copper`, `plum`, `pine` or `blue`): `warpui-kit-core` owns
+  the file and the one control that writes each key. A click applies in that
+  app at once; the other apps read the value when they next start. The apps'
+  old `font_scale` settings only seed the file on its first run, so every app
+  must be on the same `warpui-kit-core`. Both keys are additive: a file that
+  lacks one keeps the other.
 
 ## Adding an app
 
