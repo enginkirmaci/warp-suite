@@ -36,6 +36,20 @@ members = [
 version = "0.1.0"
 edition = "2024"
 
+# Dev/test profile: line tables only.
+#
+# Full debuginfo=2 across the ~950-crate graph put ~1 GB of DWARF into every
+# app binary (warp-notes 1.03 GB, warp-station 1.06 GB) and dominated build
+# time: this machine builds into .build/target on a QLC SATA SSD, so emission
+# and linking are I/O-bound (measured 2026-11: swapping bfd for lld changed
+# nothing, 2.8s vs 2.9s on the same link). line-tables-only keeps file:line
+# in panic backtraces — including gpui frames — at a fraction of the bytes.
+# [profile.test] inherits dev, so probes get the same treatment.
+# Set debug = 2 here temporarily when a session needs gdb/lldb variable
+# inspection; that rebuild only touches the dev fingerprints.
+[profile.dev]
+debug = "line-tables-only"
+
 # One release profile for the whole suite (cargo reads these only from the
 # workspace root; per-member [profile.*] tables are ignored).
 [profile.release]
