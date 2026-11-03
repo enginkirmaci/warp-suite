@@ -143,15 +143,27 @@ pub fn pop(id: impl Into<ElementId>, glyph: gpui::Svg) -> AnyElement {
 /// when motion is off, and the words beside it say the rest.
 pub fn progress_line(id: impl Into<ElementId>, color: impl Into<Hsla>) -> AnyElement {
     let color = color.into();
-    let track = div().absolute().left_0().bottom_0().h(px(2.)).bg(color);
+    let track = div().absolute().left_0().bottom_0().h(px(2.));
     if reduced() {
-        return track.w_full().into_any_element();
+        return track.w_full().bg(color).into_any_element();
     }
+    // The sweep starts left of its track so the line enters from nothing, and
+    // an unclipped inset draws past the pane it belongs to — out over the rail
+    // in a list head's case. The track clips that overhang.
     track
-        .w(relative(PROGRESS_SHARE))
-        .with_animation(id, Animation::new(PROGRESS).repeat(), |line: Div, delta| {
-            line.left(relative(delta * (1.0 + PROGRESS_SHARE) - PROGRESS_SHARE))
-        })
+        .right_0()
+        .overflow_hidden()
+        .child(
+            div()
+                .absolute()
+                .top_0()
+                .bottom_0()
+                .w(relative(PROGRESS_SHARE))
+                .bg(color)
+                .with_animation(id, Animation::new(PROGRESS).repeat(), |line: Div, delta| {
+                    line.left(relative(delta * (1.0 + PROGRESS_SHARE) - PROGRESS_SHARE))
+                }),
+        )
         .into_any_element()
 }
 
