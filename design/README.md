@@ -35,8 +35,8 @@ that does not fit the shell is a design bug, not an app exception.
   dialogs, menus and toasts have a shadow.
 - Waiting states say what is happening where it started, and pair motion with a
   word; reduce motion keeps the words and drops the movement.
-- Copper is the shipped palette. Plum and Pine stay in the prototype for
-  comparison.
+- Four palettes ship — Copper, Plum, Pine and Blue — as one `Ramp` struct
+  each; the settings control writes the shared `~/.warp/ui.json`.
 
 ## Status
 

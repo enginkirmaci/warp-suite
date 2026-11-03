@@ -43,9 +43,17 @@ fn settings_page_draws_all_sections(cx: &mut TestAppContext) {
         cx.debug_bounds("text-size-normal").is_some(),
         "Appearance carries the shared text size control"
     );
+    // the palette is a live picker now, the same control the other apps carry
+    for key in ["copper", "plum", "pine", "blue"] {
+        let selector: &'static str = Box::leak(format!("palette-{key}").into_boxed_str());
+        assert!(
+            cx.debug_bounds(selector).is_some(),
+            "Appearance offers the {key} palette"
+        );
+    }
     assert!(
-        cx.debug_bounds("settings-fixed-Palette").is_some(),
-        "Appearance names the fixed Copper palette"
+        cx.debug_bounds("settings-fixed-Palette").is_none(),
+        "the fixed Copper row is gone"
     );
 
     // the switch applies at once, with no Save; the design's row puts it at

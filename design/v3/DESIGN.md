@@ -75,7 +75,7 @@ Nothing here needs blur, gradients or transparency beyond the diff tints.
 
 ## 3. Colour
 
-The darkest step is a recessed well, not the window. All three palettes keep the
+The darkest step is a recessed well, not the window. Every palette keeps the
 same structure, so a palette is a swap of these values only. Copper is the default.
 
 | Token | Role | Copper | Plum | Pine |

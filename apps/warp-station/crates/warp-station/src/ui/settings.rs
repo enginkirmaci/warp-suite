@@ -650,8 +650,8 @@ impl SettingsPage {
             })],
             Section::Appearance => vec![
                 self.card("Palette", cx, |_, _, card| {
-                    card.child(fixed_row("Palette", "Copper"))
-                        .child(label("Fixed for the Warp Suite in this build. The kit keeps Copper as constants; Plum and Pine stay in the prototype for comparison."))
+                    card.child(warpui_kit_core::palette_control())
+                        .child(label("Applied right away. The other Warp apps follow when they next open."))
                 }),
                 self.card("Text", cx, |_, _, card| {
                     card.child(text_size_row())
@@ -1169,27 +1169,6 @@ fn switch_row(
                 .checked(checked)
                 .accessibility_label(label_text)
                 .on_click(on_click),
-        )
-        .into_any_element()
-}
-
-/// A value the build fixes: it reads like a setting, but there is nothing to
-/// press, so the row says so instead of offering a dead control.
-fn fixed_row(label_text: &str, value: &str) -> gpui::AnyElement {
-    let selector = format!("settings-fixed-{label_text}");
-    div()
-        .debug_selector(move || selector.clone())
-        .flex()
-        .flex_row()
-        .items_center()
-        .gap_3()
-        .min_h(px(60.))
-        .child(div().flex_1().min_w_0().child(label(label_text)))
-        .child(
-            div()
-                .text_size(px(theme::font_control()))
-                .text_color(theme::text_dim())
-                .child(value.to_string()),
         )
         .into_any_element()
 }
