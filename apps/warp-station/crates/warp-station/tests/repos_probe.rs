@@ -18,8 +18,14 @@ fn scratch_home() {
         let home =
             std::env::temp_dir().join(format!("warp-station-repos-probe-{}", std::process::id()));
         std::fs::create_dir_all(home.join(".warp")).expect("scratch home");
-        // SAFETY: process-global env; every probe here calls this first
-        unsafe { std::env::set_var("HOME", &home) };
+        // SAFETY: process-global env; every probe here calls this first.
+        // USERPROFILE too: Windows resolves the data root from it first, and
+        // a HOME-only redirect leaves the real ~/.warp live for a save.
+        unsafe {
+            std::env::set_var("HOME", &home);
+            #[cfg(windows)]
+            std::env::set_var("USERPROFILE", &home);
+        };
     });
 }
 
@@ -1190,8 +1196,14 @@ fn register_repos_persists_new_folders_as_scan_roots(cx: &mut TestAppContext) {
     let _ = std::fs::remove_dir_all(&home);
     std::fs::create_dir_all(home.join(".warp")).unwrap();
     // SAFETY: process-global env; other tests in this binary tolerate a
-    // default-settings store, so a racing HOME read is harmless
-    unsafe { std::env::set_var("HOME", &home) };
+    // default-settings store, so a racing HOME read is harmless. USERPROFILE
+    // too on Windows: this probe saves through the store's default service,
+    // which would otherwise persist into the real ~/.warp.
+    unsafe {
+        std::env::set_var("HOME", &home);
+        #[cfg(windows)]
+        std::env::set_var("USERPROFILE", &home);
+    };
 
     let (net_tx, _net_rx) = async_channel::unbounded();
     let store = cx.new(|cx| Store::new(cx, net_tx));
@@ -1347,9 +1359,12 @@ fn clone_dialog_editable_destination_feeds_validation(cx: &mut TestAppContext) {
     );
 
     // a valid destination passes validation: the button flips to busy (the
-    // net channel has no worker in the probe, so the result never settles)
+    // net channel has no worker in the probe, so the result never settles).
+    // The platform temp dir: validation wants an existing folder, and `/tmp`
+    // is only one on Unix.
     dialog_click(cx, "clone-dest-input");
-    cx.simulate_input("/tmp");
+    let dest = std::env::temp_dir().to_string_lossy().into_owned();
+    cx.simulate_input(&dest);
     cx.run_until_parked();
     dialog_draw(cx);
     dialog_click(cx, "btn-accent-Clone");

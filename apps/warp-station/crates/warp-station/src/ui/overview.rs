@@ -1260,8 +1260,13 @@ fn needs_you_section(
                     px(theme::icon_small()),
                     theme::SUCCESS_BRIGHT,
                 ))
+                // flex_1 + min_w_0 like needy_row's column: without them the
+                // text is a flex item with min-width auto, never shrinks, and
+                // clips mid-word at the card edge (wide-font machines)
                 .child(
                     div()
+                        .flex_1()
+                        .min_w_0()
                         .text_size(px(theme::font_body()))
                         .text_color(theme::text_dim())
                         .child("Working tree clean and in sync. Nothing to do here."),

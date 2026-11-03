@@ -134,10 +134,13 @@ pub fn change_snapshot(folder: &Path) -> Option<GitChangeSnapshot> {
         }
 
         // Worktree diff = index vs worktree (git diff); cached = HEAD vs index
-        // (git diff --cached). Untracked files appear in neither, matching
-        // numstat.
+        // (git diff --cached). Untracked rows join the worktree side so their
+        // gutters carry the file's line count, like the staged view's.
         let index = repo.index().ok()?;
         let mut diff_opts = diff_options(repo);
+        diff_opts.include_untracked(true)
+            .recurse_untracked_dirs(true)
+            .show_untracked_content(true);
         if let Ok(mut diff) = repo.diff_index_to_workdir(Some(&index), Some(&mut diff_opts))
             && find_renames(&mut diff).is_ok()
         {
@@ -281,6 +284,13 @@ pub fn change_file_patch(folder: &Path, path: &str, staged: bool) -> Option<Stri
         } else {
             let index = repo.index().ok()?;
             let mut opts = diff_options(repo);
+            // the status listing counts untracked files, so the patch must
+            // too — without include_untracked the delta is missing entirely,
+            // and without show_untracked_content its patch text comes back
+            // empty and the diff pane renders a blank body
+            opts.include_untracked(true)
+                .recurse_untracked_dirs(true)
+                .show_untracked_content(true);
             opts.pathspec(path);
             let mut diff = repo
                 .diff_index_to_workdir(Some(&index), Some(&mut opts))
@@ -540,6 +550,10 @@ pub fn day_activity(folder: &Path, day: chrono::NaiveDate) -> Option<GitDayActiv
         if !snapshot.status_files.is_empty() {
             let index = repo.index().ok()?;
             let mut diff_opts = diff_options(repo);
+            // untracked rows carry their line counts like staged ones do
+            diff_opts.include_untracked(true)
+                .recurse_untracked_dirs(true)
+                .show_untracked_content(true);
             if let Ok(mut diff) = repo.diff_index_to_workdir(Some(&index), Some(&mut diff_opts))
                 && find_renames(&mut diff).is_ok()
             {
@@ -561,9 +575,8 @@ pub fn day_activity(folder: &Path, day: chrono::NaiveDate) -> Option<GitDayActiv
             .status_files
             .iter()
             .map(|file| {
-                if file.status_code == "?" {
-                    return file.clone();
-                }
+                // untracked rows merge too: the worktree diff now includes
+                // them, and their counts ride the same +N/−N gutters
                 let wt = snapshot.worktree_counts.get(&file.path).copied();
                 let ix = snapshot.cached_counts.get(&file.path).copied();
                 let merge = |a: Option<u32>, b: Option<u32>| match (a, b) {
@@ -1022,6 +1035,59 @@ mod merge_tests {
         let (staged, unstaged) = snap.change_groups();
         assert_eq!(staged[0].additions, Some(3));
         assert_eq!(unstaged[0].deletions, Some(4));
+    }
+}
+
+#[cfg(test)]
+mod untracked_patch_tests {
+    use super::*;
+
+    /// A real repo with one commit, so HEAD and the index exist. Each caller
+    /// gets its own folder: the tests run in parallel and a shared `.git`
+    /// locks up.
+    fn scratch_repo(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("ws-read-untracked-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let repo = git2::Repository::init(&dir).unwrap();
+        std::fs::write(dir.join("base.txt"), "base\n").unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(Path::new("base.txt")).unwrap();
+        let tree_id = index.write_tree().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        let sig = git2::Signature::now("t", "t@example.com").unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])
+            .unwrap();
+        dir
+    }
+
+    #[test]
+    fn an_untracked_file_patches_as_pure_additions() {
+        let dir = scratch_repo("patch");
+        std::fs::write(dir.join("new.txt"), "line one\nline two\n").unwrap();
+        let patch = change_file_patch(&dir, "new.txt", false).expect("untracked patch");
+        assert!(patch.contains("+++ b/new.txt"), "patch was: {patch}");
+        assert!(patch.contains("+line one"), "patch was: {patch}");
+        assert!(patch.contains("+line two"), "patch was: {patch}");
+        assert!(!patch.contains("-base"), "patch was: {patch}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_untracked_file_carries_line_counts_in_the_snapshot() {
+        let dir = scratch_repo("counts");
+        std::fs::write(dir.join("new.txt"), "a\nb\nc\n").unwrap();
+        let snapshot = change_snapshot(&dir).expect("snapshot");
+        // counts ride change_groups, not the raw status lists
+        let (staged, unstaged) = snapshot.change_groups();
+        assert!(staged.is_empty());
+        let counts = unstaged
+            .iter()
+            .find(|file| file.path == "new.txt")
+            .expect("untracked row");
+        assert_eq!(counts.additions, Some(3));
+        assert_eq!(counts.deletions, Some(0));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
 

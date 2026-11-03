@@ -316,9 +316,13 @@ fn branch_new_branch_form_creates_and_closes(cx: &mut TestAppContext) {
     ));
     let _ = std::fs::remove_dir_all(&home);
     std::fs::create_dir_all(home.join(".warp")).unwrap();
-    // SAFETY: process-global env; serialized against the siblings by HOME_ENV_LOCK
+    // SAFETY: process-global env; serialized against the siblings by HOME_ENV_LOCK.
+    // USERPROFILE too on Windows: the data root resolves from it first, and a
+    // HOME-only scratch leaves the real ~/.warp live for a save.
     unsafe {
         std::env::set_var("HOME", &home);
+        #[cfg(windows)]
+        std::env::set_var("USERPROFILE", &home);
         std::env::set_var("XDG_CONFIG_HOME", home.join(".config"));
     }
     let scratch = home.join(".warp").join("settings.json");

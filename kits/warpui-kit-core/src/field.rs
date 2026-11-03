@@ -156,6 +156,11 @@ pub fn custom(
 /// The design's `textarea.area`: the same recessed box, 9/10 padding, 14/20
 /// text. The editor states its own paddings (4 either side, none above or
 /// below at this size), so the box tops them up to the design's 10/9.
+///
+/// The box also carries a min height for the content's line count: the
+/// editor's own auto-height collapses multi-line content to one visible row
+/// on some platforms (its `size_full` inside this `h_auto` box resolves to
+/// the minimum), which hid every scan root past the first on Windows.
 pub fn area(
     id: impl Into<ElementId>,
     state: &Entity<TextareaState>,
@@ -165,6 +170,7 @@ pub fn area(
     let handle = state.read(cx).focus_handle(cx);
     boxed(id, &handle, window, px(0.))
         .h_auto()
+        .min_h(area_min_height(state, cx, fonts::font_body()))
         .flex_col()
         .pt(px(shell::scaled(9.)))
         .pb(px(shell::scaled(9.)))
@@ -183,6 +189,7 @@ pub fn mono_area(
     let handle = state.read(cx).focus_handle(cx);
     boxed(id, &handle, window, px(0.))
         .h_auto()
+        .min_h(area_min_height(state, cx, fonts::font_mono_meta()))
         .flex_col()
         .pt(px(shell::scaled(9.)))
         .pb(px(shell::scaled(9.)))
@@ -192,6 +199,14 @@ pub fn mono_area(
                 .font_family(SharedString::from(fonts::code_font()))
                 .text_size(px(fonts::font_mono_meta())),
         )
+}
+
+/// The 9/9 box padding plus one line height per content line, at 1.55 leading —
+/// a floor for the editor's own height, so a multi-line value is fully visible
+/// even where the editor's measurement comes back short.
+fn area_min_height(state: &Entity<TextareaState>, cx: &App, font_size: f32) -> Pixels {
+    let lines = state.read(cx).value().lines().count().max(1) as f32;
+    px(shell::scaled(9. * 2. + lines * (font_size * 1.55)))
 }
 
 /// The kit textarea, chrome-less and filling its box: a caller that draws

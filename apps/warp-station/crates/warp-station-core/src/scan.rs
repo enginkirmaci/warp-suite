@@ -62,6 +62,12 @@ pub fn scan(settings: &ReposSettings, max_depth: Option<i32>) -> RepoScanResult 
             continue;
         }
         for dir in find_git_dirs(root_path, &git_pattern, 1, effective_depth, &excluded) {
+            // a bare repo ("mirror.git") has no working tree to launch into;
+            // taking its parent would register the containing folder as a
+            // phantom repo, so skip it
+            if is_bare_git_dir(&dir) {
+                continue;
+            }
             let Some(parent) = dir.parent() else { continue };
             let solution = first_solution_file(parent, &sln_patterns);
             let path_str = parent.to_string_lossy().to_string();
@@ -134,6 +140,32 @@ fn matches_pattern(name: &str, pattern: &str) -> bool {
                 && name.ends_with(suffix)
         }
     }
+}
+
+/// Whether the matched git dir is itself the repository — a bare checkout
+/// (`git init --bare`, `git clone --bare`), whose `[core] bare` is set. A
+/// worktree's `.git` dir carries the same file layout, so only the config
+/// tells them apart; an unreadable config keeps the old behavior.
+fn is_bare_git_dir(dir: &Path) -> bool {
+    let Ok(config) = std::fs::read_to_string(dir.join("config")) else {
+        return false;
+    };
+    let mut in_core = false;
+    for line in config.lines() {
+        let line = line.trim();
+        if line.starts_with('[') {
+            in_core = line.eq_ignore_ascii_case("[core]");
+        } else if in_core {
+            if let Some((key, value)) = line.split_once('=') {
+                if key.trim().eq_ignore_ascii_case("bare")
+                    && value.trim().eq_ignore_ascii_case("true")
+                {
+                    return true;
+                }
+            }
+        }
+    }
+    false
 }
 
 fn find_git_dirs(
@@ -247,6 +279,29 @@ mod tests {
         let result = scan_folder(&configured, &tmp.join("typed"), Some(3));
         let names: Vec<&str> = result.repos.iter().map(|r| r.name.as_str()).collect();
         assert_eq!(names, vec!["repo-typed"]);
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn bare_repos_are_skipped_not_mapped_to_their_parent() {
+        // a "*.git" pattern matches bare checkouts too; registering their
+        // parent folder as a repo made a phantom entry next to the real ones
+        let tmp = std::env::temp_dir().join(format!("dt-scan-bare-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        let bare = tmp.join("container/origin.git");
+        std::fs::create_dir_all(&bare).unwrap();
+        std::fs::write(
+            bare.join("config"),
+            "[core]\n\trepositoryformatversion = 0\n\tbare = true\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(tmp.join("container/repo-x/.git")).unwrap();
+
+        let mut s = settings(vec![tmp.to_string_lossy().to_string()]);
+        s.git_folder_pattern = "*.git".into();
+        let result = scan(&s, Some(3));
+        let names: Vec<&str> = result.repos.iter().map(|r| r.name.as_str()).collect();
+        assert_eq!(names, vec!["repo-x"]);
         let _ = std::fs::remove_dir_all(&tmp);
     }
 }

@@ -27,6 +27,11 @@ fn settings_page_draws_all_sections(cx: &mut TestAppContext) {
     // SAFETY: process-global env; serialized against the sibling HOME probes
     unsafe {
         std::env::set_var("HOME", &home);
+        // USERPROFILE too: Windows resolves the data root from it first, so a
+        // HOME-only scratch leaves the real ~/.warp live for anything that
+        // saves through the store's default service
+        #[cfg(windows)]
+        std::env::set_var("USERPROFILE", &home);
         std::env::set_var("XDG_CONFIG_HOME", home.join(".config"));
     }
 
@@ -101,6 +106,11 @@ fn filtered_picker_filters_and_dismisses(cx: &mut TestAppContext) {
     // SAFETY: process-global env; serialized against the sibling HOME probes
     unsafe {
         std::env::set_var("HOME", &home);
+        // USERPROFILE too: Windows resolves the data root from it first, so a
+        // HOME-only scratch leaves the real ~/.warp live for anything that
+        // saves through the store's default service
+        #[cfg(windows)]
+        std::env::set_var("USERPROFILE", &home);
         std::env::set_var("XDG_CONFIG_HOME", home.join(".config"));
     }
 
@@ -235,6 +245,11 @@ fn harness_model_and_variant_persist(cx: &mut TestAppContext) {
     // sibling tests serialize on HOME_ENV_LOCK
     unsafe {
         std::env::set_var("HOME", &home);
+        // USERPROFILE too: Windows resolves the data root from it first, so a
+        // HOME-only scratch leaves the real ~/.warp live for anything that
+        // saves through the store's default service
+        #[cfg(windows)]
+        std::env::set_var("USERPROFILE", &home);
         std::env::set_var("XDG_CONFIG_HOME", home.join(".config"));
     }
 
@@ -362,6 +377,11 @@ fn auto_fetch_row_picks_and_persists(cx: &mut TestAppContext) {
     // sibling test tolerates a default-settings read while this runs
     unsafe {
         std::env::set_var("HOME", &home);
+        // USERPROFILE too: Windows resolves the data root from it first, so a
+        // HOME-only scratch leaves the real ~/.warp live for anything that
+        // saves through the store's default service
+        #[cfg(windows)]
+        std::env::set_var("USERPROFILE", &home);
         std::env::set_var("XDG_CONFIG_HOME", home.join(".config"));
     }
 
@@ -438,6 +458,11 @@ fn prompt_templates_list_edit_reset(cx: &mut TestAppContext) {
     // SAFETY: process-global env; serialized against the sibling HOME probe
     unsafe {
         std::env::set_var("HOME", &home);
+        // USERPROFILE too: Windows resolves the data root from it first, so a
+        // HOME-only scratch leaves the real ~/.warp live for anything that
+        // saves through the store's default service
+        #[cfg(windows)]
+        std::env::set_var("USERPROFILE", &home);
         std::env::set_var("XDG_CONFIG_HOME", home.join(".config"));
     }
 
@@ -582,6 +607,11 @@ fn group_repos_switch_toggles_and_persists(cx: &mut TestAppContext) {
     // serialized against the sibling HOME probes by HOME_ENV_LOCK
     unsafe {
         std::env::set_var("HOME", &home);
+        // USERPROFILE too: Windows resolves the data root from it first, so a
+        // HOME-only scratch leaves the real ~/.warp live for anything that
+        // saves through the store's default service
+        #[cfg(windows)]
+        std::env::set_var("USERPROFILE", &home);
         std::env::set_var("XDG_CONFIG_HOME", home.join(".config"));
     }
 
@@ -664,6 +694,11 @@ fn group_depth_picker_renders_grouped_and_persists(cx: &mut TestAppContext) {
     // serialized against the sibling HOME probes by HOME_ENV_LOCK
     unsafe {
         std::env::set_var("HOME", &home);
+        // USERPROFILE too: Windows resolves the data root from it first, so a
+        // HOME-only scratch leaves the real ~/.warp live for anything that
+        // saves through the store's default service
+        #[cfg(windows)]
+        std::env::set_var("USERPROFILE", &home);
         std::env::set_var("XDG_CONFIG_HOME", home.join(".config"));
     }
 
@@ -737,6 +772,11 @@ fn code_search_rows_render_and_persist(cx: &mut TestAppContext) {
     // serialized against the sibling HOME probes by HOME_ENV_LOCK
     unsafe {
         std::env::set_var("HOME", &home);
+        // USERPROFILE too: Windows resolves the data root from it first, so a
+        // HOME-only scratch leaves the real ~/.warp live for anything that
+        // saves through the store's default service
+        #[cfg(windows)]
+        std::env::set_var("USERPROFILE", &home);
         std::env::set_var("XDG_CONFIG_HOME", home.join(".config"));
     }
 
@@ -843,6 +883,11 @@ fn opencode_cli_and_warp_agent_switches_are_separate(cx: &mut TestAppContext) {
     // serialized against the sibling HOME probes by HOME_ENV_LOCK
     unsafe {
         std::env::set_var("HOME", &home);
+        // USERPROFILE too: Windows resolves the data root from it first, so a
+        // HOME-only scratch leaves the real ~/.warp live for anything that
+        // saves through the store's default service
+        #[cfg(windows)]
+        std::env::set_var("USERPROFILE", &home);
         std::env::set_var("XDG_CONFIG_HOME", home.join(".config"));
     }
 
@@ -916,6 +961,11 @@ fn the_settings_head_keeps_save_inside_the_pane(cx: &mut TestAppContext) {
     // SAFETY: process-global env; serialized against the sibling HOME probes
     unsafe {
         std::env::set_var("HOME", &home);
+        // USERPROFILE too: Windows resolves the data root from it first, so a
+        // HOME-only scratch leaves the real ~/.warp live for anything that
+        // saves through the store's default service
+        #[cfg(windows)]
+        std::env::set_var("USERPROFILE", &home);
         std::env::set_var("XDG_CONFIG_HOME", home.join(".config"));
     }
 

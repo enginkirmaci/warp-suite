@@ -131,7 +131,9 @@ fn parse_match_event(line: &str, folders: &[PathBuf]) -> Option<CodeHit> {
                 .strip_prefix(folder)
                 .unwrap_or(&abs_path)
                 .to_string_lossy()
-                .to_string();
+                // rg hands the path over in the platform's shape; the UI and
+                // the probes expect '/' everywhere (Windows answers '\')
+                .replace('\\', "/");
             break;
         }
     }

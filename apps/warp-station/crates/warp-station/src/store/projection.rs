@@ -288,6 +288,15 @@ fn component_prefix_len(path: &str, count: usize) -> usize {
 /// its parent instead of splitting the shared tree). Falls back to the
 /// lexical path when nothing above it exists.
 fn canonical_text(folder: &str) -> String {
+    // Only an absolute path may resolve upward: Windows answers
+    // canonicalize("/") with the current drive's root, so a drive-relative
+    // spelling (`/work`, `/home/u`) would come back as `C:\work` and split
+    // the group keys away from the text the list was built with. Unix
+    // absolute paths stay absolute there, and real Windows roots
+    // (`C:\…`, `\\?\…`, UNC) are absolute in this sense too.
+    if !PathBuf::from(folder).is_absolute() {
+        return folder.to_string();
+    }
     let mut path = PathBuf::from(folder);
     let mut tail: Vec<OsString> = Vec::new();
     loop {
