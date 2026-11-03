@@ -451,6 +451,23 @@ impl LiveEditorState {
         self.text.clone()
     }
 
+    /// A counter that moves on every document change and on nothing else.
+    ///
+    /// `value()` is cheap to clone, but anything derived from the whole text —
+    /// a word count, a find scan — costs the length of the document, and a
+    /// view re-renders on every caret move and every notify. A caller caches
+    /// its derivation against this and recomputes only when it actually
+    /// changed.
+    pub fn revision(&self) -> u64 {
+        self.revision
+    }
+
+    /// The line and column of `byte`, both 1-based: the status bar's
+    /// "Ln x, Col y". Scans only back to the previous newline.
+    pub fn line_col(&self, byte: usize) -> (usize, usize) {
+        line_col_in(&self.text, &self.doc, byte)
+    }
+
     /// The selection as an ordered byte range.
     pub fn selected_range(&self) -> Range<usize> {
         self.selection.range()
@@ -2675,4 +2692,69 @@ pub(super) fn input_handler(
     state: Entity<LiveEditorState>,
 ) -> gpui::ElementInputHandler<LiveEditorState> {
     gpui::ElementInputHandler::new(bounds, state)
+}
+
+/// The line and column of `byte` in `text`, both 1-based.
+///
+/// The document already knows where every line starts, so this walks back to
+/// the line's start instead of counting newlines from the top — which would
+/// make a status bar cost the whole note on every caret move.
+fn line_col_in(text: &str, doc: &LiveDocument, byte: usize) -> (usize, usize) {
+    let byte = byte.min(text.len());
+    let index = doc.line_at(byte);
+    let Some(line) = doc.lines.get(index) else {
+        return (1, 1);
+    };
+    let start = line.range.start.min(byte);
+    let col = text[start..byte].chars().count();
+    (index + 1, col + 1)
+}
+
+#[cfg(test)]
+mod line_col_tests {
+    use super::*;
+
+    /// The helper must agree with a straight scan for every byte, including
+    /// the empty document and a trailing newline (where the parser appends a
+    /// final empty line).
+    #[test]
+    fn matches_a_straight_scan() {
+        for text in [
+            "",
+            "a",
+            "one",
+            "one\ntwo",
+            "one\ntwo\n",
+            "# head\n\nbody with **bold**\n",
+            "αβγ\nδεζ",
+            "- [ ] task\n- [x] done\n",
+        ] {
+            let doc = crate::live::parse_document(text);
+            for byte in 0..=text.len() {
+                if !text.is_char_boundary(byte) {
+                    continue;
+                }
+                let prefix = &text[..byte];
+                let expected = (
+                    prefix.matches('\n').count() + 1,
+                    prefix
+                        .rsplit('\n')
+                        .next()
+                        .map_or(1, |line| line.chars().count() + 1),
+                );
+                assert_eq!(
+                    line_col_in(text, &doc, byte),
+                    expected,
+                    "byte {byte} of {text:?}",
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_byte_past_the_end_lands_on_the_last_line() {
+        let text = "one\ntwo";
+        let doc = crate::live::parse_document(text);
+        assert_eq!(line_col_in(text, &doc, 999), (2, 4));
+    }
 }

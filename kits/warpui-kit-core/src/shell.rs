@@ -72,6 +72,76 @@ pub fn title_bar() -> Div {
         .border_color(palette::hairline())
 }
 
+/// The titlebar's linked apps: the sibling windows this app can open, right
+/// after its own mark and name so the family reads as one group. Each link is
+/// a 28px tile carrying the other app's own mark; the caller adds the ids,
+/// listeners and tooltips.
+///
+/// ```text
+/// [mark] [name] │ [notes] [agent]        … search, activity, window controls
+/// ```
+pub fn app_links() -> Div {
+    div()
+        .flex_shrink_0()
+        .flex()
+        .items_center()
+        .gap_0p5()
+        .ml_1()
+        .pl_2()
+        .border_l_1()
+        .border_color(palette::hairline())
+}
+
+/// The debug selector a caller's element id stands for.
+///
+/// Kit shapes take the caller's id and must also expose it to
+/// `debug_bounds`, or a headless probe can only find the shape by its
+/// contents. Deriving the selector from the id means the app names a control
+/// once and the probe reaches it by that same name.
+fn selector_for(id: &ElementId) -> String {
+    match id {
+        ElementId::Name(name) => name.to_string(),
+        ElementId::NamedInteger(name, n) => format!("{name}-{n}"),
+        ElementId::Integer(n) => n.to_string(),
+        other => format!("{other:?}"),
+    }
+}
+
+/// One linked app in [`app_links`]: a 28px tile in the app's own mark.
+///
+/// The element id doubles as the debug selector, so a probe reaches the link
+/// by the same name the app passed in (`notes-toggle`, `launch-station`) and
+/// the callers do not have to restate it.
+pub fn app_link(
+    id: impl Into<ElementId>,
+    icon_path: &str,
+    label: impl Into<SharedString>,
+) -> Stateful<Div> {
+    let label = label.into();
+    let id = id.into();
+    let selector = selector_for(&id);
+    div()
+        .id(id)
+        .debug_selector(move || selector)
+        .a11y_button(label.clone())
+        .aria_label(label)
+        .occlude()
+        .cursor_pointer()
+        .flex_shrink_0()
+        .flex()
+        .items_center()
+        .justify_center()
+        .size(px(scaled(28.)))
+        .rounded(px(6.))
+        .hover(|d| d.bg(palette::raised()))
+        .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
+        .child(crate::icon::icon(
+            icon_path,
+            px(scaled(18.)),
+            palette::text_dim(),
+        ))
+}
+
 /// The app's sections. A spacer child pins Settings to the bottom.
 pub fn rail() -> Div {
     div()
@@ -315,8 +385,11 @@ pub fn control_height() -> gpui::Pixels {
 /// 24 — and putting it on the box also gives the field one width and one
 /// border to draw on.
 pub fn field(id: impl Into<gpui::ElementId>, input: impl IntoElement) -> gpui::Stateful<gpui::Div> {
+    let id = id.into();
+    let selector = selector_for(&id);
     div()
         .id(id)
+        .debug_selector(move || selector)
         .h(field_height())
         .w_full()
         .min_w_0()

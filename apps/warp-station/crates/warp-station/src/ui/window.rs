@@ -980,27 +980,6 @@ impl MainWindow {
                     }),
                 ))
             })
-            .when(settings.warp_notes.enable_warp_notes, |row| {
-                row.child(title_icon(
-                    "notes-toggle",
-                    "Open warp-notes",
-                    "icons/icon-warp-notes.svg",
-                    show_tooltips,
-                    cx.listener(|this, _, _, cx| this.launch_notes(None, cx)),
-                ))
-            })
-            .when(settings.warp_agent.enable_warp_agent, |row| {
-                row.child(title_icon(
-                    "agent-toggle",
-                    "Open warp-agent",
-                    "icons/icon-warp-agent.svg",
-                    show_tooltips,
-                    cx.listener(|this, _, _, cx| {
-                        this.store
-                            .update(cx, |s, cx| s.open_in_warp("general".into(), cx));
-                    }),
-                ))
-            })
             .child(div().mx_1().h(px(20.)).w(px(1.)).bg(theme::hairline()))
             .child(
                 // box to box: the row's gap belongs to the buttons before them
@@ -1122,6 +1101,40 @@ impl MainWindow {
                             .whitespace_nowrap()
                             .child("Warp Station"),
                     ),
+            )
+            // the family: the sibling apps this window can open, right after
+            // its own mark and name, behind one separator
+            .child(
+                shell::app_links()
+                    .when(settings.warp_notes.enable_warp_notes, |row| {
+                        row.child(
+                            shell::app_link(
+                                "notes-toggle",
+                                "icons/icon-warp-notes.svg",
+                                "Open warp-notes",
+                            )
+                            .when(show_tooltips, |d| {
+                                d.tooltip(crate::ui::tooltip_text("Open warp-notes"))
+                            })
+                            .on_click(cx.listener(|this, _, _, cx| this.launch_notes(None, cx))),
+                        )
+                    })
+                    .when(settings.warp_agent.enable_warp_agent, |row| {
+                        row.child(
+                            shell::app_link(
+                                "agent-toggle",
+                                "icons/icon-warp-agent.svg",
+                                "Open warp-agent",
+                            )
+                            .when(show_tooltips, |d| {
+                                d.tooltip(crate::ui::tooltip_text("Open warp-agent"))
+                            })
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.store
+                                    .update(cx, |s, cx| s.open_in_warp("general".into(), cx));
+                            })),
+                        )
+                    }),
             )
             .child(
                 div()

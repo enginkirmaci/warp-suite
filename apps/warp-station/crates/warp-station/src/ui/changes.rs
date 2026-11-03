@@ -10,7 +10,7 @@ use crate::store::Store;
 use crate::theme;
 use crate::ui::{A11y, icon};
 use gpui::prelude::*;
-use gpui::{Context, Entity, FontWeight, SharedString, Window, div, px};
+use gpui::{Context, Entity, FontWeight, SharedString, Window, div, px, uniform_list};
 use gpui_kit::component::Sizable as _;
 use gpui_kit::component::input::{InputState, Textarea, TextareaState};
 use std::cell::RefCell;
@@ -23,6 +23,7 @@ use warpui_kit_picker::{
 
 /// One history row's display strings, precomputed when the history (or the
 /// day) changes so a render never re-derives them per row.
+#[derive(Clone)]
 struct HistoryRow {
     /// Some(..) on the first commit of a day: the group header label.
     day_label: Option<String>,
@@ -37,6 +38,9 @@ struct HistoryRow {
 /// The staged/unstaged split produced by `GitChangeSnapshot::change_groups`.
 type GroupedFiles = (Vec<GitChangedFile>, Vec<GitChangedFile>);
 
+/// One history row: a commit, with its day header on the row above the first
+/// of each day. Fixed so `uniform_list` can size the whole list.
+const HISTORY_ROW_HEIGHT: f32 = 58.;
 /// The file list and commit box's width.
 const FILE_COLUMN_W: f32 = 320.;
 /// The commit list's width.
@@ -816,42 +820,80 @@ impl ChangesView {
                 .into_any_element();
         }
 
-        let mut list = div()
-            .id("history-list")
-            .size_full()
-            .overflow_y_scroll()
+        // 200 commits is a normal history, so the list is virtualized: a day
+        // header and a commit row are both one fixed line, and `uniform_list`
+        // builds only the ones in the viewport. The old loop laid out every
+        // commit — its avatar, its hash chip and its listeners — on every
+        // repaint, and the store keeps 200 of them.
+        // shared, not moved out: `render_history` reads the newest row off the
+        // same field to pick the commit it drills into, before this list is
+        // even built
+        let rows = Rc::new(self.history_rows.clone());
+        let unpushed = Rc::new(unpushed);
+        uniform_list(
+            SharedString::from("history-list"),
+            rows.len(),
+            cx.processor(move |this, range: std::ops::Range<usize>, _window, cx| {
+                range
+                    .map(|ix| this.render_history_row(&rows[ix], &unpushed, cx))
+                    .collect()
+            }),
+        )
+        .debug_selector(|| "history-list".into())
+        .size_full()
+        .into_any_element()
+    }
+
+    /// One row of the virtualized history: a day header above its first commit,
+    /// then the commit itself. Both are [`HISTORY_ROW_HEIGHT`] so the list can
+    /// size itself without measuring.
+    fn render_history_row(
+        &mut self,
+        row: &HistoryRow,
+        unpushed: &Option<std::collections::HashSet<String>>,
+        cx: &mut Context<Self>,
+    ) -> gpui::AnyElement {
+        let unpushed_mark = unpushed.as_ref().is_some_and(|set| set.contains(&row.hash));
+        let selected = self.drilled_commit.as_ref() == Some(&row.hash);
+        let day_label = row.day_label.clone();
+        div()
+            .id(SharedString::from(format!("commit-{}", row.short_hash)))
+            .debug_selector({
+                let short = row.short_hash.clone();
+                move || format!("commit-{short}")
+            })
+            .a11y_button(format!("{} — {}, {}", row.subject, row.author, row.rel))
+            .cursor_pointer()
+            .flex_shrink_0()
+            .h(px(HISTORY_ROW_HEIGHT))
             .flex()
             .flex_col()
-            .pb_2();
-
-        for row in &self.history_rows {
-            if let Some(label) = &row.day_label {
-                list = list.child(
+            .justify_center()
+            .when_some(day_label, |d, label| {
+                d.child(
                     div()
                         .px_4()
-                        .pt_3()
-                        .pb_1()
+                        .pt_1()
                         .text_size(px(theme::font_sub()))
                         .font_weight(FontWeight::SEMIBOLD)
                         .text_color(theme::text_dim())
-                        .child(label.clone()),
-                );
-            }
-            let unpushed_mark = unpushed.as_ref().is_some_and(|set| set.contains(&row.hash));
-            let selected = self.drilled_commit.as_ref() == Some(&row.hash);
-            list = list.child(
+                        .child(label),
+                )
+            })
+            .child(
                 div()
-                    .id(SharedString::from(format!("commit-{}", row.short_hash)))
-                    .a11y_button(format!("{} — {}, {}", row.subject, row.author, row.rel))
-                    .cursor_pointer()
-                    .flex_shrink_0()
+                    .id(SharedString::from(format!(
+                        "commit-body-{}",
+                        row.short_hash
+                    )))
+                    .flex_1()
+                    .min_h_0()
                     .flex()
                     .flex_row()
                     .items_center()
                     .gap_2()
                     .pl(px(13.))
                     .pr_3()
-                    .py_2()
                     .border_l_3()
                     .border_color(if selected {
                         theme::accent()
@@ -940,9 +982,8 @@ impl ChangesView {
                             })
                             .child(row.short_hash.clone()),
                     ),
-            );
-        }
-        list.into_any_element()
+            )
+            .into_any_element()
     }
 
     fn render_commit_detail(

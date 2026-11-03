@@ -32,7 +32,7 @@ When the prototype and this file disagree, this file wins.
 
 | Part | Measure | Notes |
 |---|---|---|
-| Title bar | 46 | App name, global search (Station only), activity chip, list toggle, launches for the sibling apps, window controls |
+| Title bar | 46 | App name, search (Station: everything; Notes: the note store), activity chip, list toggle, launches for the sibling apps, window controls |
 | Rail | 76 | App sections, Settings pinned to the bottom. Icon 22, label 12/500 |
 | Tab strip | 40 | Right of the rail, above list and detail. Tabs 120 to 240 wide |
 | List | 432 | Resizable 320 to 560, remembered per app. Agent starts at 320: its tree rows are short and the grid wants the width |
@@ -190,7 +190,8 @@ the smallest text stays at the floor. The old `compact` spelling reads as Normal
   Any narrowing brings **Clear filters**.
 - **Global search:** results open under the title bar field, grouped as Repositories,
   Notes and Code with the match marked. It shows `Searching…`, then results or
-  `No matches.`. It searches everything and never filters the list.
+  `No matches.`. It searches everything and never filters the list. Notes' own field is
+  the same shape over its own store.
 - **Repo header:** Open in VS Code has a split menu with every launcher and its key.
   The ⋯ menu holds refresh, copy path and URL, Open in GitHub, favorite, archive, and
   Remove from repositories, which needs a second click.
@@ -277,11 +278,14 @@ the smallest text stays at the floor. The old `compact` spelling reads as Normal
   the grid. With nothing open the pane says `Add a workspace folder to begin.`, `Start the
   server to load your chats.`, or with a server running `Open a chat from the sidebar, or
   start a new one with the + next to a workspace.`
-- **Note tree (Notes):** Search all notes, New note and Collapse all folders over the tree.
-  Folders nest, with `Summaries/` at the root and under each repository, and the tree is
-  a real file tree: file names, `.md` included. New note opens two fields in place, the
-  name and an optional folder, with Create and Cancel. A note with unsaved text has a
-  `changes` dot. Search swaps the tree for results and stays capped.
+- **Note tree (Notes):** New note and Collapse all folders over the tree. Folders nest,
+  with `Summaries/` at the root and under each repository, and the tree is a real file
+  tree: file names, `.md` included. New note opens two fields in place, the name and an
+  optional folder, with Create and Cancel. A note with unsaved text has a `changes` dot.
+- **Notes search:** the title bar's field (`Ctrl K`), searching the whole note store. Its
+  results are a capped popup under the field — eight rows, then `N more` — and the tree
+  never changes for a search, so the list keeps its scroll and selection while you type.
+  The field and its popup are the app's one search; the list pane carries none.
 - **Repo scope (Notes):** Station's Notes for this repo opens the tree scoped to that
   repository. The title bar shows the repository as a chip, and ↑ goes back to all notes.
 - **Note editor (Notes):** the head is the file name in mono, `● unsaved`, Save, and Delete,

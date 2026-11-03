@@ -28,3 +28,9 @@ gpui = { package = "gpui-pre", version = "=0.3.7" }
 gpui-kit = { version = "0.7" }
 warpui-kit-core = { path = "../warpui-kit-core" }
 serde_json = { version = "1", default-features = false, features = ["std"] }
+
+[dev-dependencies]
+# headless UI probes (tests/); feature-unifies with the normal gpui-kit dep
+# only under `cargo test`
+gpui-kit = { version = "0.7", features = ["test-support"] }
+gpui = { package = "gpui-pre", version = "=0.3.7", features = ["test-support"] }

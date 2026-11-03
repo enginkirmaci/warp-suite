@@ -166,6 +166,11 @@ textarea.area:focus { border-color: var(--accent-ink); }
 .titlebar .activity { margin-left: -4px; }
 .winbtn { width: 34px; height: 32px; display: grid; place-items: center; border-radius: var(--r-s); color: var(--text-2); }
 .winbtn:hover { background: var(--raised); color: var(--text); }
+/* the family: the linked apps sit right after the app's own mark and name,
+   behind one separator, so the suite reads as one group */
+.applinks { display: flex; align-items: center; gap: 2px; margin-left: 4px; padding-left: 8px; border-left: 1px solid var(--line); }
+.applink { width: 28px; height: 28px; display: grid; place-items: center; border-radius: var(--r-s); color: var(--text-2); flex: none; }
+.applink:hover { background: var(--raised); color: var(--text); }
 .shell { flex: 1; min-height: 0; display: flex; }
 .stage { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 .panes { flex: 1; min-height: 0; display: flex; }
@@ -1053,20 +1058,31 @@ function searchPop() {
     ${group('Code', code.length, code.map(c => `<button class="hit" data-act="hitcode" data-arg="${esc(c[1])}:${c[2]}">${I('code', 16)}<span class="grow" style="min-width:0"><span class="t-meta clip" style="display:block">${esc(c[0])} · ${esc(c[1])}:${c[2]}</span><span class="t-mono">${hl(c[3], q)}</span></span></button>`).join(''))}
   </div>`;
 }
+function notesPop() {
+  const q = S.q.trim();
+  if (!S.searchOpen || !q) return '';
+  const lc = q.toLowerCase();
+  const hits = Object.entries(NOTES).filter(([, n]) => `${n[0]} ${n[2]}`.toLowerCase().includes(lc));
+  if (!hits.length) return `<div class="search-pop" role="status"><div class="search-state">No matches.</div></div>`;
+  const rows = hits.slice(0, 8).map(([id, n]) => `<button class="tree-hit" role="option" data-act="picknote" data-arg="${id}"><div class="clip">${hl(n[0], q)}</div><div class="t-meta clip">${hl(n[2], q)}</div></button>`).join('');
+  const more = hits.length > 8 ? `<div class="search-state">${hits.length - 8} more</div>` : '';
+  return `<div class="search-pop" role="listbox" aria-label="Notes">${rows}${more}</div>`;
+}
 function renderChrome() {
   seg('r-app', Object.entries(APPS).map(([k, a]) => [k, a.name.replace('Warp ', '')]), S.app, 'app');
   const root = document.documentElement;
   seg('r-palette', [['copper', 'Copper'], ['plum', 'Plum'], ['pine', 'Pine'], ['blue', 'Blue']], root.dataset.palette, 'palette');
   seg('r-type', [['inter', 'Inter + JetBrains'], ['plex', 'IBM Plex']], root.dataset.type, 'type');
-  // the sibling buttons carry each app's own mark, not a generic glyph
-  const a = APPS[S.app], launch = S.app === 'station'
-    ? `<button class="winbtn" title="Open warp-notes" data-act="app" data-arg="notes">${I('appnotes', 18)}</button><button class="winbtn" title="Open warp-agent" data-act="app" data-arg="agent">${I('appagent', 18)}</button>`
-    : `<button class="winbtn" title="Open Warp Station" data-act="app" data-arg="station">${I('appstation', 18)}</button>`;
+  // the family: the sibling apps this window can open, right after its own
+  // mark and name, behind one separator
+  const a = APPS[S.app], links = S.app === 'station'
+    ? `<button class="applink" title="Open warp-notes" data-act="app" data-arg="notes">${I('appnotes', 18)}</button><button class="applink" title="Open warp-agent" data-act="app" data-arg="agent">${I('appagent', 18)}</button>`
+    : `<button class="applink" title="Open Warp Station" data-act="app" data-arg="station">${I('appstation', 18)}</button>`;
   const scope = S.app === 'notes' && S.noteScope ? `<span class="scope-chip">${esc(S.noteScope)}</span><button class="winbtn" title="Show all notes" aria-label="Show all notes" data-act="notescope" data-arg="">${I('up', 16)}</button>` : '';
-  $('titlebar').innerHTML = `<span class="mark">${I(a.mark, 16)}</span><span class="name">${a.name}</span>${scope}
-    ${S.app === 'station' ? `<label class="field">${I('search', 16)}<input id="search" placeholder="Search repos, notes, code…" aria-label="Search" autocomplete="off" value="${esc(S.q)}"><span class="kbd">Ctrl K</span>${searchPop()}</label>` : '<span style="margin:0 auto"></span>'}
+  $('titlebar').innerHTML = `<span class="mark">${I(a.mark, 16)}</span><span class="name">${a.name}</span><span class="applinks">${links}</span>${scope}
+    ${S.app === 'agent' ? '<span style="margin:0 auto"></span>' : `<label class="field">${I('search', 16)}<input id="search" placeholder="${S.app === 'station' ? 'Search repos, notes, code…' : 'Search all notes…'}" aria-label="Search" autocomplete="off" value="${esc(S.q)}"><span class="kbd">Ctrl K</span>${S.app === 'station' ? searchPop() : notesPop()}</label>`}
     ${activity()}
-    <button class="winbtn" title="Toggle list (Ctrl \\)" data-act="focus">${I('panel', 18)}</button>${launch}
+    <button class="winbtn" title="Toggle list (Ctrl \\)" data-act="focus">${I('panel', 18)}</button>
     <span style="width:1px;height:20px;background:var(--line);margin:0 4px"></span>
     <button class="winbtn" title="Minimize">${I('min', 18)}</button><button class="winbtn" title="Maximize">${I('max', 16)}</button><button class="winbtn" title="Close">${I('x', 18)}</button>`;
   const entry = ([k, l, ic]) => {
@@ -1664,16 +1680,13 @@ function noteTree(nodes, depth, path) {
   }).join('');
 }
 function notesList() {
-  const q = S.notesQ.trim().toLowerCase();
   const root = S.noteScope ? (NOTE_TREE.find(n => n.d === S.noteScope)?.kids || []) : NOTE_TREE;
-  const hits = q ? Object.entries(NOTES).filter(([, n]) => `${n[0]} ${n[2]}`.toLowerCase().includes(q) && (!S.noteScope || n[1].startsWith(S.noteScope))) : [];
   const create = S.noteNew ? `<div class="note-create"><label class="field"><input id="note-name" placeholder="New note name" aria-label="New note name"></label><label class="field"><input id="note-folder" placeholder="Folder (optional)" aria-label="Folder (optional)" value="${esc(S.noteScope || '')}"></label><div class="inline"><button class="btn primary" data-act="createnote">Create</button><button class="btn" data-act="newnote">Cancel</button></div></div>` : '';
   const tools = `<button class="btn ghost icon" title="New note" aria-label="New note" aria-pressed="${S.noteNew}" data-act="newnote">${I('plus', 18)}</button><button class="btn ghost icon" title="Collapse all folders" aria-label="Collapse all folders" data-act="collapsenotes">${I('collapse', 18)}</button>`;
-  const body = q
-    ? (hits.length ? `<div class="t-meta" style="padding:6px 16px">${hits.length} ${hits.length === 1 ? 'note' : 'notes'}</div>` + hits.map(([id, n]) => `<div class="tree-hit ${S.pick.notes === id ? 'on' : ''}" role="button" tabindex="0" data-act="picknote" data-arg="${id}"><div class="clip">${hl(n[0], S.notesQ.trim())}</div><div class="t-meta clip">${hl(n[2], S.notesQ.trim())}</div></div>`).join('') : '<div class="tree-empty">No matches.</div>')
-    : noteTree(root, 0, S.noteScope || '');
-  return listHead('Notes', tools, `<label class="field">${I('search', 16)}<input id="notes-q" placeholder="Search all notes…" aria-label="Search all notes" value="${esc(S.notesQ)}"></label>${create}`)
-    + `<div class="list-scroll tree">${body}</div>`;
+  // search is the title bar's field: the tree keeps its rows and scroll while
+  // the capped results popup shows over it
+  return listHead('Notes', tools, create)
+    + `<div class="list-scroll tree">${noteTree(root, 0, S.noteScope || '')}</div>`;
 }
 function noteDetail() {
   const id = S.pick.notes, n = NOTES[id];

@@ -422,3 +422,93 @@ fn branch_new_branch_form_creates_and_closes(cx: &mut TestAppContext) {
 
     let _ = std::fs::remove_dir_all(&home);
 }
+
+/// The History list is virtualized: the store keeps 200 commits and every row
+/// carries an avatar, a subject, an unpushed mark and a copy-SHA chip with its
+/// own listener, so building all of them per repaint was the tab's cost. A
+/// tall list in a short window lays out a screenful.
+#[gpui_kit::gpui::test]
+fn the_history_list_lays_out_only_its_visible_rows(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+    cx.update(warp_station::theme::apply_kit_theme);
+
+    let here = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .ancestors()
+        .nth(2)
+        .unwrap()
+        .to_path_buf();
+
+    let (net_tx, _net_rx) = async_channel::unbounded();
+    let store = cx.new(|cx| {
+        let mut store = Store::new(cx, net_tx);
+        store.replace_repos(vec![warp_station_core::repo_store::RepoEntry {
+            name: "probe-repo".into(),
+            folder_path: here.clone(),
+            solution_path: None,
+            tags: vec![],
+            git_branch_name: Some("main".into()),
+            git_modified_count: 0,
+            git_to_push_count: 0,
+            git_to_pull_count: 0,
+            git_last_commit_at: None,
+            git_last_fetch_at: None,
+            git_has_remote: true,
+            git_branch_published: true,
+            git_status_loaded: true,
+            github_pr_count: 0,
+            github_issue_count: 0,
+        }]);
+        store.select_repo(&here.to_string_lossy(), cx);
+        store.set_changes(warp_station_core::git::read::change_snapshot(&here));
+        store.changes_loaded_for = Some(here.to_string_lossy().to_string());
+        store.set_history(
+            warp_station_core::git::read::history_commits(&here, 200).unwrap_or_default(),
+        );
+        store.unpushed = warp_station_core::git::read::unpushed_hashes(&here);
+        store
+    });
+    let commits = cx.read_entity(&store, |s, _| s.history().len());
+    assert!(
+        commits > 60,
+        "the probe repo needs a history longer than a screenful ({commits})",
+    );
+
+    let store_handle = store.clone();
+    let (_window_handle, cx) =
+        cx.add_window_view(|window, cx| MainWindow::new(store_handle.clone(), window, cx));
+    cx.run_until_parked();
+    cx.update_entity(&store, |s: &mut Store, cx| {
+        s.select_repo(&here.to_string_lossy(), cx);
+        s.open_repo_tab(&here.to_string_lossy(), cx);
+        s.open_detail_tab(warp_station::store::WorkspaceTab::History, cx);
+    });
+    cx.run_until_parked();
+    cx.update(|window, cx| drop(window.draw(cx)));
+    cx.run_until_parked();
+    cx.update(|window, cx| drop(window.draw(cx)));
+
+    assert!(
+        cx.debug_bounds("history-list").is_some(),
+        "the history list renders",
+    );
+    // count the commit rows actually in the frame: each row carries its own
+    // selector, so what the frame holds is what the list built
+    let laid_out = commits;
+    let mut built = 0usize;
+    for commit in cx.read_entity(&store, |s, _| {
+        s.history()
+            .iter()
+            .map(|c| c.short_hash().to_string())
+            .collect::<Vec<_>>()
+    }) {
+        let selector: &'static str = Box::leak(format!("commit-{commit}").into_boxed_str());
+        if cx.debug_bounds(selector).is_some() {
+            built += 1;
+        }
+    }
+    assert!(built > 0, "the top of the history is on screen",);
+    assert!(
+        built < laid_out,
+        "a windowed list builds a screenful, not all {laid_out} commits ({built})",
+    );
+}

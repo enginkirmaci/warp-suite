@@ -279,10 +279,13 @@ fn titlebar_bar_is_a_full_width_drag_surface(cx: &mut TestAppContext) {
     }
 }
 
-/// The titlebar's right section reads left to right: the list toggle, the
-/// sibling apps, then the window controls.
+/// The titlebar reads left to right: the app's own mark and name, the sibling
+/// apps the family links to, then — across the search field — the list toggle
+/// and the window controls. The links belong to the brand, not to the right
+/// cluster: they say "these are the apps this window can open", so they sit
+/// with the name that answers "which app is this".
 #[gpui::test]
-fn titlebar_right_orders_list_apps_then_window_buttons(cx: &mut TestAppContext) {
+fn titlebar_orders_brand_apps_then_list_and_window_buttons(cx: &mut TestAppContext) {
     cx.update(gpui_kit::init);
     cx.update(warp_station::theme::apply_kit_theme);
 
@@ -309,17 +312,27 @@ fn titlebar_right_orders_list_apps_then_window_buttons(cx: &mut TestAppContext) 
     draw(cx);
     let _ = std::fs::remove_file(&scratch);
 
+    let brand = cx.debug_bounds("titlebar-brand").expect("brand");
     let list = cx.debug_bounds("list-toggle").expect("list toggle");
     let notes = cx.debug_bounds("notes-toggle").expect("notes button");
+    let agent = cx.debug_bounds("agent-toggle").expect("agent button");
     let minimize = cx.debug_bounds("minimize-window").expect("minimize button");
 
     assert!(
-        list.right() <= notes.origin.x,
-        "the list toggle sits left of the apps ({list:?} vs {notes:?})"
+        brand.right() <= notes.origin.x,
+        "the apps follow the brand ({brand:?} vs {notes:?})"
     );
     assert!(
-        notes.right() <= minimize.origin.x,
-        "the apps sit left of the window controls ({notes:?} vs {minimize:?})"
+        notes.right() <= agent.origin.x,
+        "the apps keep their order ({notes:?} vs {agent:?})"
+    );
+    assert!(
+        agent.right() <= list.origin.x,
+        "the right cluster starts after the apps ({agent:?} vs {list:?})"
+    );
+    assert!(
+        list.right() <= minimize.origin.x,
+        "the list toggle sits left of the window controls ({list:?} vs {minimize:?})"
     );
 }
 
