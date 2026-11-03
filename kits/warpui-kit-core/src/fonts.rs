@@ -228,7 +228,9 @@ pub fn set_font_scale(scale: Option<&str>) {
 /// The settings text-size variant in force.
 pub fn font_scale() -> &'static str {
     let user = bits(USER_FACTOR.load(std::sync::atomic::Ordering::Relaxed));
-    [FONT_LARGE, FONT_LARGER]
+    // every variant must map back, or a saved Small reads as Normal and the
+    // settings picker lies about the size the app runs at
+    [FONT_SMALL, FONT_NORMAL, FONT_LARGE, FONT_LARGER]
         .into_iter()
         .find(|variant| variant_factor(Some(variant)) == user)
         .unwrap_or(FONT_NORMAL)
@@ -436,6 +438,21 @@ mod tests {
     #[test]
     fn a_saved_compact_reads_as_normal() {
         assert_eq!(normalize_font_scale(Some("compact")), FONT_NORMAL);
+    }
+
+    /// Every variant must round-trip through the factor and back, or the
+    /// settings picker shows a size the app is not drawing at (Small used to
+    /// read back as Normal).
+    #[test]
+    fn every_variant_reads_back_as_itself() {
+        let _turn = factor_lock::serial();
+        let before = font_scale();
+        for variant in [FONT_SMALL, FONT_NORMAL, FONT_LARGE, FONT_LARGER] {
+            set_font_scale(Some(variant));
+            assert_eq!(font_scale(), variant);
+        }
+        set_font_scale(Some(before));
+        assert_eq!(font_scale(), before);
     }
 
     #[test]

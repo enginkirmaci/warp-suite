@@ -787,6 +787,17 @@ fn code_search_rows_render_and_persist(cx: &mut TestAppContext) {
     let field = wcx
         .debug_bounds("settings-field-ripgrep executable")
         .expect("ripgrep field bounds");
+    // the design's `.setting .field`: 340 wide at the 36 control height
+    assert_eq!(
+        field.size.width,
+        gpui::px(340.),
+        "a settings field is 340 wide"
+    );
+    assert_eq!(
+        field.size.height,
+        gpui::px(warpui_kit_core::shell::scaled(36.)),
+        "a settings field is the shared field height"
+    );
     // the design's row puts the field at the end, opposite its label
     wcx.simulate_click(
         gpui::point(field.right() - gpui::px(120.), field.center().y),
@@ -886,4 +897,56 @@ fn opencode_cli_and_warp_agent_switches_are_separate(cx: &mut TestAppContext) {
     );
 
     let _ = std::fs::remove_dir_all(&home);
+}
+
+/// The head keeps its actions inside the pane on every section: a long hint
+/// used to widen the row and push Save past the window edge.
+#[gpui_kit::gpui::test]
+fn the_settings_head_keeps_save_inside_the_pane(cx: &mut TestAppContext) {
+    let _home_guard = HOME_ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    cx.update(gpui_kit::init);
+    cx.update(warp_station::theme::apply_kit_theme);
+
+    let home = std::env::temp_dir().join(format!(
+        "warp-station-settings-head-probe-{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&home);
+    std::fs::create_dir_all(home.join(".warp")).unwrap();
+    // SAFETY: process-global env; serialized against the sibling HOME probes
+    unsafe {
+        std::env::set_var("HOME", &home);
+        std::env::set_var("XDG_CONFIG_HOME", home.join(".config"));
+    }
+
+    let (net_tx, _net_rx) = async_channel::unbounded();
+    let store = cx.new(|cx| Store::new(cx, net_tx));
+    let (_window_handle, cx) =
+        cx.add_window_view(|window, cx| SettingsPage::new(store, window, cx));
+    cx.run_until_parked();
+    // the window the app actually opens at, at the owner's desktop scale: the
+    // head only overflowed at this size, not at the maximized test default
+    cx.simulate_scale_factor_change(1.1667);
+    cx.simulate_resize(gpui::size(gpui::px(1280.), gpui::px(820.)));
+    cx.run_until_parked();
+    cx.update(|window, cx| drop(window.draw(cx)));
+    cx.update(|window, cx| drop(window.draw(cx)));
+
+    for section in [
+        "settings-section-Git",
+        "settings-section-External tools",
+        "settings-section-AI",
+        "settings-section-Appearance",
+    ] {
+        if cx.debug_bounds(section).is_some() {
+            click(cx, section);
+            cx.update(|window, cx| drop(window.draw(cx)));
+        }
+        let pane = cx.debug_bounds("settings-detail").expect("detail pane");
+        let save = cx.debug_bounds("settings-save").expect("Save");
+        assert!(
+            save.right() <= pane.right(),
+            "{section}: Save {save:?} runs past the pane {pane:?}"
+        );
+    }
 }

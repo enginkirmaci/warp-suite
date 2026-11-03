@@ -122,3 +122,78 @@ fn the_row_fills_its_list(cx: &mut TestAppContext) {
     // the list's right border takes one pixel
     assert_eq!(row.size.width, list.size.width - px(1.));
 }
+
+/// The settings row vocabulary: a switch row is 60 high, its label is on the
+/// left at the `name` step, and the switch sits at the trailing edge.
+#[gpui_kit::gpui::test]
+fn a_switch_row_puts_the_label_left_and_the_switch_right(cx: &mut gpui::TestAppContext) {
+    use gpui::prelude::*;
+    use gpui::{Context, IntoElement, Render, Window, div};
+
+    struct Page;
+    impl Render for Page {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div()
+                .w(gpui::px(600.))
+                .child(warpui_kit_core::settings::switch_row(
+                    "probe-switch",
+                    "Reduce motion",
+                    "settings-row-Reduce motion",
+                    false,
+                    true,
+                    |_, _, _| {},
+                ))
+        }
+    }
+
+    cx.update(gpui_kit::init);
+    let (_root, cx) = cx.add_window_view(|_, _| Page);
+    cx.run_until_parked();
+    cx.update(|window, cx| drop(window.draw(cx)));
+
+    let switch = cx.debug_bounds("switch-Reduce motion").expect("switch");
+    // the design's `.switch` is 36 wide by 20 high
+    assert_eq!(switch.size.width, gpui::px(36.));
+    assert_eq!(switch.size.height, gpui::px(20.));
+    // and it trails the label: it sits in the right-hand half of a 600 row
+    assert!(
+        switch.origin.x > gpui::px(300.),
+        "the switch trails the label, got x={:?}",
+        switch.origin.x
+    );
+}
+
+/// A described row keeps its control inside a narrow pane: the description
+/// wraps, and the control ends at the row's trailing edge.
+#[gpui_kit::gpui::test]
+fn a_described_row_keeps_its_control_inside_a_narrow_pane(cx: &mut gpui::TestAppContext) {
+    use gpui::prelude::*;
+    use gpui::{Context, IntoElement, Render, Window, div};
+
+    struct Page;
+    impl Render for Page {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div()
+                .w(gpui::px(700.))
+                .child(warpui_kit_core::settings::row_with_desc(
+                    "probe-row",
+                    "Text size",
+                    "Applied right away. The other Warp apps follow when they next open.",
+                    div().h(gpui::px(34.)).w(gpui::px(314.)).bg(gpui::black()),
+                    true,
+                ))
+        }
+    }
+
+    cx.update(gpui_kit::init);
+    let (_root, cx) = cx.add_window_view(|_, _| Page);
+    cx.run_until_parked();
+    cx.update(|window, cx| drop(window.draw(cx)));
+
+    let row = cx.debug_bounds("probe-row").expect("row");
+    eprintln!("PROBE row {row:?}");
+    assert!(
+        row.size.width <= gpui::px(700.),
+        "the row must not grow past its container: {row:?}"
+    );
+}

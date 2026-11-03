@@ -454,6 +454,8 @@ impl Render for ReposPage {
                     repo_menu: self.repo_menu.as_ref(),
                     launch_menu_open: self.launch_menu_open,
                 },
+                window,
+                cx,
             )
         };
         let mut stage = shell::stage().relative().child(strip).child(

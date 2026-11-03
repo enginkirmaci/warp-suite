@@ -25,12 +25,11 @@
 
 use gpui::prelude::*;
 use gpui::{
-    App, Bounds, Context, Entity, FontWeight, MouseButton, Pixels, SharedString, Window, anchored,
-    deferred, div, px, uniform_list,
+    App, Bounds, Context, Entity, Focusable as _, FontWeight, MouseButton, Pixels, SharedString,
+    Window, anchored, deferred, div, px, uniform_list,
 };
 use gpui_kit::base::ElementExt as _;
-use gpui_kit::component::Sizable as _;
-use gpui_kit::component::input::{Input, InputState};
+use gpui_kit::component::input::InputState;
 use std::cell::Cell;
 use std::rc::Rc;
 use warpui_kit_core::palette;
@@ -771,6 +770,7 @@ impl FilteredPicker {
     fn build_panel(
         &mut self,
         data: PickerData,
+        window: &Window,
         cx: &mut Context<Self>,
     ) -> gpui::Stateful<gpui::Div> {
         let panel_id = self.panel_id();
@@ -816,6 +816,14 @@ impl FilteredPicker {
                 let filter_selector = self.filter_selector();
                 let placeholder = SharedString::from(self.spec.filter_placeholder.to_string());
                 let list = self.build_list(&rows, data.fonts, data.accent, data.show_tooltips, cx);
+                // the prototype draws the picker's filter as the one
+                // `.field` with its search icon, not a bare kit input
+                let handle = self.filter.read(cx).focus_handle(cx);
+                let icon = warpui_kit_core::icon(
+                    "icons/search.svg",
+                    px(warpui_kit_core::fonts::icon_small()),
+                    palette::text_muted(),
+                );
                 let mut content = panel
                     .child(
                         div()
@@ -825,8 +833,14 @@ impl FilteredPicker {
                             .aria_label(placeholder.clone())
                             .aria_placeholder(placeholder)
                             .child(
-                                Input::new(&self.filter)
-                                    .with_size(warpui_kit_core::fonts::field_size()),
+                                warpui_kit_core::field::boxed(
+                                    "picker-filter-field",
+                                    &handle,
+                                    window,
+                                    warpui_kit_core::shell::field_height(),
+                                )
+                                .child(icon)
+                                .child(warpui_kit_core::field::input(&self.filter)),
                             ),
                     )
                     .child(list);
@@ -850,7 +864,7 @@ impl FilteredPicker {
             return None;
         }
         let data = self.read_data(window, cx);
-        let panel = self.build_panel(data, cx);
+        let panel = self.build_panel(data, window, cx);
         // anchored to the rail (the nearest positioned ancestor)
         Some(
             panel
@@ -870,7 +884,7 @@ impl Render for FilteredPicker {
         // applies the Cards chrome, so the card only sizes it.
         if self.spec.overlay && self.spec.anchor == OverlayAnchor::Composer {
             let data = self.read_data(window, cx);
-            let panel = self.build_panel(data, cx);
+            let panel = self.build_panel(data, window, cx);
             return div()
                 .id("picker-catcher")
                 .debug_selector(|| "picker-catcher".into())
@@ -918,7 +932,7 @@ impl Render for FilteredPicker {
             if !self.open {
                 return field.into_any_element();
             }
-            let panel = self.build_panel(data, cx).w_full();
+            let panel = self.build_panel(data, window, cx).w_full();
             // the panel hangs off the trigger's bottom edge: `bounds` are
             // window coordinates from prepaint, and this is the same window
             // the anchored layer positions in
@@ -932,14 +946,25 @@ impl Render for FilteredPicker {
             // anchored pass. A trigger-sized catcher never sees a click that
             // lands elsewhere on the form, so the picker would stay open.
             let window_size = window.bounds().size;
+            // The catcher paints over the whole window, but it is an absolute
+            // child of the field, so its origin must be the field's origin
+            // moved back to the window's. Without this the catcher starts at
+            // the field (a right-hand settings column now) and its
+            // window-sized area runs off the window, so a click on empty
+            // space never reaches it.
+            let catcher_origin = self
+                .trigger_bounds
+                .get()
+                .map(|b| b.origin)
+                .unwrap_or_default();
             return field
                 .child(deferred(
                     div()
                         .id("field-catcher")
                         .debug_selector(|| "field-catcher".into())
                         .absolute()
-                        .top_0()
-                        .left_0()
+                        .top(-catcher_origin.y)
+                        .left(-catcher_origin.x)
                         .w(window_size.width)
                         .h(window_size.height)
                         // geometric hitboxes: without this the form under the
@@ -970,7 +995,7 @@ impl Render for FilteredPicker {
         // In-flow mode (no overlay) keeps the panel under the trigger.
         let trigger_row = self.build_trigger_row(&data, cx);
         let popup = if !self.spec.overlay && self.open {
-            Some(self.build_panel(data, cx))
+            Some(self.build_panel(data, window, cx))
         } else {
             None
         };

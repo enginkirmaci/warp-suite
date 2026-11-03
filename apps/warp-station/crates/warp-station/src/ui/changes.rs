@@ -11,8 +11,7 @@ use crate::theme;
 use crate::ui::{A11y, icon};
 use gpui::prelude::*;
 use gpui::{Context, Entity, FontWeight, SharedString, Window, div, px, uniform_list};
-use gpui_kit::component::Sizable as _;
-use gpui_kit::component::input::{InputState, Textarea, TextareaState};
+use gpui_kit::component::input::{InputState, TextareaState};
 use std::cell::RefCell;
 use std::rc::Rc;
 use warp_station_core::model::GitChangedFile;
@@ -1065,7 +1064,9 @@ impl ChangesView {
                 .child(text.to_string())
         };
 
-        let mut actions_row = div().flex().flex_row().gap_2();
+        // flex_shrink_0: the SHA beside it never wraps, so tight panes must
+        // squeeze the files-changed text, not slide these buttons over it
+        let mut actions_row = div().flex().flex_row().gap_2().flex_shrink_0();
         actions_row = actions_row.child({
             let store = self.store.clone();
             let full_hash = details.hash.clone();
@@ -1332,7 +1333,7 @@ impl ChangesView {
     fn render_commit_card(
         &mut self,
         busy: bool,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> gpui::AnyElement {
         let wand_active = {
@@ -1375,10 +1376,15 @@ impl ChangesView {
                         }
                     })
                     .child(
-                        Textarea::new(&self.commit_message)
-                            .bordered(true)
-                            .with_size(theme::field_size())
-                            .h_full(),
+                        // the design's `textarea.area`: the recessed well with
+                        // the default line, the body step on 9/10 padding
+                        warpui_kit_core::field::area(
+                            "commit-message",
+                            &self.commit_message,
+                            window,
+                            cx,
+                        )
+                        .h_full(),
                     )
                     // the corner wand: overlay inside the message box
                     .when(wand_on, |box_area| {
@@ -2016,6 +2022,7 @@ fn branch_data(
                 branch_ui,
                 new_branch_name,
                 picker,
+                window,
                 cx,
             )),
             selected: Selection {
@@ -2141,7 +2148,8 @@ fn new_branch_form(
     branch_ui: &Rc<RefCell<BranchUi>>,
     new_branch_name: &Entity<InputState>,
     picker: &Entity<FilteredPicker>,
-    _cx: &gpui::App,
+    window: &Window,
+    cx: &gpui::App,
 ) -> gpui::AnyElement {
     let cancel_ui = branch_ui.clone();
     let create_ui = branch_ui.clone();
@@ -2153,15 +2161,9 @@ fn new_branch_form(
         .flex()
         .flex_col()
         .gap_1()
-        .child(
-            div()
-                .debug_selector(|| "new-branch-name".into())
-                .child(warpui_kit_core::shell::field(
-                    "new-branch-name-field",
-                    gpui_kit::component::input::Input::new(new_branch_name)
-                        .with_size(theme::field_size()),
-                )),
-        )
+        .child(div().debug_selector(|| "new-branch-name".into()).child(
+            warpui_kit_core::field::mono("new-branch-name-field", new_branch_name, window, cx),
+        ))
         .child(
             div()
                 .flex()

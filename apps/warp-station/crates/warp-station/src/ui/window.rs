@@ -14,11 +14,10 @@ use crate::ui::summary::SummaryPage;
 use crate::ui::windows_tools::{KeepAwakePage, SnapItPage};
 use gpui::prelude::*;
 use gpui::{
-    App, Context, Entity, FontWeight, MouseButton, Render, SharedString, Window, WindowControlArea,
-    div, px,
+    App, Context, Entity, Focusable as _, FontWeight, MouseButton, Render, SharedString, Window,
+    WindowControlArea, div, px,
 };
-use gpui_kit::component::Sizable as _;
-use gpui_kit::component::input::{Input, InputEvent, InputState};
+use gpui_kit::component::input::{InputEvent, InputState};
 use warpui_kit_core::{motion, shell};
 
 /// The rail's sections.
@@ -1164,30 +1163,21 @@ impl MainWindow {
                     .min_w(px(160.))
                     .flex_shrink_1()
                     .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                    .child(warpui_kit_core::shell::field(
-                        "global-search-field",
-                        Input::new(&self.global_search)
-                            .with_size(theme::field_size())
-                            .cleanable(true)
-                            .prefix(icon(
-                                "icons/icon-search.svg",
-                                px(theme::icon_small()),
-                                theme::text_muted(),
-                            ))
-                            .suffix(
-                                div()
-                                    .flex_shrink_0()
-                                    .rounded(px(4.))
-                                    .border_1()
-                                    .border_color(theme::line_strong())
-                                    .mx_1()
-                                    .px_1p5()
-                                    .font_family(theme::code_font())
-                                    .text_size(px(theme::font_micro()))
-                                    .text_color(theme::text_dim())
-                                    .child("Ctrl K"),
-                            ),
-                    )),
+                    .child(
+                        warpui_kit_core::field::boxed(
+                            "global-search-field",
+                            &self.global_search.read(cx).focus_handle(cx),
+                            window,
+                            warpui_kit_core::field::title_height(),
+                        )
+                        .child(icon(
+                            "icons/icon-search.svg",
+                            px(theme::icon_small()),
+                            theme::text_muted(),
+                        ))
+                        .child(warpui_kit_core::field::input(&self.global_search).cleanable(true))
+                        .child(warpui_kit_core::field::kbd("Ctrl K")),
+                    ),
             )
             .child(right)
             .into_any_element()

@@ -7,8 +7,7 @@ use crate::theme;
 use crate::ui::A11y;
 use gpui::prelude::*;
 use gpui::{Context, Entity, FontWeight, SharedString, Window, div, px};
-use gpui_kit::component::Sizable as _;
-use gpui_kit::component::input::{Input, InputEvent, InputState};
+use gpui_kit::component::input::{InputEvent, TextareaState};
 
 #[derive(Clone, Copy, PartialEq)]
 enum FormatterMode {
@@ -61,7 +60,7 @@ impl FormatterMode {
 pub struct FormattersDrawer {
     pub store: Entity<Store>,
     mode: FormatterMode,
-    input: Entity<InputState>,
+    input: Entity<TextareaState>,
     output: String,
     history: Vec<String>,
     /// A finished convert asks the next render pass to clear the input
@@ -71,7 +70,13 @@ pub struct FormattersDrawer {
 
 impl FormattersDrawer {
     pub fn new(store: Entity<Store>, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let input = cx.new(|cx| InputState::new(window, cx).placeholder("Paste text…"));
+        // the design's `textarea.area` takes a pasted block, so one line per
+        // result; Enter still runs it (Shift+Enter is the newline)
+        let input = cx.new(|cx| {
+            TextareaState::new(window, cx)
+                .placeholder("Paste text…")
+                .submit_on_enter(true)
+        });
         cx.subscribe(&input, |this, field, event: &InputEvent, cx| {
             if let InputEvent::PressEnter { .. } = event {
                 this.run(field.read(cx).value().to_string());
@@ -117,48 +122,55 @@ impl Render for FormattersDrawer {
             self.input
                 .update(cx, |state, cx| state.set_value(String::new(), window, cx));
         }
-        let mut modes = div().flex().flex_col().gap_1();
-        for row_modes in [
+        // the design's segmented control: a recessed well trough, the active
+        // mode on the raised step — no accent on a plain mode switch
+        let mut modes = div()
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap_0p5()
+            .p(px(3.))
+            .rounded(px(8.))
+            .bg(theme::well())
+            .self_start();
+        for mode in [
             FormatterMode::Base64Encode,
             FormatterMode::Base64Decode,
             FormatterMode::SnakeCase,
             FormatterMode::PascalCase,
-        ]
-        .chunks(2)
-        {
-            let mut row = div().flex().flex_row().gap_1();
-            for &mode in row_modes {
-                let active = self.mode == mode;
-                row = row.child(
-                    div()
-                        .id(SharedString::from(format!("fmt-mode-{}", mode.label())))
-                        .a11y_toggle(mode.label(), active)
-                        .cursor_pointer()
-                        .flex_1()
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .rounded_md()
-                        .px_2()
-                        .py_1()
-                        .text_size(px(theme::font_body()))
-                        .when(active, |d| {
-                            d.bg(theme::tint(theme::accent()))
-                                .text_color(theme::blue_bright())
-                                .font_weight(FontWeight::SEMIBOLD)
-                        })
-                        .when(!active, |d| {
-                            d.bg(theme::chip()).text_color(theme::text_muted())
-                        })
-                        .hover(|s| s.opacity(0.9))
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.mode = mode;
-                            cx.notify();
-                        }))
-                        .child(mode.label()),
-                );
-            }
-            modes = modes.child(row);
+        ] {
+            let active = self.mode == mode;
+            modes = modes.child(
+                div()
+                    .id(SharedString::from(format!("fmt-mode-{}", mode.label())))
+                    .debug_selector({
+                        let sel = format!("fmt-mode-{}", mode.label());
+                        move || sel.clone()
+                    })
+                    .a11y_toggle(mode.label(), active)
+                    .cursor_pointer()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .h(px(28.))
+                    .px(px(12.))
+                    .rounded(px(6.))
+                    .text_size(px(theme::font_meta()))
+                    .when(active, |d| {
+                        d.bg(theme::raised())
+                            .text_color(theme::text())
+                            .font_weight(FontWeight::SEMIBOLD)
+                    })
+                    .when(!active, |d| {
+                        d.text_color(theme::text_dim())
+                            .hover(|s| s.text_color(theme::text()))
+                    })
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.mode = mode;
+                        cx.notify();
+                    }))
+                    .child(mode.label()),
+            );
         }
 
         let mut history = div()
@@ -229,35 +241,42 @@ impl Render for FormattersDrawer {
             .flex_col()
             .gap_3()
             .occlude()
-            .child(crate::ui::tool_header(
+            .child(crate::ui::tool_header_actions(
                 "Formatters",
                 "Base64 and case conversion, one line at a time.",
+                // Run is the page's one primary, and the design keeps it in
+                // the head rather than beside the input
+                crate::ui::primary_button(
+                    "fmt-run",
+                    "Run",
+                    !self.input.read(cx).value().trim().is_empty(),
+                    cx.listener(|this, _, _, cx| {
+                        let text = this.input.read(cx).value().to_string();
+                        this.run(text);
+                        cx.notify();
+                    }),
+                ),
             ))
             .child(modes)
             .child(
-                div()
-                    .flex()
-                    .flex_row()
-                    .items_center()
-                    .gap_2()
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .debug_selector(|| "fmt-input".into())
-                            .child(
-                                // the shell owns the field height: a kit input's own
-                                // `h` only sizes multi-line fields
-                                warpui_kit_core::shell::field(
-                                    "fmt-input-field",
-                                    Input::new(&self.input).with_size(theme::field_size()),
-                                ),
-                            ),
-                    )
-                    .child(run_button(
-                        !self.input.read(cx).value().trim().is_empty(),
-                        cx,
-                    )),
+                div().flex().flex_row().items_center().gap_2().child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .debug_selector(|| "fmt-input".into())
+                        .child(
+                            // the prototype's input is a six-row mono
+                            // textarea (`.area.t-mono`)
+                            warpui_kit_core::field::mono_area(
+                                "fmt-input-field",
+                                &self.input,
+                                window,
+                                cx,
+                            )
+                            .min_h(px(126.))
+                            .debug_selector(|| "fmt-input-box".into()),
+                        ),
+                ),
             )
             .child(
                 div()
@@ -318,42 +337,6 @@ impl Render for FormattersDrawer {
                     .child(history)
             })
     }
-}
-
-fn run_button(enabled: bool, cx: &mut Context<FormattersDrawer>) -> gpui::AnyElement {
-    div()
-        .id("fmt-run")
-        .debug_selector(|| "fmt-run".into())
-        .a11y_button("Run formatter")
-        .cursor_pointer()
-        .flex()
-        .items_center()
-        .flex_shrink_0()
-        // a button in a field's row takes the field's height: the family has
-        // controls at 34 and fields at 36, and this one sits beside the input
-        .h(warpui_kit_core::shell::field_height())
-        .rounded_md()
-        .px_3()
-        .text_size(px(theme::font_control()))
-        .font_weight(FontWeight::SEMIBOLD)
-        .bg(theme::accent())
-        .text_color(theme::on_accent())
-        .map(|d| {
-            if enabled {
-                d.hover(|s| s.opacity(0.9))
-            } else {
-                d.opacity(0.4)
-            }
-        })
-        .when(enabled, |d| {
-            d.on_click(cx.listener(|this, _, _, cx| {
-                let text = this.input.read(cx).value().to_string();
-                this.run(text);
-                cx.notify();
-            }))
-        })
-        .child("Run")
-        .into_any_element()
 }
 
 fn truncate_middle(text: &str, max: usize) -> String {

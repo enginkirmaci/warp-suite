@@ -98,7 +98,7 @@ pub fn app_links() -> Div {
 /// `debug_bounds`, or a headless probe can only find the shape by its
 /// contents. Deriving the selector from the id means the app names a control
 /// once and the probe reaches it by that same name.
-fn selector_for(id: &ElementId) -> String {
+pub(crate) fn selector_for(id: &ElementId) -> String {
     match id {
         ElementId::Name(name) => name.to_string(),
         ElementId::NamedInteger(name, n) => format!("{name}-{n}"),
@@ -377,32 +377,6 @@ pub fn field_height() -> gpui::Pixels {
 /// The one control height, at the live text size.
 pub fn control_height() -> gpui::Pixels {
     px(scaled(CONTROL_HEIGHT))
-}
-
-/// One field, at the family's metric: the kit `Input` inside a box of the
-/// shared height. The height cannot go on the `Input` itself — a single-line
-/// input applies its own `input_h` after any `.h()`, so a 36 would render at
-/// 24 — and putting it on the box also gives the field one width and one
-/// border to draw on.
-pub fn field(id: impl Into<gpui::ElementId>, input: impl IntoElement) -> gpui::Stateful<gpui::Div> {
-    let id = id.into();
-    let selector = selector_for(&id);
-    div()
-        .id(id)
-        .debug_selector(move || selector)
-        .h(field_height())
-        .w_full()
-        .min_w_0()
-        .child(input)
-}
-
-/// [`field`] for a slot that sets its own width (a row's trailing control).
-pub fn field_at_width(
-    id: impl Into<gpui::ElementId>,
-    width: gpui::Pixels,
-    input: impl IntoElement,
-) -> gpui::Stateful<gpui::Div> {
-    field(id, input).w(width)
 }
 
 #[cfg(test)]

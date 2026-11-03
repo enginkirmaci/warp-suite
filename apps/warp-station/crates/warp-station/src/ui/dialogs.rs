@@ -15,9 +15,7 @@ use crate::ui::A11y;
 use crate::ui::icon;
 use gpui::prelude::*;
 use gpui::{Context, Entity, FontWeight, SharedString, Window, div, px};
-use gpui_kit::component::Sizable as _;
-use gpui_kit::component::input::{Input, InputEvent, InputState};
-use warpui_kit_core::shell;
+use gpui_kit::component::input::{InputEvent, InputState};
 
 use crate::ui::repos::ReposPage;
 
@@ -174,22 +172,17 @@ fn field_label(label: &str) -> gpui::Div {
         .child(label.to_string())
 }
 
-/// The dialogs' text field: the family field metric — the shared 36px height,
-/// the body step's type, the recessed search fill and its border. It used to
-/// pin 30px, which made a dialog field shorter than every other field in the
-/// suite; the shell owns the height now.
-fn dialog_field(id: &'static str, input: &Entity<InputState>) -> gpui::Stateful<gpui::Div> {
-    div().id(id).debug_selector(move || id.into()).child(
-        shell::field(
-            SharedString::from(id),
-            Input::new(input).with_size(theme::field_size()),
-        )
-        .px(px(8.))
-        .rounded(px(4.))
-        .bg(theme::search_bg())
-        .border_color(theme::search_border())
-        .text_size(px(theme::font_sub())),
-    )
+/// The dialogs' text field: the family's one box (`field::mono` — the
+/// prototype draws a dialog path field as `.field text`), at the shared 36 px
+/// height. The selector stays on the box the field is, so a probe clicks the
+/// input itself and not the label above it.
+fn dialog_field(
+    id: &'static str,
+    input: &Entity<InputState>,
+    window: &Window,
+    cx: &gpui::App,
+) -> gpui::Stateful<gpui::Div> {
+    warpui_kit_core::field::mono(id, input, window, cx)
 }
 
 /// A ghost action at the pane-head metric (26px, 4px corners, the
@@ -600,7 +593,9 @@ impl AddRepoDialog {
                                 .flex_row()
                                 .items_center()
                                 .gap(px(6.))
-                                .child(dialog_field("add-root-input", &self.root).flex_1())
+                                .child(
+                                    dialog_field("add-root-input", &self.root, window, cx).flex_1(),
+                                )
                                 .child(ghost_button(
                                     "Browse…",
                                     !self.scanning,
@@ -736,7 +731,7 @@ impl CloneDialog {
         }
     }
 
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<ReposPage>) -> gpui::AnyElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<ReposPage>) -> gpui::AnyElement {
         let name = self.folder_name(cx);
         let error = self.error.clone();
         let busy = self.busy;
@@ -786,17 +781,17 @@ impl CloneDialog {
             dialog_body()
                 .child(form_field(
                     "Repository URL",
-                    dialog_field("clone-url-input", &self.url),
+                    dialog_field("clone-url-input", &self.url, window, cx),
                     url_error.map(str::to_string),
                 ))
                 .child(form_field(
                     "Destination Folder",
-                    dialog_field("clone-dest-input", &self.destination),
+                    dialog_field("clone-dest-input", &self.destination, window, cx),
                     dest_error.map(str::to_string),
                 ))
                 .child(form_field(
                     "Folder Name",
-                    dialog_field("clone-name-input", &self.name),
+                    dialog_field("clone-name-input", &self.name, window, cx),
                     name_error.map(str::to_string),
                 ))
                 .when(!target_line.is_empty(), |body| {

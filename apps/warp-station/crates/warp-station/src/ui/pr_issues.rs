@@ -12,8 +12,7 @@ use crate::ui::icon;
 use crate::ui::repos::{segment, segment_row};
 use gpui::prelude::*;
 use gpui::{Context, Entity, FontWeight, SharedString, Window, div, px};
-use gpui_kit::component::Sizable as _;
-use gpui_kit::component::input::{Input, InputEvent, InputState};
+use gpui_kit::component::input::{InputEvent, InputState};
 use warp_station_core::github::{GitHubItem, IssueSort};
 use warpui_kit_core::shell;
 
@@ -89,6 +88,8 @@ impl ItemListView {
         cx.notify();
     }
 
+    // the filter field needs the window to draw its focus edge
+    #[allow(clippy::too_many_arguments)]
     fn render_toolbar(
         &self,
         open_count: usize,
@@ -96,6 +97,7 @@ impl ItemListView {
         new_url: Option<String>,
         show_controls: bool,
         sort: IssueSort,
+        window: &Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement + use<> {
         let this = cx.entity();
@@ -145,9 +147,11 @@ impl ItemListView {
                     div()
                         .w(px(240.))
                         .debug_selector(|| "issue-filter".into())
-                        .child(warpui_kit_core::shell::field(
+                        .child(warpui_kit_core::field::text(
                             "issue-filter-field",
-                            Input::new(&self.filter).with_size(theme::field_size()),
+                            &self.filter,
+                            window,
+                            cx,
                         )),
                 )
                 .child(
@@ -374,6 +378,7 @@ impl Render for ItemListView {
             new_url,
             controls,
             sort,
+            window,
             cx,
         );
         let menu = (self.sort_open && controls).then(|| self.render_sort_menu(sort, cx));

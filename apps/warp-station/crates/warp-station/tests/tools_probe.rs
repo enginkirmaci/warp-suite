@@ -42,7 +42,7 @@ fn nuget_drawer_draws(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::gpui::test]
-fn the_formatter_field_and_its_button_share_a_height(cx: &mut TestAppContext) {
+fn the_formatters_run_button_sits_in_the_head(cx: &mut TestAppContext) {
     cx.update(gpui_kit::init);
     cx.update(warp_station::theme::apply_kit_theme);
 
@@ -54,8 +54,46 @@ fn the_formatter_field_and_its_button_share_a_height(cx: &mut TestAppContext) {
 
     let field = cx.debug_bounds("fmt-input").expect("field");
     let run = cx.debug_bounds("fmt-run").expect("button");
-    assert_eq!(field.size.height, run.size.height);
-    assert_eq!(field.origin.y, run.origin.y);
+    // the prototype's input is `textarea.area` with six rows, not a one-line
+    // field: a pasted block is what the page formats
+    assert!(
+        field.size.height >= gpui::px(100.),
+        "the formatter input is the six-row area, not a 36-high field ({:?})",
+        field.size.height
+    );
+    // the design keeps Run in the detail head, above the input, not beside it
+    assert!(
+        run.origin.y + run.size.height <= field.origin.y,
+        "Run {run:?} should sit above the field {field:?}"
+    );
+    // and the mode strip is one row of choices, not a two-by-two grid
+    let encode = cx.debug_bounds("fmt-mode-Base64 Encode").expect("mode");
+    let decode = cx.debug_bounds("fmt-mode-Base64 Decode").expect("mode");
+    assert_eq!(encode.origin.y, decode.origin.y, "modes share one row");
+}
+
+/// The tool head carries its actions and they stay inside the pane: the
+/// overflow that clipped Copy was the page root taking its width from
+/// `size_full` while also padding.
+#[gpui_kit::gpui::test]
+fn the_tool_head_actions_stay_inside_the_pane(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+    cx.update(warp_station::theme::apply_kit_theme);
+
+    let (net_tx, _net_rx) = async_channel::unbounded();
+    let store = cx.new(|cx| Store::new(cx, net_tx));
+    let (_handle, cx) =
+        cx.add_window_view(|window, cx| ClipboardPasswordDrawer::new(store, window, cx));
+    cx.run_until_parked();
+    cx.update(|window, cx| drop(window.draw(cx)));
+
+    let pane = cx.debug_bounds("clipboard-password-drawer").expect("page");
+    let copy = cx.debug_bounds("clipboard-copy").expect("Copy");
+    assert!(
+        copy.origin.x >= pane.origin.x && copy.right() <= pane.right(),
+        "Copy {copy:?} escapes the page {pane:?}"
+    );
+    assert!(copy.origin.y < pane.center().y, "Copy belongs to the head");
 }
 
 /// The page reads no real folder here, and a Linux run still draws it: the
@@ -125,4 +163,25 @@ fn main_window_draws_the_tools_section(cx: &mut TestAppContext) {
     unsafe { std::env::remove_var("WARP_STATION_PAGE") };
     assert!(cx.debug_bounds("tool-page").is_some(), "the page draws");
     assert!(cx.debug_bounds("tool-formatters").is_some(), "with its row");
+}
+
+/// Both head buttons are exposed: the a11y tree is how a screen reader (and
+/// the background automation this suite is tested with) reaches them.
+#[gpui_kit::gpui::test]
+fn both_nuget_head_buttons_are_addressable(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+    cx.update(warp_station::theme::apply_kit_theme);
+
+    let (net_tx, _net_rx) = async_channel::unbounded();
+    let store = cx.new(|cx| Store::new(cx, net_tx));
+    let (_handle, cx) = cx.add_window_view(|window, cx| NugetDrawer::new(store, window, cx));
+    cx.run_until_parked();
+    cx.update(|window, cx| drop(window.draw(cx)));
+
+    let register = cx.debug_bounds("nuget-register").expect("register");
+    let watch = cx.debug_bounds("nuget-watch").expect("watch");
+    assert!(
+        register.right() <= watch.origin.x,
+        "Register {register:?} overlaps the watch button {watch:?}"
+    );
 }

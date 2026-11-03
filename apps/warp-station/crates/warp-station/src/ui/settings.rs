@@ -10,12 +10,11 @@ use crate::store::Store;
 use crate::theme;
 use crate::ui::A11y;
 use gpui::prelude::*;
-use gpui::{Context, Entity, FontWeight, SharedString, Window, div, px, relative};
-use gpui_kit::component::Sizable as _;
-use gpui_kit::component::input::{Editor, EditorState, Input, InputState, Textarea, TextareaState};
-use gpui_kit::component::switch::Switch;
+use gpui::{App, Context, Entity, FontWeight, SharedString, Window, div, px, relative};
+use gpui_kit::component::input::{Editor, EditorState, InputState, TextareaState};
 use std::cell::RefCell;
 use std::rc::Rc;
+use warpui_kit_core::settings as kit_settings;
 use warpui_kit_markdown::{LIVE_LANGUAGE, live_highlighter_factory};
 use warpui_kit_picker::{
     FilteredPicker, OverlayAnchor, PanelChrome, PickerBody, PickerData, PickerIcons, PickerItem,
@@ -534,6 +533,8 @@ impl Render for SettingsPage {
             .map_or(("Settings", ""), |entry| (entry.2, entry.3));
         let head = div()
             .flex_shrink_0()
+            .w_full()
+            .min_w_0()
             .flex()
             .flex_row()
             .items_center()
@@ -543,14 +544,21 @@ impl Render for SettingsPage {
             .border_b_1()
             .border_color(theme::hairline())
             .child(
+                // the title column takes what is left and never more: without
+                // `overflow_hidden` a long hint sets its intrinsic width, the
+                // row grows past the pane, and Save runs off the window edge
                 div()
                     .flex_1()
                     .min_w_0()
+                    .overflow_hidden()
                     .child(
                         div()
                             .text_size(px(theme::font_screen_title()))
                             .font_weight(FontWeight::SEMIBOLD)
                             .text_color(theme::text())
+                            .overflow_hidden()
+                            .whitespace_nowrap()
+                            .text_ellipsis()
                             .child(title),
                     )
                     .child(
@@ -558,6 +566,7 @@ impl Render for SettingsPage {
                             .mt_0p5()
                             .text_size(px(theme::font_meta()))
                             .text_color(theme::text_dim())
+                            .whitespace_normal()
                             .child(hint),
                     ),
             )
@@ -569,48 +578,47 @@ impl Render for SettingsPage {
                         .child("saved ✓"),
                 )
             })
-            .child(
-                div()
-                    .id("settings-open-folder")
-                    .a11y_button("Open data folder")
-                    .cursor_pointer()
-                    .h(px(warpui_kit_core::shell::CONTROL_HEIGHT))
-                    .px_3()
-                    .rounded(px(6.))
-                    .border_1()
-                    .border_color(theme::line_strong())
-                    .bg(theme::panel())
-                    .flex()
-                    .flex_row()
-                    .items_center()
-                    .gap_2()
-                    .text_size(px(theme::font_control()))
-                    .font_weight(FontWeight::MEDIUM)
-                    .text_color(theme::text())
-                    .hover(|s| s.bg(theme::raised()))
-                    .on_click(|_, _, _| {
-                        let folder = warp_station_core::paths::AppPaths::user_data_root();
-                        let _ = std::fs::create_dir_all(&folder);
-                        let _ = warp_station_core::terminal::open_folder(&folder.to_string_lossy());
-                    })
-                    .child(crate::ui::icon(
-                        "icons/icon-folder.svg",
-                        px(theme::icon_small()),
-                        theme::text_dim(),
-                    ))
-                    .child("Data folder"),
-            )
-            .child(save_button(cx));
+            // Appearance applies at once and has nothing to save, so its head
+            // carries no actions (the prototype: `plain = k === 'appearance'`
+            // drops the Save and Data folder buttons)
+            .when(section != Section::Appearance, |row| {
+                row.child(
+                    div()
+                        .id("settings-open-folder")
+                        .a11y_button("Open data folder")
+                        .cursor_pointer()
+                        .flex_shrink_0()
+                        .h(px(warpui_kit_core::shell::CONTROL_HEIGHT))
+                        .px_3()
+                        .rounded(px(6.))
+                        .border_1()
+                        .border_color(theme::line_strong())
+                        .bg(theme::panel())
+                        .flex()
+                        .flex_row()
+                        .items_center()
+                        .gap_2()
+                        .text_size(px(theme::font_control()))
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(theme::text())
+                        .hover(|s| s.bg(theme::raised()))
+                        .on_click(|_, _, _| {
+                            let folder = warp_station_core::paths::AppPaths::user_data_root();
+                            let _ = std::fs::create_dir_all(&folder);
+                            let _ =
+                                warp_station_core::terminal::open_folder(&folder.to_string_lossy());
+                        })
+                        .child(crate::ui::icon(
+                            "icons/icon-folder.svg",
+                            px(theme::icon_small()),
+                            theme::text_dim(),
+                        ))
+                        .child("Data folder"),
+                )
+                .child(save_button(cx))
+            });
 
-        let mut cards = div()
-            .w_full()
-            .max_w(px(warpui_kit_core::shell::READING_WIDTH))
-            .flex()
-            .flex_col()
-            .gap_3();
-        for card in self.section_cards(section, cx) {
-            cards = cards.child(card);
-        }
+        let rows = self.section_rows(section, window, cx);
 
         warpui_kit_core::shell::panes().child(list).child(
             warpui_kit_core::shell::detail_pane()
@@ -620,170 +628,465 @@ impl Render for SettingsPage {
                     div()
                         .id("settings-scroll")
                         .flex_1()
+                        // the card column measures against the pane, not
+                        // against its own widest child: without these the
+                        // Git card ran to the window edge
+                        .w_full()
+                        .min_w_0()
                         .min_h_0()
                         .overflow_y_scroll()
                         .p(px(warpui_kit_core::shell::DETAIL_PADDING))
-                        .child(cards),
+                        .child(
+                            // the design's `.measure`: running content reads
+                            // at 760, and the page is rows, not cards
+                            div()
+                                .w_full()
+                                .max_w(px(warpui_kit_core::shell::READING_WIDTH))
+                                .child(kit_settings::rows(rows)),
+                        ),
                 ),
         )
     }
 }
 
 impl SettingsPage {
-    /// The cards of one section.
-    fn section_cards(&mut self, section: Section, cx: &mut Context<Self>) -> Vec<gpui::AnyElement> {
+    /// One section's rows: the design's flat `.setting` list, not cards.
+    ///
+    /// `DESIGN.md`: "one row per setting, label left and control right, 60
+    /// high". The prototype draws the whole page as one `.measure` column of
+    /// rows with a `line-soft` rule between them, so the sections here return
+    /// rows and never a card.
+    fn section_rows(
+        &mut self,
+        section: Section,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Vec<gpui::AnyElement> {
+        let mut rows: Vec<gpui::AnyElement> = Vec::new();
         match section {
-            Section::General => vec![self.card("Startup", cx, |this, cx, card| {
-                card.child(switch_row("Start at boot", this.start_at_boot, cx.listener(|this, _: &bool, _, cx| {
-                    this.start_at_boot = !this.start_at_boot;
-                    cx.notify();
-                })))
-                .child(switch_row("Start minimized", this.start_minimized, cx.listener(|this, _, _, cx| {
-                    this.start_minimized = !this.start_minimized;
-                    cx.notify();
-                })))
-                .child(switch_row("Show tooltips", this.show_tooltips, cx.listener(|this, _: &bool, _, cx| {
-                    this.show_tooltips = !this.show_tooltips;
-                    cx.notify();
-                })))
-                .child(field_row("Notes store path", &this.notes_store_path))
-            })],
-            Section::Appearance => vec![
-                self.card("Palette", cx, |_, _, card| {
-                    card.child(warpui_kit_core::palette_control())
-                        .child(label("Applied right away. The other Warp apps follow when they next open."))
-                }),
-                self.card("Text", cx, |_, _, card| {
-                    card.child(text_size_row())
-                        .child(label("Applied right away. The other Warp apps follow when they next open."))
-                }),
-                self.card("Motion", cx, |this, cx, card| {
-                    let reduced = this.store.read(cx).settings().general.reduce_motion;
-                    let store = this.store.clone();
-                    card.child(switch_row("Reduce motion", reduced, move |_, _, cx| {
+            Section::General => {
+                rows.push(kit_settings::switch_row(
+                    "set-start-at-boot",
+                    "Start at boot",
+                    "settings-row-Start at boot".to_string(),
+                    self.start_at_boot,
+                    rows.is_empty(),
+                    cx.listener(|this, _, _, cx| {
+                        this.start_at_boot = !this.start_at_boot;
+                        cx.notify();
+                    }),
+                ));
+                rows.push(kit_settings::switch_row(
+                    "set-start-minimized",
+                    "Start minimized",
+                    "settings-row-Start minimized".to_string(),
+                    self.start_minimized,
+                    rows.is_empty(),
+                    cx.listener(|this, _, _, cx| {
+                        this.start_minimized = !this.start_minimized;
+                        cx.notify();
+                    }),
+                ));
+                rows.push(kit_settings::switch_row(
+                    "set-tooltips",
+                    "Show tooltips",
+                    "settings-row-Show tooltips".to_string(),
+                    self.show_tooltips,
+                    rows.is_empty(),
+                    cx.listener(|this, _, _, cx| {
+                        this.show_tooltips = !this.show_tooltips;
+                        cx.notify();
+                    }),
+                ));
+                rows.push(field_row(
+                    "Notes store path",
+                    &self.notes_store_path,
+                    rows.is_empty(),
+                    window,
+                    cx,
+                ));
+            }
+            Section::Appearance => {
+                // the three appearance rows apply at once and carry the
+                // design's one-line explanation under the label
+                rows.push(kit_settings::row_with_desc(
+                    "settings-row-Palette".to_string(),
+                    "Palette",
+                    "Shared by every app in the suite",
+                    warpui_kit_core::palette_control(),
+                    rows.is_empty(),
+                ));
+                rows.push(kit_settings::row_with_desc(
+                    "settings-row-Text size".to_string(),
+                    "Text size",
+                    "Also shared by every app",
+                    warpui_kit_core::text_size_control(),
+                    rows.is_empty(),
+                ));
+                rows.push(kit_settings::row_with_desc(
+                    "settings-row-Typeface".to_string(),
+                    "Typeface",
+                    "Interface and code fonts",
+                    div()
+                        .text_size(px(theme::font_body()))
+                        .text_color(theme::text())
+                        .child("Inter + JetBrains Mono"),
+                    rows.is_empty(),
+                ));
+                let reduced = self.store.read(cx).settings().general.reduce_motion;
+                let store = self.store.clone();
+                rows.push(kit_settings::switch_row_with_desc(
+                    "set-reduce-motion",
+                    "Reduce motion",
+                    "settings-row-Reduce motion".to_string(),
+                    "Turns off transitions and keeps spinners still. Busy labels stay",
+                    reduced,
+                    rows.is_empty(),
+                    move |_, _, cx| {
                         store.update(cx, |s, cx| {
                             s.set_reduce_motion(!reduced, cx);
                         });
                         cx.refresh_windows();
-                    }))
-                    .child(label("Turns animation off, spinners included. The busy words stay. Applied right away."))
-                }),
-            ],
-            Section::Repositories => vec![self.card("Repository scanning", cx, |this, cx, card| {
-                card.child(label("Scan folders (one per line)"))
-                    .child(Textarea::new(&this.scan_folders).bordered(true).with_size(theme::field_size()).h(px(240.)).aria_label("Scan folders"))
-                    .child(label("Excluded folders (one per line)"))
-                    .child(Textarea::new(&this.excluded_folders).bordered(true).with_size(theme::field_size()).h(px(100.)).aria_label("Excluded folders"))
-                    .child(field_row("Git folder pattern", &this.git_folder_pattern))
-                    .child(field_row("Solution file pattern", &this.solution_file_pattern))
-                    .child(field_row("Platform folder name", &this.platform_folder_name))
-                    .child(field_row("Max scan depth", &this.max_scan_depth))
-                    .child(switch_row("Group repos by folder", this.group_by_root, cx.listener(|this, _, _, cx| {
+                    },
+                ));
+            }
+            Section::Repositories => {
+                // the prototype's `.setting.stack`: the label over a full-width
+                // `.area` (a folder list is a block, not a 340-wide value)
+                rows.push(kit_settings::stack_row(
+                    "settings-row-Scan folders".to_string(),
+                    "Scan folders",
+                    warpui_kit_core::field::mono_area(
+                        "field-scan-folders",
+                        &self.scan_folders,
+                        window,
+                        cx,
+                    )
+                    .h(px(96.)),
+                    rows.is_empty(),
+                ));
+                rows.push(kit_settings::stack_row(
+                    "settings-row-Excluded folders".to_string(),
+                    "Excluded folders",
+                    warpui_kit_core::field::mono_area(
+                        "field-excluded-folders",
+                        &self.excluded_folders,
+                        window,
+                        cx,
+                    )
+                    .h(px(64.)),
+                    rows.is_empty(),
+                ));
+                rows.push(field_row(
+                    "Git folder pattern",
+                    &self.git_folder_pattern,
+                    rows.is_empty(),
+                    window,
+                    cx,
+                ));
+                rows.push(field_row(
+                    "Solution file pattern",
+                    &self.solution_file_pattern,
+                    rows.is_empty(),
+                    window,
+                    cx,
+                ));
+                rows.push(field_row(
+                    "Platform folder name",
+                    &self.platform_folder_name,
+                    rows.is_empty(),
+                    window,
+                    cx,
+                ));
+                rows.push(field_row(
+                    "Max scan depth",
+                    &self.max_scan_depth,
+                    rows.is_empty(),
+                    window,
+                    cx,
+                ));
+                rows.push(kit_settings::switch_row(
+                    "set-group-by-root",
+                    "Group repos by folder",
+                    "settings-row-Group repos by folder".to_string(),
+                    self.group_by_root,
+                    rows.is_empty(),
+                    cx.listener(|this, _, _, cx| {
                         this.group_by_root = !this.group_by_root;
                         cx.notify();
-                    })))
-                    .child(label("Group the list by the folder each repository lives in. Collapsing and filtering never rescan."))
-                    .when(this.group_by_root, |card| {
-                        card.child(group_depth_row(this, cx))
-                            .child(label("1 groups repos under the scan folders' shared folder, 2 under that folder's parent, and so on. Folders that resolve to the same path (a symlink and its target) share one group."))
-                    })
-            })],
-            Section::Git => vec![self.card("Git", cx, |this, cx, card| {
-                card.child(field_row("Branch name prefix", &this.branch_name_prefix))
-                    .child(auto_fetch_row(this, cx))
-                    .child(switch_row("Only fetch while active", this.auto_fetch_only_focused, cx.listener(|this, _, _, cx| {
+                    }),
+                ));
+                if self.group_by_root {
+                    rows.push(group_depth_row(self, cx, rows.is_empty()));
+                }
+            }
+            Section::Git => {
+                rows.push(field_row(
+                    "Branch name prefix",
+                    &self.branch_name_prefix,
+                    rows.is_empty(),
+                    window,
+                    cx,
+                ));
+                rows.push(auto_fetch_row(self, cx, rows.is_empty()));
+                rows.push(kit_settings::switch_row_with_desc(
+                    "set-fetch-active",
+                    "Only fetch while active",
+                    "settings-row-Only fetch while active".to_string(),
+                    "Pauses the fetch while no window has focus",
+                    self.auto_fetch_only_focused,
+                    rows.is_empty(),
+                    cx.listener(|this, _, _, cx| {
                         this.auto_fetch_only_focused = !this.auto_fetch_only_focused;
                         cx.notify();
-                    })))
-                    .child(label("With an interval set, pauses the fetch while no window has focus; with Auto fetch off, fetches once on launch."))
-            })],
-            Section::ExternalTools => vec![
-                self.card("Editors and terminal", cx, |this, cx, card| {
-                    card.child(switch_row("Enable Visual Studio (Windows)", this.enable_visual_studio, cx.listener(|this, _, _, cx| {
-                            this.enable_visual_studio = !this.enable_visual_studio;
-                            cx.notify();
-                        })))
-                    .child(switch_row("Enable VS Code", this.enable_vscode, cx.listener(|this, _, _, cx| {
-                            this.enable_vscode = !this.enable_vscode;
-                            cx.notify();
-                        })))
-                    .child(switch_row("Enable Terminal", this.enable_terminal, cx.listener(|this, _, _, cx| {
+                    }),
+                ));
+            }
+            Section::ExternalTools => {
+                rows.push(kit_settings::switch_row(
+                    "set-vs",
+                    "Enable Visual Studio (Windows)",
+                    "settings-row-Enable Visual Studio (Windows)".to_string(),
+                    self.enable_visual_studio,
+                    rows.is_empty(),
+                    cx.listener(|this, _, _, cx| {
+                        this.enable_visual_studio = !this.enable_visual_studio;
+                        cx.notify();
+                    }),
+                ));
+                rows.push(kit_settings::switch_row(
+                    "set-vscode",
+                    "Enable VS Code",
+                    "settings-row-Enable VS Code".to_string(),
+                    self.enable_vscode,
+                    rows.is_empty(),
+                    cx.listener(|this, _, _, cx| {
+                        this.enable_vscode = !this.enable_vscode;
+                        cx.notify();
+                    }),
+                ));
+                rows.push(field_row(
+                    "VS Code executable",
+                    &self.vscode_executable,
+                    rows.is_empty(),
+                    window,
+                    cx,
+                ));
+                rows.push(field_row(
+                    "VS Code profile",
+                    &self.vscode_profile,
+                    rows.is_empty(),
+                    window,
+                    cx,
+                ));
+                rows.push(kit_settings::switch_row(
+                    "set-terminal",
+                    "Enable Terminal",
+                    "settings-row-Enable Terminal".to_string(),
+                    self.enable_terminal,
+                    rows.is_empty(),
+                    cx.listener(|this, _, _, cx| {
                         this.enable_terminal = !this.enable_terminal;
                         cx.notify();
-                    })))
-                    .child(field_row("VS Code executable", &this.vscode_executable))
-                    .child(field_row("VS Code profile", &this.vscode_profile))
-                    .child(field_row("Terminal executable", &this.terminal_executable))
-                    .child(field_row("IDE executable", &this.ide_executable))
-                    .child(switch_row("Cross-repo code search", this.enable_code_search, cx.listener(|this, _, _, cx| {
+                    }),
+                ));
+                rows.push(field_row(
+                    "Terminal executable",
+                    &self.terminal_executable,
+                    rows.is_empty(),
+                    window,
+                    cx,
+                ));
+                rows.push(field_row(
+                    "IDE executable",
+                    &self.ide_executable,
+                    rows.is_empty(),
+                    window,
+                    cx,
+                ));
+                rows.push(kit_settings::switch_row(
+                    "set-code-search",
+                    "Cross-repo code search",
+                    "settings-row-Cross-repo code search".to_string(),
+                    self.enable_code_search,
+                    rows.is_empty(),
+                    cx.listener(|this, _, _, cx| {
                         this.enable_code_search = !this.enable_code_search;
                         cx.notify();
-                    })))
-                    .child(field_row("ripgrep executable", &this.code_search_executable))
-                    .when(cfg!(windows), |card| {
-                        card.child(switch_row("Start SnapIt automatically (Windows)", this.snap_it_auto_start, cx.listener(|this, _, _, cx| {
+                    }),
+                ));
+                rows.push(field_row(
+                    "ripgrep executable",
+                    &self.code_search_executable,
+                    rows.is_empty(),
+                    window,
+                    cx,
+                ));
+                if cfg!(windows) {
+                    rows.push(kit_settings::switch_row(
+                        "set-snapit",
+                        "Start SnapIt automatically (Windows)",
+                        "settings-row-Start SnapIt automatically (Windows)".to_string(),
+                        self.snap_it_auto_start,
+                        rows.is_empty(),
+                        cx.listener(|this, _, _, cx| {
                             this.snap_it_auto_start = !this.snap_it_auto_start;
                             cx.notify();
-                        })))
-                        .child(field_row("SnapIt executable", &this.snap_it_executable))
-                    })
-                }),
-                self.card("OpenCode", cx, |this, cx, card| {
-                    card.child(switch_row("Enable OpenCode", this.enable_opencode, cx.listener(|this, _, _, cx| {
+                        }),
+                    ));
+                    rows.push(field_row(
+                        "SnapIt executable",
+                        &self.snap_it_executable,
+                        rows.is_empty(),
+                        window,
+                        cx,
+                    ));
+                }
+                rows.push(kit_settings::subhead("OpenCode"));
+                rows.push(kit_settings::switch_row(
+                    "set-opencode",
+                    "Enable OpenCode",
+                    "settings-row-Enable OpenCode".to_string(),
+                    self.enable_opencode,
+                    rows.is_empty(),
+                    cx.listener(|this, _, _, cx| {
                         this.enable_opencode = !this.enable_opencode;
                         cx.notify();
-                    })))
-                    .child(field_row("OpenCode executable", &this.opencode_executable))
-                    .child(label("Adds the OpenCode launcher: it runs this CLI in a terminal with the selected model when the harness is opencode. Independent of warp-agent runs."))
-                }),
-                self.card("DeepSeek", cx, |this, cx, card| {
-                    card.child(switch_row("Enable DeepSeek", this.enable_deepseek, cx.listener(|this, _, _, cx| {
+                    }),
+                ));
+                rows.push(field_row(
+                    "OpenCode executable",
+                    &self.opencode_executable,
+                    rows.is_empty(),
+                    window,
+                    cx,
+                ));
+                rows.push(kit_settings::subhead("DeepSeek"));
+                rows.push(kit_settings::switch_row(
+                    "set-deepseek",
+                    "Enable DeepSeek",
+                    "settings-row-Enable DeepSeek".to_string(),
+                    self.enable_deepseek,
+                    rows.is_empty(),
+                    cx.listener(|this, _, _, cx| {
                         this.enable_deepseek = !this.enable_deepseek;
                         cx.notify();
-                    })))
-                    .child(field_row("DeepSeek executable", &this.deepseek_executable))
-                    .child(label("Adds the DeepSeek launcher: it runs this CLI in a terminal. Independent of warp-agent runs."))
-                }),
-            ],
-            Section::Ai => vec![self.card("AI features (warp-agent)", cx, |this, cx, card| {
-                card.child(switch_row("Enable warp-agent", this.warp_enabled, cx.listener(|this, _, _, cx| {
-                    this.warp_enabled = !this.warp_enabled;
-                    cx.notify();
-                })))
-                .child(field_row("warp-agent executable", &this.warp_executable))
-                .child(this.harness_row(cx))
-                .child(label("Model"))
-                .child(this.model_picker.clone())
-                .child(label("Variant"))
-                .child(this.variant_picker.clone())
-                .child(label("Prompt templates"))
-                .child(this.templates_section(cx))
-                .child(label("All wands, commit messages and the daily summary run over warp-agent's door with this harness, model and variant. Switching the harness resets the model pick."))
-            })],
-            Section::Integrations => vec![
-                self.card("Notes (warp-notes)", cx, |this, cx, card| {
-                    card.child(switch_row("Enable warp-notes", this.warp_notes_enabled, cx.listener(|this, _, _, cx| {
+                    }),
+                ));
+                rows.push(field_row(
+                    "DeepSeek executable",
+                    &self.deepseek_executable,
+                    rows.is_empty(),
+                    window,
+                    cx,
+                ));
+            }
+            Section::Ai => {
+                rows.push(kit_settings::switch_row(
+                    "set-warp-agent",
+                    "Enable warp-agent",
+                    "settings-row-Enable warp-agent".to_string(),
+                    self.warp_enabled,
+                    rows.is_empty(),
+                    cx.listener(|this, _, _, cx| {
+                        this.warp_enabled = !this.warp_enabled;
+                        cx.notify();
+                    }),
+                ));
+                rows.push(field_row(
+                    "warp-agent executable",
+                    &self.warp_executable,
+                    rows.is_empty(),
+                    window,
+                    cx,
+                ));
+                rows.push(self.harness_row(cx, rows.is_empty()));
+                rows.push(kit_settings::row(
+                    "settings-row-Model".to_string(),
+                    "Model",
+                    div()
+                        .w(px(240.))
+                        .flex_shrink_0()
+                        .child(self.model_picker.clone()),
+                    rows.is_empty(),
+                ));
+                rows.push(kit_settings::row(
+                    "settings-row-Variant".to_string(),
+                    "Variant",
+                    div()
+                        .w(px(240.))
+                        .flex_shrink_0()
+                        .child(self.variant_picker.clone()),
+                    rows.is_empty(),
+                ));
+                rows.push(kit_settings::subhead("Prompt templates"));
+                rows.push(self.templates_section(cx));
+            }
+            Section::Integrations => {
+                rows.push(kit_settings::switch_row(
+                    "set-notes",
+                    "Enable warp-notes",
+                    "settings-row-Enable warp-notes".to_string(),
+                    self.warp_notes_enabled,
+                    rows.is_empty(),
+                    cx.listener(|this, _, _, cx| {
                         this.warp_notes_enabled = !this.warp_notes_enabled;
                         cx.notify();
-                    })))
-                    .child(field_row("warp-notes executable", &this.warp_notes_executable))
-                    .child(label("The title bar and the Notes launcher open this app over the shared notes store."))
-                }),
-                self.card("Integrations", cx, |this, cx, card| {
-                    card.child(switch_row("GitHub", this.enable_github, cx.listener(|this, _, _, cx| {
+                    }),
+                ));
+                rows.push(field_row(
+                    "warp-notes executable",
+                    &self.warp_notes_executable,
+                    rows.is_empty(),
+                    window,
+                    cx,
+                ));
+                rows.push(kit_settings::switch_row(
+                    "set-github",
+                    "GitHub",
+                    "settings-row-GitHub".to_string(),
+                    self.enable_github,
+                    rows.is_empty(),
+                    cx.listener(|this, _, _, cx| {
                         this.enable_github = !this.enable_github;
                         cx.notify();
-                    })))
-                    .child(field_row("GitHub CLI executable", &this.github_executable))
-                    .child(switch_row("Azure DevOps", this.enable_azure, cx.listener(|this, _, _, cx| {
+                    }),
+                ));
+                rows.push(field_row(
+                    "GitHub CLI executable",
+                    &self.github_executable,
+                    rows.is_empty(),
+                    window,
+                    cx,
+                ));
+                rows.push(kit_settings::switch_row(
+                    "set-azure",
+                    "Azure DevOps",
+                    "settings-row-Azure DevOps".to_string(),
+                    self.enable_azure,
+                    rows.is_empty(),
+                    cx.listener(|this, _, _, cx| {
                         this.enable_azure = !this.enable_azure;
                         cx.notify();
-                    })))
-                    .child(field_row("Azure DevOps PAT", &this.azure_pat))
-                    .child(field_row("Azure DevOps server URL", &this.azure_url))
-                }),
-            ],
+                    }),
+                ));
+                rows.push(field_row(
+                    "Azure DevOps PAT",
+                    &self.azure_pat,
+                    rows.is_empty(),
+                    window,
+                    cx,
+                ));
+                rows.push(field_row(
+                    "Azure DevOps server URL",
+                    &self.azure_url,
+                    rows.is_empty(),
+                    window,
+                    cx,
+                ));
+            }
         }
+        rows
     }
 }
 
@@ -1015,31 +1318,6 @@ impl SettingsPage {
             .child(placeholder_chips(template.placeholders))
             .into_any_element()
     }
-
-    fn card(
-        &mut self,
-        title: &str,
-        cx: &mut Context<Self>,
-        build: impl FnOnce(&mut Self, &mut Context<Self>, gpui::Div) -> gpui::Div,
-    ) -> gpui::AnyElement {
-        let shell = div()
-            .w_full()
-            .rounded_xl()
-            .border_1()
-            .border_color(theme::hairline())
-            .bg(theme::card())
-            .p_4()
-            .flex()
-            .flex_col()
-            .gap_3()
-            .child(
-                div()
-                    .text_size(px(theme::font_heading()))
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .child(title.to_string()),
-            );
-        build(self, cx, shell).into_any_element()
-    }
 }
 
 fn save_button(cx: &mut Context<SettingsPage>) -> gpui::AnyElement {
@@ -1048,6 +1326,7 @@ fn save_button(cx: &mut Context<SettingsPage>) -> gpui::AnyElement {
         .debug_selector(|| "settings-save".into())
         .a11y_button("Save settings")
         .cursor_pointer()
+        .flex_shrink_0()
         .rounded_md()
         .bg(theme::accent())
         .px_4()
@@ -1059,13 +1338,6 @@ fn save_button(cx: &mut Context<SettingsPage>) -> gpui::AnyElement {
         .on_click(cx.listener(|this, _, _, cx| this.save(cx)))
         .child("Save")
         .into_any_element()
-}
-
-fn label(text: &str) -> impl IntoElement + use<> {
-    div()
-        .text_size(px(theme::font_body()))
-        .text_color(theme::text_muted())
-        .child(text.to_string())
 }
 
 /// A small bordered row action; the armed state turns red with "Confirm".
@@ -1122,158 +1394,109 @@ fn placeholder_chips(placeholders: &[&'static str]) -> impl IntoElement + use<> 
     row
 }
 
-fn field_row(label_text: &str, field: &Entity<InputState>) -> impl IntoElement + use<> {
-    // a stable per-row selector so probes can reach the field through its row.
-    // The design's setting is one row: label left, control right, 60 high
-    // (multi-line fields are the ones that stack, and they have their own row).
-    let selector = format!("settings-field-{label_text}");
-    div()
-        .debug_selector(move || selector.clone())
-        .flex()
-        .flex_row()
-        .items_center()
-        .gap_3()
-        .min_h(px(60.))
-        .child(div().flex_1().min_w_0().child(label(label_text)))
-        .child(
-            div()
-                .w(px(240.))
-                .flex_shrink_0()
-                .child(warpui_kit_core::shell::field(
-                    "settings-field",
-                    Input::new(field)
-                        .with_size(theme::field_size())
-                        .aria_label(label_text),
-                )),
-        )
-}
-
-fn switch_row(
+fn field_row(
     label_text: &str,
-    checked: bool,
-    on_click: impl Fn(&bool, &mut Window, &mut gpui::App) + 'static,
+    field: &Entity<InputState>,
+    first: bool,
+    window: &Window,
+    cx: &App,
 ) -> gpui::AnyElement {
-    // a stable per-row selector so probes can reach the switch through its row
-    let selector = format!("settings-row-{label_text}");
-    div()
+    // a stable per-row selector so probes can reach the field through its row
+    let selector = format!("settings-field-{label_text}");
+    let control = div()
         .debug_selector(move || selector.clone())
-        .flex()
-        .flex_row()
-        .items_center()
-        .gap_3()
-        .min_h(px(60.))
-        // label left, control right, like every other setting row
-        .child(div().flex_1().min_w_0().child(label(label_text)))
-        .child(
-            Switch::new(SharedString::from(format!("switch-{label_text}")))
-                .checked(checked)
-                .accessibility_label(label_text)
-                .on_click(on_click),
-        )
-        .into_any_element()
+        // the design's `.setting .field`: 340 wide, never past 46% of the
+        // measure, so the control shrinks with the pane
+        .w(px(340.))
+        .max_w(px(0.46 * warpui_kit_core::shell::READING_WIDTH))
+        .min_w_0()
+        .child(warpui_kit_core::field::custom(
+            "settings-field",
+            field,
+            window,
+            cx,
+            move |input| {
+                input
+                    .aria_label(label_text)
+                    .font_family(SharedString::from(theme::code_font()))
+                    .text_size(px(theme::font_mono_meta()))
+            },
+        ));
+    kit_settings::row(
+        format!("settings-field-row-{label_text}"),
+        label_text,
+        control,
+        first,
+    )
 }
 
-fn text_size_row() -> gpui::AnyElement {
-    div()
-        .flex()
-        .flex_row()
-        .items_center()
-        .gap_3()
-        .min_h(px(60.))
-        .child(div().flex_1().min_w_0().child(label("Text size")))
-        .child(warpui_kit_core::text_size_control())
-        .into_any_element()
+/// The group-depth picker: 1/2/3/4 as the design's segmented control. Only
+/// rendered while grouping is on.
+fn group_depth_row(
+    this: &SettingsPage,
+    cx: &mut Context<SettingsPage>,
+    first: bool,
+) -> gpui::AnyElement {
+    let options = (1..=4usize)
+        .map(|level| {
+            kit_settings::Choice::new(
+                level.to_string(),
+                level.to_string(),
+                this.group_depth == level,
+            )
+        })
+        .collect();
+    let entity = cx.entity();
+    let control =
+        kit_settings::segmented("group-depth", options, move |key, _, cx: &mut gpui::App| {
+            let level = key.parse::<usize>().unwrap_or(1);
+            entity.update(cx, |this, cx| {
+                this.group_depth = level;
+                cx.notify();
+            });
+        });
+    kit_settings::row("group-depth-row", "Group depth", control, first)
 }
 
-/// The group-depth picker: 1/2/3/4 segmented buttons; 1 = the scan roots'
-/// shared folder, each further level one folder higher. Only rendered while
-/// grouping is on.
-fn group_depth_row(this: &SettingsPage, cx: &mut Context<SettingsPage>) -> gpui::AnyElement {
-    let mut row = div()
-        .id("group-depth-row")
-        .debug_selector(|| "group-depth-row".into())
-        .flex()
-        .flex_row()
-        .items_center()
-        .gap_2()
-        .child(label("Group depth"));
-    for level in 1..=4usize {
-        let id = SharedString::from(format!("group-depth-{level}"));
-        let selected = this.group_depth == level;
-        row = row.child(
-            div()
-                .id(id.clone())
-                .debug_selector(move || id.to_string())
-                .a11y_toggle(format!("Group depth {level}"), selected)
-                .cursor_pointer()
-                .rounded_md()
-                .px_3()
-                .py_1()
-                .text_size(px(theme::font_body()))
-                .font_weight(FontWeight::SEMIBOLD)
-                .when(selected, |d| {
-                    d.bg(theme::tint(theme::accent()))
-                        .text_color(theme::blue_bright())
-                })
-                .when(!selected, |d| {
-                    d.text_color(theme::text_muted())
-                        .hover(|s| s.bg(theme::hover_bg()))
-                })
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.group_depth = level;
-                    cx.notify();
-                }))
-                .child(level.to_string()),
-        );
-    }
-    row.into_any_element()
-}
-
-/// The periodic-fetch picker: Off/15m/30m/60m segmented buttons; None = off.
-fn auto_fetch_row(this: &SettingsPage, cx: &mut Context<SettingsPage>) -> gpui::AnyElement {
-    let options: [(Option<u16>, &str, &'static str); 4] = [
-        (None, "Off", "auto-fetch-off"),
-        (Some(15), "15m", "auto-fetch-15"),
-        (Some(30), "30m", "auto-fetch-30"),
-        (Some(60), "60m", "auto-fetch-60"),
+/// The periodic-fetch picker: Off/15m/30m/60m, the design's segmented control
+/// (a `well` trough, the choice on `raised`); None = off.
+fn auto_fetch_row(
+    this: &SettingsPage,
+    cx: &mut Context<SettingsPage>,
+    first: bool,
+) -> gpui::AnyElement {
+    let options: [(Option<u16>, &'static str); 4] = [
+        (None, "Off"),
+        (Some(15), "15m"),
+        (Some(30), "30m"),
+        (Some(60), "60m"),
     ];
-    let mut row = div()
-        .id("auto-fetch-row")
-        .debug_selector(|| "auto-fetch-row".into())
-        .flex()
-        .flex_row()
-        .items_center()
-        .gap_2()
-        .child(label("Auto fetch"));
-    for (value, name, id) in options {
-        let selected = this.auto_fetch_minutes == value;
-        row = row.child(
-            div()
-                .id(id)
-                .debug_selector(move || id.into())
-                .a11y_toggle(format!("Auto fetch {name}"), selected)
-                .cursor_pointer()
-                .rounded_md()
-                .px_3()
-                .py_1()
-                .text_size(px(theme::font_body()))
-                .font_weight(FontWeight::SEMIBOLD)
-                .when(selected, |d| {
-                    d.bg(theme::tint(theme::accent()))
-                        .text_color(theme::blue_bright())
-                })
-                .when(!selected, |d| {
-                    d.text_color(theme::text_muted())
-                        .hover(|s| s.bg(theme::hover_bg()))
-                })
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.auto_fetch_minutes = value;
-                    cx.notify();
-                }))
-                .child(name),
-        );
-    }
-    row.into_any_element()
+    let choices = options
+        .iter()
+        .map(|(value, name)| {
+            // the key is the minute count, so the button's id reads
+            // `auto-fetch-30` while its label reads "30m"
+            let key = match value {
+                Some(minutes) => minutes.to_string(),
+                None => "off".to_string(),
+            };
+            kit_settings::Choice::new(key, *name, this.auto_fetch_minutes == *value)
+        })
+        .collect();
+    let entity = cx.entity();
+    let control =
+        kit_settings::segmented("auto-fetch", choices, move |key, _, cx: &mut gpui::App| {
+            let picked = if key.as_ref() == "off" {
+                None
+            } else {
+                key.parse::<u16>().ok()
+            };
+            entity.update(cx, |this, cx| {
+                this.auto_fetch_minutes = picked;
+                cx.notify();
+            });
+        });
+    kit_settings::row("auto-fetch-row", "Auto fetch", control, first)
 }
 
 impl SettingsPage {
@@ -1297,62 +1520,33 @@ impl SettingsPage {
         cx.notify();
     }
 
-    /// The harness radio row: one round radio per option the door reports.
-    fn harness_row(&self, cx: &mut Context<Self>) -> gpui::AnyElement {
+    /// The harness picker: the design's `.seg` over whatever harnesses the
+    /// door reports (the prototype draws Harness as a segmented control, not a
+    /// radio list).
+    fn harness_row(&self, cx: &mut Context<Self>, first: bool) -> gpui::AnyElement {
         let harnesses = self.store.read(cx).harnesses.clone();
         let selected = self.harness_scope.read(cx).harness.clone();
-        let mut row = div()
-            .id("warp-harness-row")
-            .debug_selector(|| "warp-harness-row".into())
-            .flex()
-            .flex_row()
-            .items_center()
-            .gap_3()
-            .child(label("Harness"));
-        for harness in harnesses {
-            let id = harness.id;
-            let display = harness.label;
-            let is_on = id == selected;
-            let selector = format!("warp-harness-{id}");
-            let marker = if is_on {
-                div()
-                    .size(px(11.))
-                    .rounded_full()
-                    .bg(theme::accent())
-                    .into_any_element()
-            } else {
-                div()
-                    .size(px(11.))
-                    .rounded_full()
-                    .border_1()
-                    .border_color(theme::text_muted())
-                    .into_any_element()
-            };
-            let click_id = id.clone();
-            row = row.child(
-                div()
-                    .id(SharedString::from(selector.clone()))
-                    .debug_selector(move || selector.clone())
-                    .role(gpui::Role::RadioButton)
-                    .aria_label(SharedString::from(format!("Harness {display}")))
-                    .aria_selected(is_on)
-                    .flex()
-                    .items_center()
-                    .gap_1p5()
-                    .cursor_pointer()
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        this.pick_harness(click_id.clone(), window, cx);
-                    }))
-                    .child(marker)
-                    .child(
-                        div()
-                            .text_size(px(theme::font_body()))
-                            .text_color(theme::text())
-                            .child(display),
-                    ),
-            );
-        }
-        row.into_any_element()
+        let choices = harnesses
+            .iter()
+            .map(|harness| {
+                kit_settings::Choice::new(
+                    harness.id.clone(),
+                    harness.label.clone(),
+                    harness.id == selected,
+                )
+            })
+            .collect();
+        let entity = cx.entity();
+        let control = kit_settings::segmented(
+            "warp-harness",
+            choices,
+            move |key, window, cx: &mut gpui::App| {
+                entity.update(cx, |this, cx| {
+                    this.pick_harness(key.to_string(), window, cx);
+                });
+            },
+        );
+        kit_settings::row("settings-row-Harness", "Harness", control, first)
     }
 }
 

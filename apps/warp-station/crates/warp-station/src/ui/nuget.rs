@@ -5,11 +5,9 @@
 
 use crate::store::Store;
 use crate::theme;
-use crate::ui::A11y;
 use gpui::prelude::*;
-use gpui::{App, Context, Entity, FontWeight, Window, div, px};
-use gpui_kit::component::Sizable as _;
-use gpui_kit::component::input::{Input, InputEvent, InputState};
+use gpui::{Context, Entity, FontWeight, Window, div, px};
+use gpui_kit::component::input::{InputEvent, InputState};
 
 pub struct NugetDrawer {
     pub store: Entity<Store>,
@@ -73,7 +71,7 @@ impl NugetDrawer {
 }
 
 impl Render for NugetDrawer {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl gpui::IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl gpui::IntoElement {
         let snapshot = self.store.read(cx).nuget.clone();
         let mut activity = div()
             .id("nuget-activity-list")
@@ -98,18 +96,65 @@ impl Render for NugetDrawer {
 
         div()
             .id("nuget-drawer")
-            .size_full()
+            .w_full()
+            .h_full()
+            .min_w_0()
             .max_w(px(warpui_kit_core::shell::READING_WIDTH + 2. * warpui_kit_core::shell::DETAIL_PADDING))
             .p(px(warpui_kit_core::shell::DETAIL_PADDING))
             .flex()
             .flex_col()
             .gap_3()
             .occlude()
-            .child(crate::ui::tool_header(
+            // the head carries the state (dot + word, the design's
+            // tool-state) and both actions: Register as the plain button,
+            // the watch toggle as the page's one primary
+            .child(crate::ui::tool_header_actions(
                 "NuGet Package Manager",
-                "Refresh the global cache when a local build produces .nupkg files.",
+                div()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap_1p5()
+                    .child(
+                        div()
+                            .size(px(8.))
+                            .rounded_full()
+                            .bg(if snapshot.watching {
+                                theme::SUCCESS_BRIGHT
+                            } else {
+                                theme::text_muted()
+                            }),
+                    )
+                    .child(if snapshot.watching {
+                        "Watching for new builds"
+                    } else {
+                        "Watch is idle"
+                    }),
+                crate::ui::head_actions(vec![
+                    crate::ui::neutral_button(
+                        "nuget-register",
+                        "Register source",
+                        true,
+                        cx.listener(|this, _, _, cx| this.register(cx)),
+                    ),
+                    if snapshot.watching {
+                        crate::ui::primary_button(
+                            "nuget-watch",
+                            "Stop Watch",
+                            true,
+                            cx.listener(|this, _, _, cx| this.toggle_watch(cx)),
+                        )
+                    } else {
+                        crate::ui::primary_button(
+                            "nuget-watch",
+                            "Start Watch",
+                            true,
+                            cx.listener(|this, _, _, cx| this.toggle_watch(cx)),
+                        )
+                    },
+                ]),
             ))
-            // setup card: watch folder, resolved cache paths, register
+            // setup card: watch folder, resolved cache paths
             .child(
                 div()
                     .rounded_lg()
@@ -122,28 +167,15 @@ impl Render for NugetDrawer {
                     .gap_1p5()
                     .child(
                         div()
-                            .flex()
-                            .flex_row()
-                            .items_center()
-                            .gap_2()
-                            .child(
-                                div()
-                                    .text_size(px(theme::font_meta()))
-                                    .text_color(theme::text_muted())
-                                    .child("Watch directory"),
-                            )
-                            .child(div().flex_1())
-                            .child(action_button(
-                                "nuget-register",
-                                "Register source",
-                                theme::blue_bright(),
-                                false,
-                                cx.listener(|this, _, _, cx| this.register(cx)),
-                            )),
+                            .text_size(px(theme::font_meta()))
+                            .text_color(theme::text_muted())
+                            .child("Watch directory"),
                     )
-                    .child(warpui_kit_core::shell::field(
+                    .child(warpui_kit_core::field::mono(
                         "field-watch_input",
-                        Input::new(&self.watch_input).with_size(theme::field_size()),
+                        &self.watch_input,
+                        window,
+                        cx,
                     ))
                     .child(
                         div()
@@ -230,30 +262,6 @@ impl Render for NugetDrawer {
                     })
                     .when(!snapshot.activity.is_empty(), |card| card.child(activity)),
             )
-            // footer: the watch toggle
-            .child(
-                div()
-                    .flex()
-                    .flex_row()
-                    .justify_end()
-                    .child(if snapshot.watching {
-                        action_button(
-                            "nuget-watch",
-                            "Stop Watch",
-                            theme::DANGER,
-                            false,
-                            cx.listener(|this, _, _, cx| this.toggle_watch(cx)),
-                        )
-                    } else {
-                        action_button(
-                            "nuget-watch",
-                            "Start Watch",
-                            theme::SUCCESS_BRIGHT,
-                            false,
-                            cx.listener(|this, _, _, cx| this.toggle_watch(cx)),
-                        )
-                    }),
-            )
     }
 }
 
@@ -288,35 +296,5 @@ fn explain_line(text: &str) -> gpui::AnyElement {
         .text_size(px(theme::font_meta()))
         .text_color(theme::text_dim())
         .child(text.to_string())
-        .into_any_element()
-}
-
-fn action_button(
-    id: &'static str,
-    label: &str,
-    color: gpui::Rgba,
-    disabled: bool,
-    on_click: impl Fn(&gpui::ClickEvent, &mut Window, &mut App) + 'static,
-) -> gpui::AnyElement {
-    div()
-        .id(id)
-        .a11y_button(label.to_string())
-        .cursor_pointer()
-        .rounded_md()
-        .px_3()
-        .py_1()
-        .text_size(px(theme::font_body()))
-        .font_weight(FontWeight::SEMIBOLD)
-        .bg(theme::tint(color))
-        .text_color(color)
-        .map(|d| {
-            if disabled {
-                d.opacity(0.4)
-            } else {
-                d.hover(|s| s.opacity(0.85))
-            }
-        })
-        .when(!disabled, |d| d.on_click(on_click))
-        .child(label.to_string())
         .into_any_element()
 }

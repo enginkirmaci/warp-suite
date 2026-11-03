@@ -12,10 +12,10 @@ use crate::ui::launchers::{self, Launcher};
 use crate::ui::repos::ReposPage;
 use gpui::prelude::*;
 use gpui::{
-    AnyElement, App, ClipboardItem, Entity, FontWeight, MouseButton, Rgba, SharedString, div, px,
+    AnyElement, App, ClipboardItem, Entity, Focusable as _, FontWeight, MouseButton, Rgba,
+    SharedString, Window, div, px,
 };
-use gpui_kit::component::Sizable as _;
-use gpui_kit::component::input::{Input, InputState};
+use gpui_kit::component::input::InputState;
 use warp_station_core::rel_time;
 use warp_station_core::repo_store::RepoEntry;
 use warp_station_core::settings::AppSettings;
@@ -51,6 +51,8 @@ pub fn render(
     entities: &Entity<Store>,
     page: &Entity<ReposPage>,
     tag_draft: Option<&Entity<InputState>>,
+    window: &Window,
+    cx: &App,
 ) -> AnyElement {
     let body = div()
         .id("overview")
@@ -82,7 +84,7 @@ pub fn render(
         .flex_col()
         .gap_4()
         .child(status_section(
-            repo, page, tag_draft, entities, &folder, store,
+            repo, page, tag_draft, entities, &folder, store, window, cx,
         ))
         .children(details_section(store));
     body.child(
@@ -579,6 +581,8 @@ fn tag_row(
     tag_draft: Option<&Entity<InputState>>,
     entities: &Entity<Store>,
     folder: &str,
+    window: &Window,
+    cx: &App,
 ) -> AnyElement {
     let mut row = div()
         .flex()
@@ -590,10 +594,19 @@ fn tag_row(
         row = row.child(tag_chip(tag, entities, folder));
     }
     if let Some(input) = tag_draft {
-        row = row.child(div().w(px(120.)).child(warpui_kit_core::shell::field(
-            "tag-draft-field",
-            Input::new(input).with_size(theme::field_size()),
-        )));
+        // the prototype's compact tag box: `.field`, 26 high and 120 wide
+        let handle = input.read(cx).focus_handle(cx);
+        row = row.child(
+            div().w(px(120.)).child(
+                warpui_kit_core::field::boxed(
+                    "tag-draft-field",
+                    &handle,
+                    window,
+                    px(warpui_kit_core::shell::scaled(26.)),
+                )
+                .child(warpui_kit_core::field::input(input)),
+            ),
+        );
     } else {
         let target = page.clone();
         row = row.child(
@@ -686,6 +699,9 @@ fn fact(label: &'static str, value: impl IntoElement) -> gpui::Div {
 
 /// Branch, how far it is from the remote, HEAD and the tags. The syncing
 /// verbs live in Needs you, where the counts that ask for them are.
+// the tag editor is an input box, so the section needs the window and the app
+// as well as its own data; every one of them is used
+#[allow(clippy::too_many_arguments)]
 fn status_section(
     repo: &RepoEntry,
     page: &Entity<ReposPage>,
@@ -693,6 +709,8 @@ fn status_section(
     entities: &Entity<Store>,
     folder: &str,
     store: &Store,
+    window: &Window,
+    cx: &App,
 ) -> AnyElement {
     let branch = repo
         .git_branch_name
@@ -818,7 +836,7 @@ fn status_section(
         .child(fact("Last commit", last_commit_line))
         .child(fact(
             "Tags",
-            tag_row(repo, page, tag_draft, entities, folder),
+            tag_row(repo, page, tag_draft, entities, folder, window, cx),
         ))
         .into_any_element()
 }

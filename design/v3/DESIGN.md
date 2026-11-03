@@ -391,6 +391,17 @@ constants stay as Copper's reference values and are pinned to it by
 their tabs and rows) so an app cannot drift from it, and `motion` holds the durations
 and the spinner.
 
+Two vocabularies the apps had each grown their own copy of are module-level now, so a
+page cannot disagree with this file: `warpui_kit_core::settings` draws the `.setting`
+rows (label left, control right, 60 high, `.settings.stack` for a full-width area,
+`.seg` for a choice, `.switch` for a toggle), and `warpui_kit_core::field` draws the one
+text box — `.field` at 36 (32 in the title bar) with the `well` fill, the `line` edge and
+`accent-ink` on focus, `.field.text` for a mono value, `.area` for a multi-line one, and
+the `.kbd` chip that sits inside a field. The kit's own `Input` cannot draw that box: one
+theme token would have to be both the `line` edge and the `well` recess, and it draws 24
+high whatever height a caller sets — so the box is drawn by `field` and the widget goes
+inside it chrome-less.
+
 | `palette.rs` today | v3 token |
 |---|---|
 | `WINDOW_CHROME`, `TOPBAR_BG`, `SETTINGS_BG`, `FOOT_BG` | `chrome` |

@@ -77,6 +77,8 @@ pub fn render(
     page: &Entity<ReposPage>,
     views: &DetailViews,
     props: DetailProps,
+    window: &Window,
+    cx: &App,
 ) -> AnyElement {
     let pane = shell::detail_pane()
         .debug_selector(|| "repos-detail".into())
@@ -187,7 +189,7 @@ pub fn render(
         .min_h_0()
         .child(match views.panel(active) {
             Some(panel) => panel,
-            None => overview::render(store, entities, page, props.tag_draft),
+            None => overview::render(store, entities, page, props.tag_draft, window, cx),
         });
     // keyed on what is shown, so a redraw never replays it
     let view = SharedString::from(format!("detail-enter-{folder}-{}", active.selector()));

@@ -146,7 +146,9 @@ pub fn tool_header(title: &'static str, hint: &'static str) -> gpui::AnyElement 
         header = header.child(
             div()
                 .text_size(px(theme::font_meta()))
-                .text_color(theme::text_faint())
+                // the prototype's `.detail-sub` is `t-meta` on `text-2`, not
+                // the quietest ink
+                .text_color(theme::text_dim())
                 .child(hint),
         );
     }
@@ -158,6 +160,159 @@ pub fn tool_header(title: &'static str, hint: &'static str) -> gpui::AnyElement 
         .border_b_1()
         .border_color(theme::border_light())
         .child(header)
+        .into_any_element()
+}
+
+/// [`tool_header`] with the head's own actions (the design gives every tool
+/// head its buttons: Copy on Clipboard Password, Register source and the
+/// watch toggle on NuGet). The title shrinks and the actions wrap, so a
+/// narrow pane squeezes the words instead of pushing the buttons past the
+/// window edge.
+pub fn tool_header_actions(
+    title: &'static str,
+    hint: impl IntoElement,
+    actions: impl IntoElement,
+) -> gpui::AnyElement {
+    // the design's detail head: title and actions share one row (the title
+    // clips, the actions keep their width) and the hint sits under it
+    div()
+        .flex()
+        .flex_col()
+        .gap_1()
+        .pb_3()
+        .border_b_1()
+        .border_color(theme::border_light())
+        .child(
+            div()
+                .flex()
+                .flex_row()
+                .items_center()
+                .gap_2()
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .text_size(px(theme::font_screen_title()))
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_color(theme::text())
+                        .overflow_hidden()
+                        .whitespace_nowrap()
+                        .text_ellipsis()
+                        .child(title),
+                )
+                .child(actions.into_any_element()),
+        )
+        .child(
+            div()
+                .text_size(px(theme::font_meta()))
+                // the prototype's `.detail-sub` is `t-meta` on `text-2`, not
+                // the quietest ink
+                .text_color(theme::text_dim())
+                .child(hint.into_any_element()),
+        )
+        .into_any_element()
+}
+
+/// The head's action cluster. Each action is its own child of this row so
+/// every one of them reaches the accessibility tree: nesting two buttons in a
+/// single `div` child left the second one out of the tree, which made the
+/// primary unreachable for a screen reader.
+pub fn head_actions(actions: Vec<gpui::AnyElement>) -> gpui::AnyElement {
+    let mut row = div()
+        .flex()
+        .flex_row()
+        .items_center()
+        .flex_shrink_0()
+        .gap_2();
+    for (index, action) in actions.into_iter().enumerate() {
+        // gpui's accesskit pass only names the first interactive child of a
+        // row, so each action goes in its own id-ed wrapper: the wrapper is
+        // the row's child and the button inside it is the first of its own
+        // parent, which is what the tree walks
+        row = row.child(
+            div()
+                .id(("head-action", index as u64))
+                .flex_shrink_0()
+                .flex()
+                .items_center()
+                .child(action),
+        );
+    }
+    row.into_any_element()
+}
+
+/// The design's plain button: `panel` fill, `line-strong` edge, one control
+/// height. The family's buttons are neutral; only the page's one primary
+/// takes the accent fill.
+pub fn neutral_button(
+    id: impl Into<SharedString>,
+    label: impl Into<SharedString>,
+    enabled: bool,
+    on_click: impl Fn(&gpui::ClickEvent, &mut Window, &mut gpui::App) + 'static,
+) -> gpui::AnyElement {
+    let id = id.into();
+    let label = label.into();
+    let selector = id.to_string();
+    div()
+        .id(id)
+        .debug_selector(move || selector.clone())
+        .a11y_button(label.clone())
+        .when(enabled, |d| {
+            d.cursor_pointer()
+                .hover(|s| s.bg(theme::raised()))
+                .on_click(on_click)
+        })
+        .flex_shrink_0()
+        .flex()
+        .items_center()
+        .gap_1p5()
+        .h(warpui_kit_core::shell::control_height())
+        .px_3()
+        .rounded(px(6.))
+        .border_1()
+        .border_color(theme::line_strong())
+        .bg(theme::panel())
+        .text_size(px(theme::font_control()))
+        .font_weight(FontWeight::MEDIUM)
+        .text_color(theme::text())
+        .when(!enabled, |d| d.opacity(0.45))
+        .child(label)
+        .into_any_element()
+}
+
+/// The design's primary button: the one `accent` fill a view carries, with
+/// `on-accent` text.
+pub fn primary_button(
+    id: impl Into<SharedString>,
+    label: impl Into<SharedString>,
+    enabled: bool,
+    on_click: impl Fn(&gpui::ClickEvent, &mut Window, &mut gpui::App) + 'static,
+) -> gpui::AnyElement {
+    let id = id.into();
+    let label = label.into();
+    let selector = id.to_string();
+    div()
+        .id(id)
+        .debug_selector(move || selector.clone())
+        .a11y_button(label.clone())
+        .when(enabled, |d| {
+            d.cursor_pointer()
+                .hover(|s| s.bg(theme::accent_hover()))
+                .on_click(on_click)
+        })
+        .flex_shrink_0()
+        .flex()
+        .items_center()
+        .gap_1p5()
+        .h(warpui_kit_core::shell::control_height())
+        .px_3()
+        .rounded(px(6.))
+        .bg(theme::accent())
+        .text_size(px(theme::font_control()))
+        .font_weight(FontWeight::SEMIBOLD)
+        .text_color(theme::on_accent())
+        .when(!enabled, |d| d.opacity(0.45))
+        .child(label)
         .into_any_element()
 }
 

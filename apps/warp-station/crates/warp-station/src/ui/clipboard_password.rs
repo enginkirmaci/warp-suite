@@ -7,8 +7,7 @@ use crate::theme;
 use crate::ui::A11y;
 use gpui::prelude::*;
 use gpui::{App, Context, Entity, FontWeight, Window, div, px};
-use gpui_kit::component::Sizable as _;
-use gpui_kit::component::input::{Input, InputEvent, InputState};
+use gpui_kit::component::input::{InputEvent, InputState};
 
 pub struct ClipboardPasswordDrawer {
     pub store: Entity<Store>,
@@ -141,93 +140,137 @@ impl Render for ClipboardPasswordDrawer {
 
         div()
             .id("clipboard-password-drawer")
-            .size_full()
+            .debug_selector(|| "clipboard-password-drawer".into())
+            .w_full()
+            .h_full()
+            .min_w_0()
             .max_w(px(warpui_kit_core::shell::READING_WIDTH + 2. * warpui_kit_core::shell::DETAIL_PADDING))
             .p(px(warpui_kit_core::shell::DETAIL_PADDING))
             .flex()
             .flex_col()
             .gap_3()
             .occlude()
-            .child(crate::ui::tool_header(
+            .child(crate::ui::tool_header_actions(
                 "Clipboard Password",
                 "Copy the stored password from anywhere with Ctrl+Shift+V.",
+                // the head owns the page's one primary: Copy (the prototype
+                // keeps Save and Clear in the form under the field)
+                crate::ui::primary_button(
+                    "clipboard-copy",
+                    "Copy",
+                    stored,
+                    cx.listener(|this, _, _, cx| this.copy(cx)),
+                ),
             ))
             .child(
                 div()
                     .flex()
                     .flex_col()
                     .gap_1()
+                    .max_w(px(420.))
                     .child(
                         div()
                             .text_size(px(theme::font_meta()))
                             .text_color(theme::text_muted())
                             .child("Password"),
                     )
-                    .child(warpui_kit_core::shell::field(
+                    .child(warpui_kit_core::field::custom(
                         "password-field",
-                        Input::new(&self.password)
-                            .with_size(theme::field_size())
-                            .mask_toggle(),
+                        &self.password,
+                        window,
+                        cx,
+                        |input| input.mask_toggle(),
                     )),
             )
             .child(
                 div()
                     .flex()
                     .flex_row()
-                    .justify_end()
                     .gap_2()
-                    .child(ghost_button(
-                        "clipboard-clear",
-                        if clear_armed { "Confirm clear?" } else { "Clear Stored Password" },
-                        theme::DANGER,
-                        stored,
-                        clear_armed,
-                        cx.listener(move |this, _, _, cx| {
-                            if clear_armed {
-                                this.clear(cx);
-                            } else {
-                                let armed_at = std::time::Instant::now();
-                                this.clear_armed = Some(armed_at);
-                                this.status =
-                                    "Click Clear again to remove the stored password.".into();
-                                cx.notify();
-                                // the armed look expires on its own — without
-                                // this the solid danger button would sit armed
-                                // until some unrelated render happened
-                                cx.spawn(async move |this, cx| {
-                                    cx.background_executor()
-                                        .timer(std::time::Duration::from_secs(4))
-                                        .await;
-                                    let _ = this.update(cx, |this, cx| {
-                                        if this.clear_armed == Some(armed_at) {
-                                            this.clear_armed = None;
-                                            let stored = stored_password(
-                                                &this.store.read(cx).settings(),
-                                            )
-                                            .is_some();
-                                            this.status = status_line(stored).to_string();
-                                            cx.notify();
-                                        }
-                                    });
-                                })
-                                .detach();
-                            }
-                        }),
-                    ))
-                    .child(ghost_button(
-                        "clipboard-copy",
-                        "Copy",
-                        theme::blue_bright(),
-                        stored,
-                        false,
-                        cx.listener(|this, _, _, cx| this.copy(cx)),
-                    ))
-                    .child(accent_button(
+                    .child(crate::ui::neutral_button(
                         "clipboard-save",
                         "Save Password",
                         !self.password.read(cx).value().trim().is_empty(),
                         cx.listener(|this, _, _, cx| this.save(cx)),
-                    )),
+                    ))
+                    .child(
+                        // the design's second-click confirm: quiet ghost at
+                        // rest, danger only once armed
+                        div()
+                            .id("clipboard-clear")
+                            .a11y_button(if clear_armed {
+                                "Confirm clear"
+                            } else {
+                                "Clear Stored Password"
+                            })
+                            .when(stored && !clear_armed, |d| {
+                                d.cursor_pointer().hover(|s| s.bg(theme::raised()))
+                            })
+                            .when(clear_armed, |d| {
+                                d.cursor_pointer().hover(|s| s.bg(theme::raised()))
+                            })
+                            .flex_shrink_0()
+                            .flex()
+                            .items_center()
+                            .gap_1p5()
+                            .h(warpui_kit_core::shell::control_height())
+                            .px_3()
+                            .rounded(px(6.))
+                            .border_1()
+                            .border_color(if clear_armed {
+                                theme::DANGER
+                            } else {
+                                theme::line_strong()
+                            })
+                            .bg(gpui::transparent_black())
+                            .text_size(px(theme::font_control()))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(if clear_armed {
+                                theme::DANGER
+                            } else {
+                                theme::text_dim()
+                            })
+                            .when(!stored, |d| d.opacity(0.45))
+                            .when(clear_armed, |d| {
+                                d.on_click(cx.listener(move |this, _, _, cx| {
+                                    this.clear(cx);
+                                }))
+                            })
+                            .when(stored && !clear_armed, |d| {
+                                d.on_click(cx.listener(move |this, _, _, cx| {
+                                    let armed_at = std::time::Instant::now();
+                                    this.clear_armed = Some(armed_at);
+                                    this.status =
+                                        "Click Clear again to remove the stored password.".into();
+                                    cx.notify();
+                                    // the armed look expires on its own — without
+                                    // this the armed button would sit until some
+                                    // unrelated render happened
+                                    cx.spawn(async move |this, cx| {
+                                        cx.background_executor()
+                                            .timer(std::time::Duration::from_secs(4))
+                                            .await;
+                                        let _ = this.update(cx, |this, cx| {
+                                            if this.clear_armed == Some(armed_at) {
+                                                this.clear_armed = None;
+                                                let stored = stored_password(
+                                                    &this.store.read(cx).settings(),
+                                                )
+                                                .is_some();
+                                                this.status = status_line(stored).to_string();
+                                                cx.notify();
+                                            }
+                                        });
+                                    })
+                                    .detach();
+                                }))
+                            })
+                            .child(if clear_armed {
+                                "Confirm clear?"
+                            } else {
+                                "Clear Stored Password"
+                            }),
+                    ),
             )
             .child(
                 div()
@@ -242,69 +285,4 @@ impl Render for ClipboardPasswordDrawer {
                     .child("Ctrl+Shift+V copies the stored password system-wide while Warp Station runs (focused-only where the OS refuses a global grab)."),
             )
     }
-}
-
-fn ghost_button(
-    id: &'static str,
-    label: &str,
-    color: gpui::Rgba,
-    enabled: bool,
-    emphasized: bool,
-    on_click: impl Fn(&gpui::ClickEvent, &mut Window, &mut App) + 'static,
-) -> gpui::AnyElement {
-    div()
-        .id(id)
-        .a11y_button(label.to_string())
-        .cursor_pointer()
-        .rounded_md()
-        .px_2p5()
-        .py_1()
-        .text_size(px(theme::font_body()))
-        .font_weight(FontWeight::SEMIBOLD)
-        // emphasized = the destructive confirm state: solid danger fill
-        .bg(if emphasized {
-            color.into()
-        } else {
-            theme::tint(color)
-        })
-        .text_color(if emphasized { theme::ON_DANGER } else { color })
-        .map(|d| {
-            if enabled {
-                d.hover(|s| s.opacity(0.85))
-            } else {
-                d.opacity(0.4)
-            }
-        })
-        .when(enabled, |d| d.on_click(on_click))
-        .child(label.to_string())
-        .into_any_element()
-}
-
-fn accent_button(
-    id: &'static str,
-    label: &str,
-    enabled: bool,
-    on_click: impl Fn(&gpui::ClickEvent, &mut Window, &mut App) + 'static,
-) -> gpui::AnyElement {
-    div()
-        .id(id)
-        .a11y_button(label.to_string())
-        .cursor_pointer()
-        .rounded_md()
-        .px_3()
-        .py_1()
-        .text_size(px(theme::font_body()))
-        .font_weight(FontWeight::SEMIBOLD)
-        .bg(theme::accent())
-        .text_color(theme::on_accent())
-        .map(|d| {
-            if enabled {
-                d.hover(|s| s.opacity(0.9))
-            } else {
-                d.opacity(0.4)
-            }
-        })
-        .when(enabled, |d| d.on_click(on_click))
-        .child(label.to_string())
-        .into_any_element()
 }

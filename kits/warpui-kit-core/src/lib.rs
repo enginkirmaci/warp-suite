@@ -15,6 +15,7 @@
 //! - [`a11y`] — the role/label trait every hand-rolled control passes through
 //! - [`mod@icon`] — tinted svg icon builder
 //! - [`controls`] — the one button look, menu row, popover card and fold body
+//! - [`field`] — the one text box: `.field`, `.area` and the `.kbd` chip
 //! - [`media`] — attachment mime guesses and inline images from bytes
 //! - [`tooltip`] and [`tooltip_overlay`] — the two tooltip mechanisms
 //!
@@ -24,6 +25,7 @@
 
 pub mod a11y;
 pub mod controls;
+pub mod field;
 pub mod fonts;
 pub mod icon;
 pub mod kit;
@@ -32,6 +34,7 @@ pub mod media;
 pub mod motion;
 pub mod palette;
 pub mod scale;
+pub mod settings;
 pub mod shell;
 pub mod tooltip;
 pub mod tooltip_overlay;
