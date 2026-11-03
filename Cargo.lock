@@ -6950,6 +6950,7 @@ dependencies = [
  "serde_json",
  "tiny-skia",
  "windows 0.62.2",
+ "winresource",
 ]
 
 [[package]]

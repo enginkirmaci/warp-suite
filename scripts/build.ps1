@@ -68,7 +68,12 @@ $revisions = @()
 foreach ($name in $appNames) {
     $dir = Get-Item (Join-Path (Join-Path $root 'apps') $name)
     # The cargo package name; differs from the directory for warp-snapit.
-    $package = (& python3 $manifest get $name package 2>$null)
+    # A missing key exits non-zero with a message on stderr, which the next
+    # line absorbs by falling back to the app name - but under
+    # $ErrorActionPreference = 'Stop' PS 5.1 promotes redirected native
+    # stderr to a terminating error, so catch the miss and fall back.
+    $package = $null
+    try { $package = (& python3 $manifest get $name package 2>$null) } catch { }
     if ($LASTEXITCODE -ne 0 -or -not $package) { $package = $name }
     Write-Host "== $name"
 
