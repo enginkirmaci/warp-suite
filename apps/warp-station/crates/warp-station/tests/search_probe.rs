@@ -212,12 +212,26 @@ fn titlebar_side_columns_stay_balanced(cx: &mut TestAppContext) {
     cx.run_until_parked();
     draw(cx);
 
-    let brand = cx.debug_bounds("titlebar-brand").expect("brand column");
+    // The requirement is the field's own centre, not a proxy: comparing the
+    // brand column with the right cluster used to pass while the app links —
+    // a fixed-width sibling between the two flexible columns — pushed the
+    // field ~46px right of centre.
+    let left = cx.debug_bounds("titlebar-left").expect("left column");
     let right = cx.debug_bounds("titlebar-right").expect("right group");
     assert!(
-        (brand.size.width - right.size.width).abs() < gpui::px(2.),
-        "side columns must stay equal for a centered search \
-         (brand {brand:?} vs right {right:?})"
+        (left.size.width - right.size.width).abs() < gpui::px(2.),
+        "the flexible side columns must stay equal \
+         (left {left:?} vs right {right:?})"
+    );
+    let field = cx
+        .debug_bounds("global-search-field")
+        .expect("search field");
+    let window_centre = cx.update(|window, _| window.viewport_size().width) / 2.;
+    let field_centre = field.origin.x + field.size.width / 2.;
+    assert!(
+        (field_centre - window_centre).abs() < gpui::px(2.),
+        "the search field sits on the window's centre \
+         (field centre {field_centre:?}, window centre {window_centre:?})"
     );
 }
 

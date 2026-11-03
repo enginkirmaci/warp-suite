@@ -1031,7 +1031,7 @@ impl MainWindow {
             .flex_none()
             .items_center()
             .gap_2()
-            .pl(px(14.))
+            .px(px(14.))
             .bg(theme::topbar_bg())
             .border_b_1()
             .border_color(theme::hairline())
@@ -1070,71 +1070,89 @@ impl MainWindow {
             .on_mouse_down_out(cx.listener(|this, _, _, _| {
                 this.titlebar_should_move = false;
             }))
+            // the left column: the app's own mark and name, then the family's
+            // links. It is ONE flexible column so the search field between it
+            // and the right cluster lands on the window's centre — the links
+            // used to be a fixed-width sibling outside it, which pushed the
+            // field ~46px right of centre.
             .child(
                 div()
-                    .debug_selector(|| "titlebar-brand".into())
+                    .debug_selector(|| "titlebar-left".into())
                     .flex_1()
                     .min_w_0()
                     .flex()
                     .items_center()
-                    .gap_2p5()
+                    .gap_2()
                     .child(
                         div()
+                            .debug_selector(|| "titlebar-brand".into())
                             .flex_shrink_0()
                             .flex()
                             .items_center()
-                            .justify_center()
-                            .size(px(28.))
-                            .rounded(px(6.))
-                            .bg(theme::accent_soft())
-                            .child(icon(
-                                "icons/logo-glyph.svg",
-                                px(theme::icon_small()),
-                                theme::accent_ink(),
-                            )),
+                            .gap_2p5()
+                            .child(
+                                div()
+                                    .flex_shrink_0()
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .size(px(28.))
+                                    .rounded(px(6.))
+                                    .bg(theme::accent_soft())
+                                    .child(icon(
+                                        "icons/logo-glyph.svg",
+                                        px(theme::icon_small()),
+                                        theme::accent_ink(),
+                                    )),
+                            )
+                            .child(
+                                div()
+                                    .text_size(px(theme::font_brand()))
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .text_color(theme::text())
+                                    .whitespace_nowrap()
+                                    .child("Warp Station"),
+                            ),
                     )
+                    // the family: the sibling apps this window can open, right
+                    // after its own mark and name, behind one separator
                     .child(
-                        div()
-                            .text_size(px(theme::font_brand()))
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(theme::text())
-                            .whitespace_nowrap()
-                            .child("Warp Station"),
+                        shell::app_links()
+                            .when(settings.warp_notes.enable_warp_notes, |row| {
+                                row.child(
+                                    shell::app_link(
+                                        "notes-toggle",
+                                        "icons/icon-warp-notes.svg",
+                                        "Open warp-notes",
+                                    )
+                                    .when(show_tooltips, |d| {
+                                        d.tooltip(crate::ui::tooltip_text("Open warp-notes"))
+                                    })
+                                    .on_click(
+                                        cx.listener(|this, _, _, cx| this.launch_notes(None, cx)),
+                                    ),
+                                )
+                            })
+                            .when(settings.warp_agent.enable_warp_agent, |row| {
+                                row.child(
+                                    shell::app_link(
+                                        "agent-toggle",
+                                        "icons/icon-warp-agent.svg",
+                                        "Open warp-agent",
+                                    )
+                                    .when(show_tooltips, |d| {
+                                        d.tooltip(crate::ui::tooltip_text("Open warp-agent"))
+                                    })
+                                    .on_click(cx.listener(
+                                        |this, _, _, cx| {
+                                            this.store.update(cx, |s, cx| {
+                                                s.open_in_warp("general".into(), cx)
+                                            });
+                                        },
+                                    )),
+                                )
+                            }),
                     ),
-            )
-            // the family: the sibling apps this window can open, right after
-            // its own mark and name, behind one separator
-            .child(
-                shell::app_links()
-                    .when(settings.warp_notes.enable_warp_notes, |row| {
-                        row.child(
-                            shell::app_link(
-                                "notes-toggle",
-                                "icons/icon-warp-notes.svg",
-                                "Open warp-notes",
-                            )
-                            .when(show_tooltips, |d| {
-                                d.tooltip(crate::ui::tooltip_text("Open warp-notes"))
-                            })
-                            .on_click(cx.listener(|this, _, _, cx| this.launch_notes(None, cx))),
-                        )
-                    })
-                    .when(settings.warp_agent.enable_warp_agent, |row| {
-                        row.child(
-                            shell::app_link(
-                                "agent-toggle",
-                                "icons/icon-warp-agent.svg",
-                                "Open warp-agent",
-                            )
-                            .when(show_tooltips, |d| {
-                                d.tooltip(crate::ui::tooltip_text("Open warp-agent"))
-                            })
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.store
-                                    .update(cx, |s, cx| s.open_in_warp("general".into(), cx));
-                            })),
-                        )
-                    }),
             )
             .child(
                 div()
