@@ -17,6 +17,14 @@
 //! as selection participants), so per-line rows cost nothing and buy
 //! full-bleed washes that reach the right edge on every row.
 //!
+//! Both renderers pin the code family and the caller's `font_detail` size on
+//! the block's own root element. GPUI shapes a `StyledText` at the *ambient*
+//! text style (a `TextRun` carries a font, never a size), so a style built
+//! from `window.text_style()` alone only decides the color: the rows were
+//! drawn at whatever size the surrounding view happened to set, which is how
+//! the diff stopped following the app's text size — and wrapped segments fell
+//! back to the UI family. The pin is what makes `font_detail` mean anything.
+//!
 //! Colors come from `warpui-kit-core`'s palette; token colors come from the
 //! kit's installed highlight theme. Enable the grammar features (this
 //! crate's `tree-sitter-*` features forward to gpui-kit) for the languages
@@ -73,7 +81,7 @@ pub fn render_diff(
         ..Default::default()
     };
 
-    let mut root = div().w_full().flex().flex_col();
+    let mut root = block_root(font_detail);
     for i in 0..lines.len() {
         let line = lines[i];
         root = root.child(match kinds[i] {
@@ -176,7 +184,7 @@ pub fn render_code(
         ..Default::default()
     };
 
-    let mut root = div().w_full().flex().flex_col();
+    let mut root = block_root(font_detail);
     for (i, line) in lines.iter().enumerate() {
         let number = first_number + i;
         let gutter = styled_text(
@@ -395,6 +403,19 @@ fn code_style(window: &mut Window, font_detail: f32, color: gpui::Rgba) -> TextS
     style.font_size = AbsoluteLength::Pixels(px(font_detail));
     style.color = color.into();
     style
+}
+
+/// The block's root: the code family and `font_detail` pinned as the ambient
+/// style every row underneath inherits. Without this the rows are shaped at
+/// whatever size the surrounding view set, and `code_style`'s size only
+/// reaches the run's font, not its metrics (see the module docs).
+fn block_root(font_detail: f32) -> gpui::Div {
+    div()
+        .w_full()
+        .flex()
+        .flex_col()
+        .font_family(fonts::code_font())
+        .text_size(px(font_detail))
 }
 
 /// One row of text on the ambient background; empty lines keep a single

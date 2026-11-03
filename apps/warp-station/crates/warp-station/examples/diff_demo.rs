@@ -116,7 +116,11 @@ impl Render for DiffDemo {
 fn main() {
     application().run(|cx| {
         gpui_kit::init(cx);
+        // the shared text size, so the fixture draws what the app draws at the
+        // owner's setting (the diff follows it through `font_control()`)
+        warpui_kit_core::adopt_text_size(None);
         theme::apply_kit_theme(cx);
+        warpui_kit_core::follow_ui_scale(cx, theme::apply_kit_theme);
         let bounds = Bounds::centered(None, size(px(1000.), px(700.)), cx);
         gpui_kit::open_window(
             WindowOptions {

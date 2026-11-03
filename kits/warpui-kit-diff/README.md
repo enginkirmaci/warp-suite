@@ -19,6 +19,26 @@ let lang = sniff_lang(tool_input);
 
 Colors come from `warpui-kit-core`'s palette; token colors from the kit's installed highlight theme (`gpui_kit::component::Theme::global(cx).highlight_theme`).
 
+## Text size
+
+`font_detail` is the size the block draws at, and it is the only size that
+decides it: the renderer pins the code family and that size on the block's own
+root, so the rows are shaped at it no matter what text size the surrounding
+view set. GPUI shapes a `StyledText` at the *ambient* text style (a `TextRun`
+carries a font, never a size), so without the pin the block silently followed
+the caller's container instead — the bug behind "the diff's font size does not
+follow the app's font size".
+
+Pass the family step the app's text size resolves to, read at render time, so
+the block follows the setting with everything around it:
+
+```rust
+// warp-station: a getter on the live ladder
+render_diff(patch, None, theme::font_mono_meta(), window, cx);
+// warp-agent: the FontTokens snapshot the view already holds
+render_diff(diff, Some(&path), fonts.font_meta, window, cx);
+```
+
 ## Grammars
 
 Token highlighting needs the grammar features enabled; this crate's `tree-sitter-*` features forward to gpui-kit's:
