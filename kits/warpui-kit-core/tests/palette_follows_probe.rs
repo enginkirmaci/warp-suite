@@ -15,13 +15,11 @@ use gpui::{Context, IntoElement, Render, TestAppContext, Window};
 use warpui_kit_core::{palette, text_size_control};
 
 /// The ramp tokens, which every surface must read live.
-const RAMP_TOKENS: [&str; 17] = [
+const RAMP_TOKENS: [&str; 15] = [
     "SURFACE",
-    "BACKGROUND",
     "CARD",
     "PANEL",
     "WINDOW_CHROME",
-    "TOPBAR_BG",
     "POPUP",
     "OVERLAY",
     "INPUT",

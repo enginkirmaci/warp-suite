@@ -181,15 +181,8 @@ pub fn set_ramp(key: &str) -> &'static Ramp {
 // steps are the aliases under the constants.
 
 pub const SURFACE: Rgba = rgba_hex(0x252321FF); // window canvas, main area
-/// DevTools spelling of [`SURFACE`]: window canvas + page.
-pub const BACKGROUND: Rgba = SURFACE;
 pub const CARD: Rgba = rgba_hex(0x2B2926FF); // tile surface, table rows, cards
 pub const WINDOW_CHROME: Rgba = rgba_hex(0x201E1CFF); // titlebar, sidebar, ring
-/// DevTools spelling of [`WINDOW_CHROME`]: the titlebar.
-pub const TOPBAR_BG: Rgba = WINDOW_CHROME;
-/// warp-agent spelling of [`WINDOW_CHROME`]: settings sheet.
-pub const SETTINGS_BG: Rgba = WINDOW_CHROME;
-pub const SETTINGS_CARD: Rgba = CARD;
 pub const POPUP: Rgba = rgba_hex(0x3A3733FF); // popovers, menus, tooltips
 pub const INPUT: Rgba = rgba_hex(0x1C1A18FF); // text fields
 pub const CHIP: Rgba = rgba_hex(0x34312EFF); // neutral pill background
@@ -461,18 +454,6 @@ pub const DIFF_ADD_BG: Hsla = hsla(0.388, 0.515, 0.669, 0.13);
 pub const DIFF_DEL_BG: Hsla = hsla(0.009, 0.892, 0.749, 0.13);
 /// The hunk band: the muted text's warm hue, so it stays on the ramp.
 pub const DIFF_HUNK_BG: Hsla = hsla(0.08, 0.12, 0.6, 0.10);
-
-// ---- chat surfaces ---------------------------------------------------------
-// User bubble = chip tone, assistant bubble = popup tone raised off the tile
-// card; the shared ramp derives them.
-
-pub const BUBBLE_USER: Rgba = CHIP;
-pub const BUBBLE_ASSISTANT: Rgba = CARD;
-pub const Q_OPT_SELECTED: Rgba = CHIP;
-pub const BUBBLE_QUEUED: Rgba = WINDOW_CHROME;
-pub const QUEUED_BORDER: Rgba = HAIRLINE;
-/// The base step at 0.7 alpha over the chat.
-pub const FLYOUT_SURFACE: Rgba = rgba_hex(0x252321B3);
 
 // ---- syntax highlight theme ------------------------------------------------
 
