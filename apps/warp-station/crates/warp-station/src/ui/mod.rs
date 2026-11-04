@@ -7,6 +7,7 @@ pub mod detail;
 pub mod dialogs;
 pub mod formatters;
 pub mod launchers;
+pub mod markdown;
 pub mod nuget;
 pub mod overview;
 pub mod pr_issues;

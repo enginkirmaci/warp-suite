@@ -8,7 +8,9 @@ use crate::theme;
 use crate::ui::{A11y, icon};
 use gpui::prelude::*;
 use gpui::{Context, Entity, FontWeight, SharedString, Window, div, px};
-use gpui_kit::base::text::TextView;
+use warpui_kit_markdown::LiveEditorState;
+
+use crate::ui::markdown as md;
 use std::path::PathBuf;
 use warpui_kit_core::shell;
 
@@ -18,6 +20,9 @@ pub struct SummaryPage {
     files: Vec<PathBuf>,
     selected: Option<PathBuf>,
     text: Option<SharedString>,
+    /// The read-only kit editor rendering `fed_text` (the selected summary).
+    editor: Option<Entity<LiveEditorState>>,
+    fed_text: Option<SharedString>,
     /// A run that finishes adds a file, so the list reloads on the falling edge.
     was_busy: bool,
     loaded: bool,
@@ -31,6 +36,8 @@ impl SummaryPage {
             files: Vec::new(),
             selected: None,
             text: None,
+            editor: None,
+            fed_text: None,
             was_busy: false,
             loaded: false,
         }
@@ -180,7 +187,7 @@ fn file_name(path: &std::path::Path) -> String {
 }
 
 impl Render for SummaryPage {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl gpui::IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl gpui::IntoElement {
         let (busy, available) = {
             let store = self.store.read(cx);
             (store.summary_busy, store.wand_available())
@@ -330,13 +337,26 @@ impl Render for SummaryPage {
             .overflow_y_scroll()
             .p(px(shell::DETAIL_PADDING))
             .child(match self.text.clone() {
-                Some(text) => div()
-                    .max_w(px(shell::READING_WIDTH))
-                    .child(
-                        TextView::markdown(gpui::ElementId::Name("summary".into()), text)
-                            .selectable(true),
-                    )
-                    .into_any_element(),
+                Some(text) => {
+                    // feed the read-only editor on content change (a newly
+                    // selected or regenerated summary)
+                    if self.fed_text.as_ref() != Some(&text) {
+                        match &self.editor {
+                            Some(editor) => md::feed(editor, text.clone(), window, cx),
+                            None => {
+                                self.editor = Some(md::attach(text.clone(), window, cx));
+                            }
+                        }
+                        self.fed_text = Some(text);
+                    }
+                    div()
+                        .max_w(px(shell::READING_WIDTH))
+                        .child(md::render_read_only(
+                            self.editor.as_ref().expect("editor fed above"),
+                            cx,
+                        ))
+                        .into_any_element()
+                }
                 None => div()
                     .text_size(px(theme::font_body()))
                     .text_color(theme::text_dim())

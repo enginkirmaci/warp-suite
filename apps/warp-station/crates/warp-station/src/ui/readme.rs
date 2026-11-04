@@ -1,6 +1,6 @@
-//! The README view: the repo's README rendered as markdown (the kit's
-//! TextView). The wand generates a draft that renders in place with
-//! Save/Discard; Save writes README.md.
+//! The README view: the repo's README rendered through the suite's live
+//! markdown engine in read-only mode (ui::markdown). The wand generates a
+//! draft that renders in place with Save/Discard; Save writes README.md.
 
 use crate::net::WandKind;
 use crate::store::Store;
@@ -9,13 +9,18 @@ use crate::ui::A11y;
 use crate::ui::icon;
 use gpui::prelude::*;
 use gpui::{Context, Entity, FontWeight, SharedString, Window, div, px};
-use gpui_kit::base::text::TextView;
+use warpui_kit_markdown::LiveEditorState;
+
+use crate::ui::markdown as md;
 
 pub struct ReadmeView {
     pub store: Entity<Store>,
-    /// SharedString: every render hands the TextView a refcount, never a
-    /// full copy of the README.
+    /// SharedString: every render hands the engine a refcount, never a full
+    /// copy of the README.
     readme: Option<SharedString>,
+    /// The read-only kit editor rendering `fed_text` (README or wand draft).
+    editor: Option<Entity<LiveEditorState>>,
+    fed_text: Option<SharedString>,
     loaded_for: Option<String>,
 }
 
@@ -26,6 +31,8 @@ impl ReadmeView {
         let mut view = Self {
             store,
             readme: None,
+            editor: None,
+            fed_text: None,
             loaded_for: None,
         };
         view.follow_selection(cx);
@@ -48,7 +55,7 @@ impl ReadmeView {
 }
 
 impl Render for ReadmeView {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl gpui::IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl gpui::IntoElement {
         let folder = self.store.read(cx).selected_repo.clone();
         let draft = self.store.read(cx).readme_draft.clone();
         let wand_active = {
@@ -62,6 +69,24 @@ impl Render for ReadmeView {
             .as_ref()
             .map(|d| SharedString::from(d.as_str()))
             .or_else(|| self.readme.clone());
+
+        // feed the read-only editor: created on first content, re-fed when
+        // the README or the draft changed (set_value forgets undo and resets
+        // scroll — right for a whole-document swap)
+        match &shown {
+            Some(text) if self.fed_text.as_ref() == Some(text) => {}
+            Some(text) => match &self.editor {
+                Some(editor) => md::feed(editor, text.clone(), window, cx),
+                None => {
+                    self.editor = Some(md::attach(text.clone(), window, cx));
+                    self.fed_text = shown.clone();
+                }
+            },
+            None => {
+                self.editor = None;
+                self.fed_text = None;
+            }
+        }
 
         let header = div()
             .id("readme-header")
@@ -211,7 +236,10 @@ impl Render for ReadmeView {
                 pane.child(
                     div()
                         .max_w(px(warpui_kit_core::shell::READING_WIDTH))
-                        .child(render_markdown(shown.clone().unwrap_or_default())),
+                        .child(md::render_read_only(
+                            self.editor.as_ref().expect("editor fed above"),
+                            cx,
+                        )),
                 )
             })
             .when(shown.is_none(), |pane| {
@@ -297,8 +325,4 @@ fn read_readme(folder: &str) -> Option<String> {
         }
     }
     None
-}
-
-fn render_markdown(source: SharedString) -> impl IntoElement + use<> {
-    TextView::markdown(gpui::ElementId::Name("readme".into()), source).selectable(true)
 }
