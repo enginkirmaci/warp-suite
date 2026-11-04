@@ -270,7 +270,7 @@ impl RenderOnce for LiveEditor {
                 window.listener_for(&state, LiveEditorState::right_mouse_down),
             )
             .on_mouse_move(window.listener_for(&state, LiveEditorState::mouse_move))
-            .on_scroll_wheel(window.listener_for(&state, LiveEditorState::scroll_wheel))
+            .on_scroll(window.listener_for(&state, LiveEditorState::scroll_wheel))
             .on_hover(move |hovered, _, cx| {
                 if !hovered {
                     hover_state.update(cx, LiveEditorState::clear_hover);
@@ -380,7 +380,7 @@ impl LiveEditor {
                 window.listener_for(&state, LiveEditorState::mouse_up),
             )
             .on_mouse_move(window.listener_for(&state, LiveEditorState::mouse_move))
-            .on_scroll_wheel(window.listener_for(&state, LiveEditorState::scroll_wheel))
+            .on_scroll(window.listener_for(&state, LiveEditorState::scroll_wheel))
             .on_hover(move |hovered, _, cx| {
                 if !hovered {
                     hover_state.update(cx, LiveEditorState::clear_hover);

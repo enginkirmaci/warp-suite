@@ -155,14 +155,12 @@ fn is_bare_git_dir(dir: &Path) -> bool {
         let line = line.trim();
         if line.starts_with('[') {
             in_core = line.eq_ignore_ascii_case("[core]");
-        } else if in_core {
-            if let Some((key, value)) = line.split_once('=') {
-                if key.trim().eq_ignore_ascii_case("bare")
-                    && value.trim().eq_ignore_ascii_case("true")
-                {
-                    return true;
-                }
-            }
+        } else if in_core
+            && let Some((key, value)) = line.split_once('=')
+            && key.trim().eq_ignore_ascii_case("bare")
+            && value.trim().eq_ignore_ascii_case("true")
+        {
+            return true;
         }
     }
     false

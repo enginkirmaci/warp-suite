@@ -170,11 +170,12 @@ impl Harness {
     /// One wheel notch of `dy` pixels over `at`.
     fn wheel(&mut self, at: Point<gpui::Pixels>, dy: f32) {
         self.cx.simulate_mouse_move(at, None, Modifiers::default());
-        self.cx.simulate_event(gpui::ScrollWheelEvent {
+        self.cx.simulate_event(gpui::ScrollEvent {
             position: at,
             delta: gpui::ScrollDelta::Pixels(gpui::point(px(0.), px(dy))),
             modifiers: Modifiers::default(),
             touch_phase: gpui::TouchPhase::Moved,
+            source: gpui::ScrollSource::Pointer,
         });
         self.settle();
     }

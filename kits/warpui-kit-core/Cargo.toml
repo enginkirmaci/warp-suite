@@ -7,9 +7,9 @@ license = "MIT"
 
 [dependencies]
 # gpui-pre: crates.io snapshots of zed's gpui, pinned to the exact rev
-# gpui-kit 0.7 is built against (=zed@1a28cff). Bump together with gpui-kit.
-gpui = { package = "gpui-pre", version = "=0.3.7" }
-gpui-kit = { version = "0.7" }
+# gpui-kit 0.9 is built against these exact 0.3.11 snapshots. Bump together with gpui-kit.
+gpui = { package = "gpui-pre", version = "=0.3.11" }
+gpui-kit = { version = "0.9" }
 # the net-event pump (pump.rs): both store-driven apps fed it the same
 # copy-pasted drain loop
 async-channel = "2"
@@ -29,5 +29,5 @@ media = ["dep:image", "dep:smallvec"]
 [dev-dependencies]
 # headless UI probes (tests/); feature-unifies with the normal gpui-kit dep
 # only under `cargo test`
-gpui-kit = { version = "0.7", features = ["test-support"] }
-gpui = { package = "gpui-pre", version = "=0.3.7", features = ["test-support"] }
+gpui-kit = { version = "0.9", features = ["test-support"] }
+gpui = { package = "gpui-pre", version = "=0.3.11", features = ["test-support"] }

@@ -4,4 +4,4 @@
 # on the rustc version so CI recompiles exactly once per bump. The dtolnay
 # action installs from this file (no toolchain input is set in the workflows).
 [toolchain]
-channel = "1.98"
+channel = "1.99"

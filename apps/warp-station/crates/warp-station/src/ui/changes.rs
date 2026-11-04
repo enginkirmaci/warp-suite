@@ -1298,7 +1298,7 @@ impl ChangesView {
                 let handle = self
                     .patch_scrolls
                     .entry(file.path.clone())
-                    .or_insert_with(gpui::ScrollHandle::new)
+                    .or_default()
                     .clone();
                 row = row.child(
                     div()
@@ -1319,7 +1319,7 @@ impl ChangesView {
                         // scroller: an event it can act on is consumed here,
                         // so it never also moves the pane behind it, while an
                         // edge event still chains outward, browser-style
-                        .on_scroll_wheel(move |event: &gpui::ScrollWheelEvent, window, cx| {
+                        .on_scroll(move |event: &gpui::ScrollEvent, window, cx| {
                             let delta = event.delta.pixel_delta(window.line_height()).y;
                             let handle = &handle;
                             if wheel_reaches_content(handle.offset(), handle.max_offset(), delta) {

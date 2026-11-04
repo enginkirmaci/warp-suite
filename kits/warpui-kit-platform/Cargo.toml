@@ -16,8 +16,8 @@ tracing-appender = "0.2"
 # `assets`: the rust-embed-over-gpui-kit AssetSource. Feature-scoped so the
 # headless service crates (warp-station-core) can take the io/logging halves
 # without pulling gpui into their "testable without a display" graph.
-gpui = { package = "gpui-pre", version = "=0.3.7", optional = true }
-gpui-kit = { version = "0.7", optional = true }
+gpui = { package = "gpui-pre", version = "=0.3.11", optional = true }
+gpui-kit = { version = "0.9", optional = true }
 # trait only (no derive in this crate); apps derive with their own
 # `debug-embed` feature so dev builds embed assets too
 rust-embed = { version = "8", default-features = false, optional = true }

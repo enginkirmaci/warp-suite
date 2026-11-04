@@ -19,7 +19,7 @@ use gpui::prelude::*;
 use gpui::{
     App, Bounds, ClipboardItem, Context, CursorStyle, Entity, EntityInputHandler, EventEmitter,
     FocusHandle, Focusable, Hsla, KeyBinding, MouseButton, MouseDownEvent, MouseMoveEvent,
-    MouseUpEvent, Pixels, Point, ScrollWheelEvent, SharedString, Subscription, UTF16Selection,
+    MouseUpEvent, Pixels, Point, ScrollEvent, SharedString, Subscription, UTF16Selection,
     WeakEntity, Window, font, point, px, size,
 };
 use gpui_kit::base::actions::{SelectDown, SelectLeft, SelectRight, SelectUp};
@@ -2701,7 +2701,7 @@ impl LiveEditorState {
 
     pub(super) fn scroll_wheel(
         &mut self,
-        event: &ScrollWheelEvent,
+        event: &ScrollEvent,
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -2808,13 +2808,16 @@ fn ensure_keys_bound(cx: &mut App) {
     }
     cx.set_global(Bound);
     let context = Some("LiveEditor");
+    // explicit ctrl: gpui 0.3.11's static parse dropped the secondary- alias
+    // (only KeyBinding::load resolves it against the host OS), and the suite's
+    // targets are ctrl platforms — the apps spell their own bindings ctrl- too
     cx.bind_keys([
-        KeyBinding::new("secondary-b", ToggleBold, context),
-        KeyBinding::new("secondary-i", ToggleItalic, context),
-        KeyBinding::new("secondary-k", InsertLink, context),
-        KeyBinding::new("secondary-l", ToggleTask, context),
-        KeyBinding::new("secondary-d", DeleteLine, context),
-        KeyBinding::new("secondary-shift-z", Redo, context),
+        KeyBinding::new("ctrl-b", ToggleBold, context),
+        KeyBinding::new("ctrl-i", ToggleItalic, context),
+        KeyBinding::new("ctrl-k", InsertLink, context),
+        KeyBinding::new("ctrl-l", ToggleTask, context),
+        KeyBinding::new("ctrl-d", DeleteLine, context),
+        KeyBinding::new("ctrl-shift-z", Redo, context),
     ]);
 }
 
