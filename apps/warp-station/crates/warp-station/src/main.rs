@@ -133,7 +133,7 @@ fn main() {
             })
             .detach();
 
-            let bounds = Bounds::centered(None, size(px(1280.), px(820.)), cx);
+            let bounds = Bounds::centered(None, size(px(1500.), px(960.)), cx);
             gpui_kit::open_window(
                 WindowOptions {
                     window_bounds: Some(WindowBounds::Windowed(bounds)),
