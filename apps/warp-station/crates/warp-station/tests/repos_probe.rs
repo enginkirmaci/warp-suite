@@ -900,6 +900,306 @@ fn auto_fetch_gate_alone_fetches_once(cx: &mut TestAppContext) {
     let _ = std::fs::remove_file(&scratch);
 }
 
+/// The periodic refresh scheduler: a due schedule runs exactly what the
+/// repository page's Refresh button runs (a Scan carrying the current
+/// settings), re-arms, and holds while a scan is already in flight.
+/// WARP_STATION_AUTO_REFRESH_SECS=1 replaces the minutes setting so the probe
+/// runs on the E2E interval.
+#[gpui::test]
+fn auto_refresh_runs_the_refresh_button_and_reschedules(cx: &mut TestAppContext) {
+    use warp_station::net::NetCommand;
+
+    let _env_turn = AUTO_FETCH_ENV.lock().unwrap_or_else(|e| e.into_inner());
+    cx.update(gpui_kit::init);
+    scratch_home();
+
+    // SAFETY: process-global env, held exclusively via AUTO_FETCH_ENV
+    unsafe { std::env::set_var("WARP_STATION_AUTO_REFRESH_SECS", "1") };
+
+    let scratch = std::env::temp_dir().join(format!(
+        "warp-station-auto-refresh-store-{}.json",
+        std::process::id()
+    ));
+    std::fs::write(&scratch, r#"{"Repos": {"AutoRefreshMinutes": 30}}"#).expect("scratch settings");
+
+    let (net_tx, net_rx) = async_channel::unbounded();
+    let store = cx.new(|_cx| {
+        let mut store = Store::with_settings(
+            net_tx,
+            std::sync::Arc::new(warp_station_core::settings::SettingsService::at(
+                scratch.clone(),
+            )),
+        );
+        store.replace_repos(vec![entry("alpha", "/probe/alpha", &[])]);
+        store
+    });
+    assert!(
+        cx.read_entity(&store, |s, _| s.next_auto_refresh.is_some()),
+        "construction arms the schedule"
+    );
+    // the constructor's own startup scan is still in flight
+    while net_rx.try_recv().is_ok() {}
+
+    cx.update_entity(&store, |s: &mut Store, _| {
+        s.scanning = false;
+        s.next_auto_refresh = Some(std::time::Instant::now() - std::time::Duration::from_secs(1));
+    });
+    cx.update_entity(&store, |s: &mut Store, cx| s.check_auto_refresh(cx));
+
+    let mut scanned = 0;
+    while let Ok(command) = net_rx.try_recv() {
+        if let NetCommand::Scan { .. } = command {
+            scanned += 1;
+        }
+    }
+    assert_eq!(scanned, 1, "exactly one Scan went out");
+    cx.read_entity(&store, |s, _| {
+        assert!(s.scanning, "the Refresh button's scanning state is on");
+        assert!(
+            s.next_auto_refresh.expect("each fire re-arms") > std::time::Instant::now(),
+            "the next due sits in the future"
+        );
+    });
+
+    // a scan in flight is this cycle's refresh: no second Scan is stacked, and
+    // the clock restarts instead of firing the moment it settles
+    cx.update_entity(&store, |s: &mut Store, _| {
+        s.next_auto_refresh = Some(std::time::Instant::now() - std::time::Duration::from_secs(1));
+    });
+    cx.update_entity(&store, |s: &mut Store, cx| s.check_auto_refresh(cx));
+    while let Ok(command) = net_rx.try_recv() {
+        assert!(
+            !matches!(command, NetCommand::Scan { .. }),
+            "no second Scan while one is in flight"
+        );
+    }
+    cx.read_entity(&store, |s, _| {
+        assert!(
+            s.next_auto_refresh.expect("the clock restarts") > std::time::Instant::now(),
+            "an in-flight pass restarts the clock"
+        );
+    });
+
+    // a freshly due tick after the scan settled starts a new pass
+    cx.update_entity(&store, |s: &mut Store, _| {
+        s.scanning = false;
+        s.next_auto_refresh = Some(std::time::Instant::now() - std::time::Duration::from_secs(1));
+    });
+    cx.update_entity(&store, |s: &mut Store, cx| s.check_auto_refresh(cx));
+    let mut scanned = 0;
+    while let Ok(command) = net_rx.try_recv() {
+        if let NetCommand::Scan { .. } = command {
+            scanned += 1;
+        }
+    }
+    assert_eq!(scanned, 1, "a newly due tick starts a fresh pass");
+
+    unsafe { std::env::remove_var("WARP_STATION_AUTO_REFRESH_SECS") };
+    let _ = std::fs::remove_file(&scratch);
+}
+
+/// The Refresh button is a full sync: it fetches the remote repos first, then
+/// rescans, and restarts both periodic clocks so the next automatic pass is a
+/// full interval out.
+#[gpui::test]
+fn refresh_fetches_rescans_and_restarts_both_timers(cx: &mut TestAppContext) {
+    use warp_station::net::NetCommand;
+
+    let _env_turn = AUTO_FETCH_ENV.lock().unwrap_or_else(|e| e.into_inner());
+    cx.update(gpui_kit::init);
+    scratch_home();
+
+    let scratch = std::env::temp_dir().join(format!(
+        "warp-station-refresh-sync-{}.json",
+        std::process::id()
+    ));
+    std::fs::write(
+        &scratch,
+        r#"{"Repos": {"AutoFetchMinutes": 30, "AutoRefreshMinutes": 15}}"#,
+    )
+    .expect("scratch settings");
+
+    let (net_tx, net_rx) = async_channel::unbounded();
+    let store = cx.new(|_cx| {
+        let mut store = Store::with_settings(
+            net_tx,
+            std::sync::Arc::new(warp_station_core::settings::SettingsService::at(
+                scratch.clone(),
+            )),
+        );
+        store.replace_repos(vec![
+            entry("alpha", "/probe/alpha", &[]),
+            entry("beta", "/probe/beta", &[]),
+        ]);
+        store.repos[1].git_has_remote = false;
+        store.scanning = false;
+        store.next_auto_fetch = Some(std::time::Instant::now() - std::time::Duration::from_secs(1));
+        store.next_auto_refresh =
+            Some(std::time::Instant::now() - std::time::Duration::from_secs(1));
+        store
+    });
+    while net_rx.try_recv().is_ok() {}
+
+    cx.update_entity(&store, |s: &mut Store, cx| s.refresh(cx));
+
+    let mut fetched: Option<Vec<PathBuf>> = None;
+    let mut scans = 0;
+    while let Ok(command) = net_rx.try_recv() {
+        match command {
+            NetCommand::FetchAll { folders } => fetched = Some(folders),
+            NetCommand::Scan { .. } => scans += 1,
+            _ => {}
+        }
+    }
+    assert_eq!(
+        fetched.expect("refresh fetches first"),
+        vec![PathBuf::from("/probe/alpha")],
+        "only the repos with a remote are fetched"
+    );
+    assert_eq!(scans, 1, "then the repository page's rescan");
+    cx.read_entity(&store, |s, _| {
+        assert!(s.scanning, "the toolbar shows Refreshing");
+        assert!(
+            s.next_auto_fetch.expect("the fetch clock is re-armed") > std::time::Instant::now(),
+            "the fetch clock restarts"
+        );
+        assert!(
+            s.next_auto_refresh.expect("the refresh clock is re-armed") > std::time::Instant::now(),
+            "the refresh clock restarts"
+        );
+    });
+
+    let _ = std::fs::remove_file(&scratch);
+}
+
+/// The focus-regain sync: the first observation primes the edge (a focused
+/// launch must not double the startup pass), a later focus regain runs one
+/// full fetch + refresh and restarts both clocks; a pass already in flight
+/// only restarts the clocks, and the switch being off sends nothing.
+#[gpui::test]
+fn focus_regain_syncs_once_and_restarts_both_timers(cx: &mut TestAppContext) {
+    use warp_station::net::NetCommand;
+
+    let _env_turn = AUTO_FETCH_ENV.lock().unwrap_or_else(|e| e.into_inner());
+    cx.update(gpui_kit::init);
+    scratch_home();
+
+    let scratch = std::env::temp_dir().join(format!(
+        "warp-station-focus-sync-{}.json",
+        std::process::id()
+    ));
+    std::fs::write(
+        &scratch,
+        r#"{"Repos": {"AutoFetchMinutes": 30, "AutoRefreshMinutes": 15, "SyncOnFocus": true}}"#,
+    )
+    .expect("scratch settings");
+
+    let (net_tx, net_rx) = async_channel::unbounded();
+    let store = cx.new(|_cx| {
+        let mut store = Store::with_settings(
+            net_tx,
+            std::sync::Arc::new(warp_station_core::settings::SettingsService::at(
+                scratch.clone(),
+            )),
+        );
+        store.replace_repos(vec![
+            entry("alpha", "/probe/alpha", &[]),
+            entry("beta", "/probe/beta", &[]),
+        ]);
+        store.repos[1].git_has_remote = false;
+        store.scanning = false;
+        store
+    });
+    while net_rx.try_recv().is_ok() {}
+
+    // the first observation primes the edge: no sync
+    cx.update_entity(&store, |s: &mut Store, cx| s.on_focus_changed(true, cx));
+    assert!(
+        !drained_a_sync(&net_rx),
+        "a focused launch is not a focus regain"
+    );
+
+    // losing focus is not an event either
+    cx.update_entity(&store, |s: &mut Store, cx| s.on_focus_changed(false, cx));
+    assert!(!drained_a_sync(&net_rx));
+
+    // a scan already in flight: the focus only restarts the clocks
+    cx.update_entity(&store, |s: &mut Store, _| {
+        s.scanning = true;
+        s.next_auto_fetch = Some(std::time::Instant::now() - std::time::Duration::from_secs(1));
+        s.next_auto_refresh = Some(std::time::Instant::now() - std::time::Duration::from_secs(1));
+    });
+    cx.update_entity(&store, |s: &mut Store, cx| s.on_focus_changed(true, cx));
+    assert!(
+        !drained_a_sync(&net_rx),
+        "no pass is stacked behind the in-flight scan"
+    );
+    cx.read_entity(&store, |s, _| {
+        assert!(
+            s.next_auto_fetch.expect("the fetch clock is restarted") > std::time::Instant::now()
+        );
+        assert!(
+            s.next_auto_refresh.expect("the refresh clock is restarted")
+                > std::time::Instant::now()
+        );
+    });
+
+    // the normal edge: fetch + refresh once, both clocks restarted
+    cx.update_entity(&store, |s: &mut Store, _| s.scanning = false);
+    cx.update_entity(&store, |s: &mut Store, cx| s.on_focus_changed(false, cx));
+    cx.update_entity(&store, |s: &mut Store, cx| s.on_focus_changed(true, cx));
+    let mut fetched: Option<Vec<PathBuf>> = None;
+    let mut scans = 0;
+    while let Ok(command) = net_rx.try_recv() {
+        match command {
+            NetCommand::FetchAll { folders } => fetched = Some(folders),
+            NetCommand::Scan { .. } => scans += 1,
+            _ => {}
+        }
+    }
+    assert_eq!(
+        fetched.expect("the focus regain fetches"),
+        vec![PathBuf::from("/probe/alpha")],
+        "only the repos with a remote are fetched"
+    );
+    assert_eq!(scans, 1, "and rescans once");
+    cx.read_entity(&store, |s, _| {
+        assert!(
+            s.next_auto_fetch.expect("the fetch clock is restarted") > std::time::Instant::now()
+        );
+        assert!(
+            s.next_auto_refresh.expect("the refresh clock is restarted")
+                > std::time::Instant::now()
+        );
+    });
+
+    // switch off: a focus regain sends nothing
+    cx.update_entity(&store, |s: &mut Store, _| {
+        s.update_settings(|settings| settings.repos.sync_on_focus = None);
+    });
+    cx.update_entity(&store, |s: &mut Store, cx| s.on_focus_changed(false, cx));
+    cx.update_entity(&store, |s: &mut Store, cx| s.on_focus_changed(true, cx));
+    assert!(!drained_a_sync(&net_rx), "the switch is off");
+
+    let _ = std::fs::remove_file(&scratch);
+}
+
+/// Drains the store's net channel, reporting whether a fetch or a scan was
+/// queued (the two commands a refresh and a focus sync emit).
+fn drained_a_sync(net_rx: &async_channel::Receiver<warp_station::net::NetCommand>) -> bool {
+    let mut found = false;
+    while let Ok(command) = net_rx.try_recv() {
+        if matches!(
+            command,
+            warp_station::net::NetCommand::FetchAll { .. }
+                | warp_station::net::NetCommand::Scan { .. }
+        ) {
+            found = true;
+        }
+    }
+    found
+}
+
 /// Drains the store's net channel for LoadChanges requests.
 fn load_changes_folders(
     net_rx: &async_channel::Receiver<warp_station::net::NetCommand>,

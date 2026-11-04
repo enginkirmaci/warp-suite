@@ -96,6 +96,8 @@ pub struct Store {
 
     // ---- wand (warp-agent) state ----
     pub wand_busy: Option<WandKind>,
+    /// The live run's id, for the progress chip's Cancel.
+    pub wand_id: Option<String>,
     /// The repo the running wand was kicked for — its result may only land
     /// while that repo is still selected.
     pub wand_repo: Option<String>,
@@ -162,6 +164,19 @@ pub struct Store {
     /// off. Armed by [Self::refresh_auto_fetch_schedule], checked on the UI's
     /// once-per-second tick.
     pub next_auto_fetch: Option<std::time::Instant>,
+    /// The interval (seconds) the fetch schedule was armed with; a settings
+    /// save that leaves it alone keeps the running countdown.
+    auto_fetch_armed_secs: Option<u64>,
+    /// When the next periodic list refresh fires (the repository page's
+    /// Refresh button on a timer); None = the feature is off. Armed by
+    /// [Self::refresh_auto_refresh_schedule], checked on the same tick.
+    pub next_auto_refresh: Option<std::time::Instant>,
+    /// The interval (seconds) the refresh schedule was armed with; a settings
+    /// save that leaves it alone keeps the running countdown.
+    auto_refresh_armed_secs: Option<u64>,
+    /// Last focus state the tick observed; None before the first observation,
+    /// so a launch that starts focused does not look like a focus regain.
+    window_focused: Option<bool>,
 
     /// Write-behind cache saves: bumped on every tag/favorite mutation; the
     /// deferred flush only writes when its generation is still current.
@@ -249,6 +264,7 @@ impl Store {
             open_pull: None,
             closed_requested: std::collections::HashSet::new(),
             wand_busy: None,
+            wand_id: None,
             wand_repo: None,
             wand_error: None,
             commit_message_draft: None,
@@ -283,6 +299,10 @@ impl Store {
             commit_details: None,
             commit_file_patch: None,
             next_auto_fetch: None,
+            auto_fetch_armed_secs: None,
+            next_auto_refresh: None,
+            auto_refresh_armed_secs: None,
+            window_focused: None,
             save_generation: 0,
             nuget: Arc::new(Default::default()),
             tags_cache: Vec::new(),
@@ -313,7 +333,8 @@ impl Store {
             store.detail_tab = store.home_tab;
         }
         store.reproject();
-        store.refresh_auto_fetch_schedule();
+        store.arm_auto_fetch_at_launch();
+        store.refresh_auto_refresh_schedule();
 
         // Cache first for instant labels, then the session scan + a status
         // pass over whatever we know (the scan's settle re-probes the merged
@@ -445,10 +466,25 @@ impl Store {
         });
     }
 
-    /// Manual refresh: rescan with the current settings, then re-probe.
+    /// A full refresh — the repository page's Refresh button, the auto-refresh
+    /// timer and the focus-regain sync all run this: fetch every repo with a
+    /// remote (busy folders excluded), rescan with the current settings, then
+    /// re-probe on settle. A pass also restarts both periodic clocks, since it
+    /// just did their work. While a scan is already in flight that pass is
+    /// this ask: the clocks restart, nothing is queued behind it.
     pub fn refresh(&mut self, cx: &mut Context<Self>) {
+        if self.scanning {
+            self.reset_auto_schedules();
+            cx.notify();
+            return;
+        }
         let settings = self.settings();
+        let folders = self.fetchable_folders();
+        if !folders.is_empty() {
+            let _ = self.net.send_blocking(NetCommand::FetchAll { folders });
+        }
         self.kick_scan(&settings);
+        self.reset_auto_schedules();
         cx.notify();
     }
 
@@ -718,7 +754,9 @@ impl Store {
                 // another repo is selected
                 let for_selected = self.wand_repo.as_deref() == self.selected_repo.as_deref();
                 self.wand_busy = None;
+                self.wand_id = None;
                 self.wand_repo = None;
+                let cancelled = matches!(&result, Err(err) if err == "cancelled");
                 match (&result, kind) {
                     (Ok(text), WandKind::Commit) => {
                         if for_selected {
@@ -731,18 +769,26 @@ impl Store {
                         }
                     }
                     (Err(err), WandKind::Commit) => {
-                        tracing::warn!("wand failed: {err}");
-                        if for_selected {
-                            self.wand_error = Some(err.clone());
+                        if cancelled {
+                            self.notify_info("Commit message generation cancelled");
+                        } else {
+                            tracing::warn!("wand failed: {err}");
+                            if for_selected {
+                                self.wand_error = Some(err.clone());
+                            }
+                            self.notify_error("Could not generate a commit message");
                         }
-                        self.notify_error("Could not generate a commit message");
                     }
                     (Err(err), WandKind::Readme) => {
-                        tracing::warn!("wand failed: {err}");
-                        if for_selected {
-                            self.wand_error = Some(err.clone());
+                        if cancelled {
+                            self.notify_info("README generation cancelled");
+                        } else {
+                            tracing::warn!("wand failed: {err}");
+                            if for_selected {
+                                self.wand_error = Some(err.clone());
+                            }
+                            self.notify_error("Could not generate a README");
                         }
-                        self.notify_error("Could not generate a README");
                     }
                 }
                 cx.notify();
@@ -1007,6 +1053,7 @@ impl Store {
         self.wand_error = None;
         let id = format!("wand-{}", self.save_generation);
         self.save_generation += 1;
+        self.wand_id = Some(id.clone());
         let _ = self.net.send_blocking(NetCommand::Wand {
             id,
             kind,
@@ -1014,6 +1061,16 @@ impl Store {
             choice,
             warp_exe: exe.to_string_lossy().to_string(),
         });
+        cx.notify();
+    }
+
+    /// Stops the live wand run. The run still answers with WandDone, so the
+    /// busy state clears through the one path and a late draft can never land.
+    pub fn cancel_wand(&mut self, cx: &mut Context<Self>) {
+        let Some(id) = self.wand_id.clone() else {
+            return;
+        };
+        let _ = self.net.send_blocking(NetCommand::CancelWand { id });
         cx.notify();
     }
 
@@ -1229,34 +1286,86 @@ impl Store {
         }
     }
 
-    // ---- periodic fetch -----------------------------------------------------
+    // ---- periodic fetch and refresh -----------------------------------------
 
-    /// The effective auto-fetch interval: WARP_STATION_AUTO_FETCH_SECS=<secs>
-    /// (E2E hook, mirrors the other WARP_STATION_* launch hooks) replaces the
-    /// minutes setting; None = the feature is off.
-    fn auto_fetch_interval(repos: &ReposSettings) -> Option<std::time::Duration> {
+    /// The effective auto-fetch interval in seconds:
+    /// WARP_STATION_AUTO_FETCH_SECS=<secs> (E2E hook, mirrors the other
+    /// WARP_STATION_* launch hooks) replaces the minutes setting; None = off.
+    fn auto_fetch_seconds(repos: &ReposSettings) -> Option<u64> {
         if let Ok(secs) = std::env::var("WARP_STATION_AUTO_FETCH_SECS")
             && let Ok(secs) = secs.parse::<u64>()
         {
-            return Some(std::time::Duration::from_secs(secs));
+            return Some(secs);
         }
         repos
             .auto_fetch_minutes
-            .map(|minutes| std::time::Duration::from_secs(u64::from(minutes) * 60))
+            .map(|minutes| u64::from(minutes) * 60)
+    }
+
+    fn auto_fetch_interval(repos: &ReposSettings) -> Option<std::time::Duration> {
+        Self::auto_fetch_seconds(repos).map(std::time::Duration::from_secs)
+    }
+
+    /// The interval pass's first due instant after a launch: the oldest known
+    /// fetch plus one interval, so restarting the app does not reset the clock
+    /// and postpone the pass a whole interval. A list that has never been
+    /// fetched, or one already overdue, fires after a short grace — which also
+    /// gives the startup scan/probe time to land.
+    fn auto_fetch_due(&self, interval: std::time::Duration) -> std::time::Instant {
+        const GRACE: std::time::Duration = std::time::Duration::from_secs(5);
+        // a short grace, but never longer than the interval itself (the E2E
+        // hook may arm seconds, not minutes)
+        let grace = GRACE.min(interval);
+        let now = std::time::Instant::now();
+        let oldest = self
+            .repos
+            .iter()
+            .filter(|repo| !repo.is_archived())
+            .filter_map(|repo| repo.git_last_fetch_at)
+            .min();
+        let Some(oldest) = oldest else {
+            return now + grace;
+        };
+        let elapsed = chrono::Local::now()
+            .signed_duration_since(oldest)
+            .to_std()
+            .unwrap_or_default();
+        if elapsed >= interval {
+            now + grace
+        } else {
+            now + (interval - elapsed)
+        }
     }
 
     /// Re-arms the periodic fetch from the current settings; call wherever a
-    /// settings load or save can change the interval. Fetch-off + focus-gate-on
-    /// arms a single immediate pass instead (one fetch, held for focus).
+    /// settings load or save can change the interval. A save that left the
+    /// interval alone keeps the running countdown instead of pushing the pass
+    /// a whole interval further out. Fetch-off + focus-gate-on arms a single
+    /// immediate pass instead (one fetch, held for focus).
     pub fn refresh_auto_fetch_schedule(&mut self) {
-        let repos = &self.settings().repos;
-        self.next_auto_fetch = if let Some(interval) = Self::auto_fetch_interval(repos) {
-            Some(std::time::Instant::now() + interval)
+        let repos = self.settings().repos;
+        let seconds = Self::auto_fetch_seconds(&repos);
+        if seconds == self.auto_fetch_armed_secs && self.next_auto_fetch.is_some() {
+            return;
+        }
+        self.auto_fetch_armed_secs = seconds;
+        self.next_auto_fetch = if let Some(secs) = seconds {
+            Some(std::time::Instant::now() + std::time::Duration::from_secs(secs))
         } else if repos.auto_fetch_only_focused.unwrap_or(false) {
             Some(std::time::Instant::now())
         } else {
             None
         };
+    }
+
+    /// Launch arming: the countdown a restart would have left behind — if the
+    /// oldest fetch is older than the interval, the pass fires after the grace
+    /// instead of waiting a fresh interval.
+    fn arm_auto_fetch_at_launch(&mut self) {
+        self.refresh_auto_fetch_schedule();
+        if let Some(secs) = Self::auto_fetch_seconds(&self.settings().repos) {
+            self.next_auto_fetch = Some(self.auto_fetch_due(std::time::Duration::from_secs(secs)));
+        }
     }
 
     /// Whether any open window is the focused one. The notes window counts,
@@ -1267,6 +1376,22 @@ impl Store {
                 .update(cx, |_, window, _| window.is_window_active())
                 .unwrap_or(false)
         })
+    }
+
+    /// The repos a fetch pass may touch: a remote is configured, the repo is
+    /// not archived, and no git mutation is running in its folder (index.lock
+    /// conflict avoidance).
+    fn fetchable_folders(&self) -> Vec<std::path::PathBuf> {
+        self.repos
+            .iter()
+            .filter(|repo| repo.git_has_remote && !repo.is_archived())
+            .map(|repo| repo.folder_path.clone())
+            .filter(|folder| {
+                !self
+                    .git_jobs
+                    .contains_key(folder.to_string_lossy().as_ref())
+            })
+            .collect()
     }
 
     /// The tick's check: when the schedule is due, fetch every repo with a
@@ -1289,6 +1414,7 @@ impl Store {
             .unwrap_or(false);
         if interval.is_none() && !gated {
             self.next_auto_fetch = None;
+            self.auto_fetch_armed_secs = None;
             return;
         }
         // the focus gate holds the pass — and the schedule — until a
@@ -1296,27 +1422,112 @@ impl Store {
         if gated && !Self::any_window_focused(cx) {
             return;
         }
-        // the launch one-shot waits for the first scan to land repos;
-        // otherwise it is consumed by an empty table and never fetches
-        if interval.is_none() && self.repos.is_empty() {
+        // hold until the first scan and status pass land: an empty table has
+        // nothing to fetch, and an unprobed one would filter every repo out
+        // (git_has_remote is false until its status arrives), consuming the
+        // pass — a launch catch-up included. Both land seconds after startup.
+        if self.repos.is_empty() || self.repos.iter().all(|repo| !repo.git_status_loaded) {
             return;
         }
-        let folders: Vec<std::path::PathBuf> = self
-            .repos
-            .iter()
-            .filter(|repo| repo.git_has_remote && !repo.is_archived())
-            .map(|repo| repo.folder_path.clone())
-            .filter(|folder| {
-                !self
-                    .git_jobs
-                    .contains_key(folder.to_string_lossy().as_ref())
-            })
-            .collect();
+        let folders = self.fetchable_folders();
         // an interval re-arms into the future; the one-shot clears instead
         self.next_auto_fetch = interval.map(|i| std::time::Instant::now() + i);
+        if interval.is_none() {
+            self.auto_fetch_armed_secs = None;
+        }
         if !folders.is_empty() {
             let _ = self.net.send_blocking(NetCommand::FetchAll { folders });
         }
+    }
+
+    /// The effective auto-refresh interval in seconds:
+    /// WARP_STATION_AUTO_REFRESH_SECS=<secs> (E2E hook, mirrors the other
+    /// WARP_STATION_* launch hooks) replaces the minutes setting; None = off.
+    fn auto_refresh_seconds(repos: &ReposSettings) -> Option<u64> {
+        if let Ok(secs) = std::env::var("WARP_STATION_AUTO_REFRESH_SECS")
+            && let Ok(secs) = secs.parse::<u64>()
+        {
+            return Some(secs);
+        }
+        repos
+            .auto_refresh_minutes
+            .map(|minutes| u64::from(minutes) * 60)
+    }
+
+    /// Re-arms the periodic list refresh from the current settings; a save
+    /// that left the interval alone keeps the running countdown.
+    pub fn refresh_auto_refresh_schedule(&mut self) {
+        let repos = self.settings().repos;
+        let seconds = Self::auto_refresh_seconds(&repos);
+        if seconds == self.auto_refresh_armed_secs && self.next_auto_refresh.is_some() {
+            return;
+        }
+        self.auto_refresh_armed_secs = seconds;
+        self.next_auto_refresh =
+            seconds.map(|secs| std::time::Instant::now() + std::time::Duration::from_secs(secs));
+    }
+
+    /// The tick's refresh check: when due, run a full refresh (fetch + rescan +
+    /// probe, the same pass as the Refresh button). An in-flight scan counts as
+    /// this cycle's refresh, so the clock restarts instead of stacking a pass.
+    pub fn check_auto_refresh(&mut self, cx: &mut Context<Self>) {
+        let Some(due) = self.next_auto_refresh else {
+            return;
+        };
+        if std::time::Instant::now() < due {
+            return;
+        }
+        if Self::auto_refresh_seconds(&self.settings().repos).is_none() {
+            self.next_auto_refresh = None;
+            self.auto_refresh_armed_secs = None;
+            return;
+        }
+        // refresh() restarts both clocks itself, and an in-flight scan counts
+        // as this cycle's pass
+        self.refresh(cx);
+    }
+
+    /// Restarts both periodic clocks from now: a full refresh just ran, so the
+    /// next automatic pass is a whole interval out. With auto fetch off, this
+    /// also consumes the focus-gate one-shot — the pass fetched.
+    fn reset_auto_schedules(&mut self) {
+        let repos = self.settings().repos;
+        let now = std::time::Instant::now();
+        let fetch_secs = Self::auto_fetch_seconds(&repos);
+        self.auto_fetch_armed_secs = fetch_secs;
+        self.next_auto_fetch = fetch_secs.map(|secs| now + std::time::Duration::from_secs(secs));
+        let refresh_secs = Self::auto_refresh_seconds(&repos);
+        self.auto_refresh_armed_secs = refresh_secs;
+        self.next_auto_refresh =
+            refresh_secs.map(|secs| now + std::time::Duration::from_secs(secs));
+    }
+
+    /// One focus edge, fed by [Self::check_focus_sync]: regaining focus after
+    /// the app was unfocused runs one full refresh (fetch + rescan + probe)
+    /// when `SyncOnFocus` is on, then restarts both periodic clocks. The first
+    /// observation only primes the edge, so a launch that starts focused does
+    /// not duplicate the startup pass.
+    pub fn on_focus_changed(&mut self, focused: bool, cx: &mut Context<Self>) {
+        let was = self.window_focused.replace(focused);
+        let Some(was) = was else {
+            return;
+        };
+        if !focused || was {
+            return;
+        }
+        if !self.settings().repos.sync_on_focus.unwrap_or(false) {
+            return;
+        }
+        // refresh() restarts both clocks; an in-flight scan counts as the sync
+        self.refresh(cx);
+    }
+
+    /// The tick's focus poll: [Self::on_focus_changed] with the live window
+    /// state. Any open Warp Station window counts as focused, so moving
+    /// between the main window and Notes is not a focus regain.
+    pub fn check_focus_sync(&mut self, cx: &mut Context<Self>) {
+        let focused = Self::any_window_focused(cx);
+        self.on_focus_changed(focused, cx);
     }
 
     // ---- list shaping ------------------------------------------------------
@@ -2532,5 +2743,72 @@ mod tests {
             !ai_enabled(&settings),
             "warp-agent off turns the AI surface off"
         );
+    }
+
+    /// A launch keeps the fetch clock: the first pass is armed from the oldest
+    /// known FETCH_HEAD, so restarting the app does not postpone it a whole
+    /// interval; a never-fetched or overdue list fires after the grace.
+    #[test]
+    fn a_restart_keeps_the_fetch_clock_instead_of_restarting_it() {
+        let (tx, _rx) = async_channel::unbounded();
+        let scratch = std::env::temp_dir().join(format!(
+            "warp-station-fetch-clock-{}.json",
+            std::process::id()
+        ));
+        std::fs::write(&scratch, "{}").expect("scratch settings");
+        let mut store = Store::with_settings(tx, Arc::new(SettingsService::at(scratch.clone())));
+        let interval = std::time::Duration::from_secs(15 * 60);
+        let repo = |minutes_ago: Option<i64>| RepoEntry {
+            name: "r".into(),
+            folder_path: std::path::PathBuf::from("/probe/r"),
+            solution_path: None,
+            tags: Vec::new(),
+            git_branch_name: None,
+            git_modified_count: 0,
+            git_to_push_count: 0,
+            git_to_pull_count: 0,
+            git_last_commit_at: None,
+            git_last_fetch_at: minutes_ago
+                .map(|m| chrono::Local::now() - chrono::Duration::minutes(m)),
+            git_has_remote: true,
+            git_branch_published: false,
+            git_status_loaded: true,
+            github_pr_count: 0,
+            github_issue_count: 0,
+        };
+        let grace = std::time::Duration::from_secs(5);
+        let remaining = |store: &Store| {
+            store
+                .auto_fetch_due(interval)
+                .saturating_duration_since(std::time::Instant::now())
+        };
+
+        // never fetched: the launch pass waits only the grace
+        store.repos = vec![repo(None)];
+        assert!(remaining(&store) <= grace, "a fresh list fires early");
+
+        // fetched 14 minutes ago: a minute left, not a fresh 15
+        store.repos = vec![repo(Some(14))];
+        let left = remaining(&store);
+        assert!(
+            left >= std::time::Duration::from_secs(50)
+                && left <= std::time::Duration::from_secs(70),
+            "the restart keeps the clock (got {left:?})"
+        );
+
+        // overdue: fire after the grace instead of waiting another interval
+        store.repos = vec![repo(Some(120))];
+        assert!(remaining(&store) <= grace, "an overdue list fires early");
+
+        // archived repos do not hold the clock back
+        let mut archived = repo(Some(120));
+        archived.tags = vec![repo_store::ARCHIVED_TAG.into()];
+        store.repos = vec![repo(Some(14)), archived];
+        assert!(
+            remaining(&store) >= std::time::Duration::from_secs(50),
+            "an archived stale fetch is ignored"
+        );
+
+        let _ = std::fs::remove_file(&scratch);
     }
 }

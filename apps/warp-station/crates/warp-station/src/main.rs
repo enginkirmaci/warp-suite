@@ -113,8 +113,8 @@ fn main() {
             })
             .detach();
 
-            // toasts expire on a once-per-second beat; the same beat checks
-            // the periodic fetch schedule
+            // toasts expire on a once-per-second beat; the same beat polls the
+            // focus edge and the periodic fetch/refresh schedules
             let notice_store = store.downgrade();
             cx.spawn(async move |cx| {
                 loop {
@@ -124,7 +124,9 @@ fn main() {
                     if let Some(store) = notice_store.upgrade() {
                         store.update(cx, |s, cx| {
                             s.tick_notices(cx);
+                            s.check_focus_sync(cx);
                             s.check_auto_fetch(cx);
+                            s.check_auto_refresh(cx);
                         });
                     } else {
                         break;

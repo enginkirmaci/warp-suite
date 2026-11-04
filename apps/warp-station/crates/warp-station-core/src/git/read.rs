@@ -49,7 +49,9 @@ pub fn probe(folder: &Path) -> Option<Probe> {
         let modified = statuses.len() as u32;
 
         let head = repo.find_reference("HEAD").ok()?;
-        let detached = head.symbolic_target().is_err();
+        // git2 returns Ok(None) for a direct (detached) HEAD; `is_err()`
+        // would miss it and report the literal "HEAD"
+        let detached = head.symbolic_target().ok().flatten().is_none();
         let resolved = head.resolve().ok()?;
         let branch_name = if detached {
             "(detached)".to_string()
@@ -196,6 +198,40 @@ pub fn branches(folder: &Path) -> Option<Vec<GitBranchRef>> {
                 }))
                 .collect(),
         )
+    })
+    .flatten()
+}
+
+/// Resolves a remote-tracking branch pick (`origin/main`) to the local branch
+/// a checkout should land on: the name after the remote prefix, plus whether
+/// that local branch already exists. None when `target` is not a
+/// remote-tracking ref (a local branch, tag or commit hash) — those keep
+/// plain checkout semantics, so a commit pick still detaches HEAD as intended.
+/// Remote names are matched longest-first, so a slash in the remote name
+/// still splits correctly.
+pub fn remote_tracking_local(folder: &Path, target: &str) -> Option<(String, bool)> {
+    with_repo(folder, |repo| {
+        // an exact local branch always wins, even one whose name looks like
+        // `origin/main` — plain checkout resolves it the same way
+        if repo.find_reference(&format!("refs/heads/{target}")).is_ok() {
+            return None;
+        }
+        repo.find_reference(&format!("refs/remotes/{target}"))
+            .ok()?;
+        let remotes = repo.remotes().ok()?;
+        let mut names: Vec<&str> = remotes
+            .iter()
+            .filter_map(|remote| remote.ok().flatten())
+            .collect();
+        names.sort_by_key(|name| std::cmp::Reverse(name.len()));
+        let remote = names.into_iter().find(|name| {
+            target
+                .strip_prefix(*name)
+                .is_some_and(|rest| rest.len() > 1 && rest.starts_with('/'))
+        })?;
+        let local = &target[remote.len() + 1..];
+        let exists = repo.find_reference(&format!("refs/heads/{local}")).is_ok();
+        Some((local.to_string(), exists))
     })
     .flatten()
 }
@@ -594,7 +630,8 @@ pub fn day_activity(folder: &Path, day: chrono::NaiveDate) -> Option<GitDayActiv
             .collect();
 
         let branch_name = repo.find_reference("HEAD").ok().and_then(|head| {
-            if head.symbolic_target().is_err() {
+            // Ok(None) is the detached HEAD; see `probe`
+            if head.symbolic_target().ok().flatten().is_none() {
                 Some("(detached)".to_string())
             } else {
                 head.resolve()

@@ -93,6 +93,14 @@ pub struct ReposSettings {
     /// launch. None/false = fetch regardless. Absence-meaningful like
     /// auto_fetch_minutes.
     pub auto_fetch_only_focused: Option<bool>,
+    /// Background list-refresh interval: the repository page's Refresh button
+    /// (fetch + rescan + status probe) on a timer. None = off. Absence-
+    /// meaningful like auto_fetch_minutes.
+    pub auto_refresh_minutes: Option<u16>,
+    /// Regaining focus after the app was unfocused runs one fetch + refresh
+    /// and restarts both periodic timers. None/false = off.
+    /// Absence-meaningful like auto_fetch_minutes.
+    pub sync_on_focus: Option<bool>,
     /// Collapsible folder groups in the repos table; None/false = the flat
     /// list. Absence-meaningful like sort_ascending.
     pub group_repos_by_root: Option<bool>,
@@ -168,6 +176,8 @@ impl Default for ReposSettings {
             sort_ascending: None,
             auto_fetch_minutes: None,
             auto_fetch_only_focused: None,
+            auto_refresh_minutes: None,
+            sync_on_focus: None,
             group_repos_by_root: None,
             group_root_depth: None,
             collapsed_groups: None,
@@ -561,6 +571,35 @@ mod tests {
         assert!(json.contains("\"AutoFetchMinutes\": 30"));
         let back: AppSettings = serde_json::from_str(&json).unwrap();
         assert_eq!(back.repos.auto_fetch_minutes, Some(30));
+    }
+
+    #[test]
+    fn auto_refresh_minutes_round_trips_and_absent_means_off() {
+        // absence (legacy files) = off
+        let legacy: AppSettings = serde_json::from_str("{}").unwrap();
+        assert_eq!(legacy.repos.auto_refresh_minutes, None);
+        // an explicit interval persists and reads back
+        let on: AppSettings =
+            serde_json::from_str(r#"{"Repos": {"AutoRefreshMinutes": 15}}"#).unwrap();
+        assert_eq!(on.repos.auto_refresh_minutes, Some(15));
+        let json = serde_json::to_string_pretty(&on).unwrap();
+        assert!(json.contains("\"AutoRefreshMinutes\": 15"));
+        let back: AppSettings = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.repos.auto_refresh_minutes, Some(15));
+    }
+
+    #[test]
+    fn sync_on_focus_round_trips_and_absent_means_off() {
+        // absence (legacy files) = off
+        let legacy: AppSettings = serde_json::from_str("{}").unwrap();
+        assert_eq!(legacy.repos.sync_on_focus, None);
+        // the opt-in persists and reads back
+        let on: AppSettings = serde_json::from_str(r#"{"Repos": {"SyncOnFocus": true}}"#).unwrap();
+        assert_eq!(on.repos.sync_on_focus, Some(true));
+        let json = serde_json::to_string_pretty(&on).unwrap();
+        assert!(json.contains("\"SyncOnFocus\": true"));
+        let back: AppSettings = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.repos.sync_on_focus, Some(true));
     }
 
     #[test]

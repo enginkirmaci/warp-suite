@@ -172,6 +172,352 @@ fn history_and_drill_down_draw(cx: &mut TestAppContext) {
     );
 }
 
+/// The Changes rail only offers verbs that can act right now: no fetch without
+/// a remote, no pull with nothing behind, no push with nothing ahead, no
+/// publish for a published branch — and no commit box until something is
+/// staged (the commit prompt reads the index, so an unstaged-only tree has
+/// nothing to commit).
+#[gpui_kit::gpui::test]
+fn git_verbs_and_commit_follow_the_repo_state(cx: &mut TestAppContext) {
+    use warp_station_core::model::{
+        GitBranchKind, GitBranchRef, GitChangeSnapshot, GitChangedFile,
+    };
+    use warp_station_core::repo_store::RepoEntry;
+
+    cx.update(gpui_kit::init);
+    cx.update(warp_station::theme::apply_kit_theme);
+
+    fn file(path: &str) -> GitChangedFile {
+        GitChangedFile {
+            path: path.into(),
+            status_code: "M".into(),
+            additions: Some(1),
+            deletions: None,
+        }
+    }
+    fn snapshot(staged: bool, unstaged: bool) -> GitChangeSnapshot {
+        let staged_files = if staged {
+            vec![file("staged.txt")]
+        } else {
+            Vec::new()
+        };
+        let unstaged_files = if unstaged {
+            vec![file("unstaged.txt")]
+        } else {
+            Vec::new()
+        };
+        let status_files = staged_files
+            .iter()
+            .chain(unstaged_files.iter())
+            .cloned()
+            .collect();
+        GitChangeSnapshot {
+            status_files,
+            staged_files,
+            unstaged_files,
+            worktree_counts: Default::default(),
+            cached_counts: Default::default(),
+        }
+    }
+
+    let (net_tx, _net_rx) = async_channel::unbounded();
+    let store = cx.new(|cx| {
+        let mut store = Store::with_settings(net_tx, scratch_service("changes-git-verbs-relevant"));
+        store.replace_repos(vec![RepoEntry {
+            name: "alpha".into(),
+            folder_path: std::path::PathBuf::from("/probe/alpha"),
+            solution_path: None,
+            tags: Vec::new(),
+            git_branch_name: Some("main".into()),
+            git_modified_count: 1,
+            git_to_push_count: 0,
+            git_to_pull_count: 0,
+            git_last_commit_at: None,
+            git_last_fetch_at: None,
+            git_has_remote: true,
+            git_branch_published: true,
+            git_status_loaded: true,
+            github_pr_count: 0,
+            github_issue_count: 0,
+        }]);
+        store.select_repo("/probe/alpha", cx);
+        store.open_detail_tab(warp_station::store::WorkspaceTab::Changes, cx);
+        store.changes_loaded_for = Some("/probe/alpha".into());
+        store.branches = vec![GitBranchRef {
+            name: "main".into(),
+            kind: GitBranchKind::Local,
+        }];
+        store.set_changes(Some(snapshot(true, false)));
+        store
+    });
+    let (_window, cx) = cx.add_window_view(|window, cx| MainWindow::new(store.clone(), window, cx));
+    cx.run_until_parked();
+    cx.update(|window, cx| drop(window.draw(cx)));
+
+    // published, in sync, one staged file: fetch and the commit box only
+    assert!(
+        cx.debug_bounds("rail-Fetch").is_some(),
+        "a remote gets Fetch"
+    );
+    assert!(
+        cx.debug_bounds("rail-Pull").is_none(),
+        "nothing behind, no Pull"
+    );
+    assert!(
+        cx.debug_bounds("rail-Push").is_none(),
+        "nothing ahead, no Push"
+    );
+    assert!(
+        cx.debug_bounds("rail-Publish").is_none(),
+        "published, no Publish"
+    );
+    assert!(cx.debug_bounds("rail-Sync").is_none(), "in sync, no Sync");
+    assert!(
+        cx.debug_bounds("commit-message").is_some(),
+        "staged: commit box"
+    );
+
+    // behind and ahead: Pull, Push and Sync appear
+    cx.update_entity(&store, |s: &mut Store, _| {
+        let entry = s.repos.iter_mut().find(|r| r.name == "alpha").unwrap();
+        entry.git_to_pull_count = 2;
+        entry.git_to_push_count = 3;
+    });
+    cx.run_until_parked();
+    cx.update(|window, cx| drop(window.draw(cx)));
+    assert!(cx.debug_bounds("rail-Pull").is_some());
+    assert!(cx.debug_bounds("rail-Push").is_some());
+    assert!(cx.debug_bounds("rail-Sync").is_some());
+
+    // unstaged only: the commit box steps aside for the stage hint
+    cx.update_entity(&store, |s: &mut Store, _| {
+        s.set_changes(Some(snapshot(false, true)));
+        let entry = s.repos.iter_mut().find(|r| r.name == "alpha").unwrap();
+        entry.git_to_pull_count = 0;
+        entry.git_to_push_count = 0;
+    });
+    cx.run_until_parked();
+    cx.update(|window, cx| drop(window.draw(cx)));
+    assert!(
+        cx.debug_bounds("commit-message").is_none(),
+        "nothing staged"
+    );
+    assert!(cx.debug_bounds("commit-button").is_none());
+    assert!(cx.debug_bounds("changes-stage-hint").is_some());
+    assert!(cx.debug_bounds("rail-Pull").is_none());
+    assert!(cx.debug_bounds("rail-Push").is_none());
+    assert!(cx.debug_bounds("rail-Sync").is_none());
+
+    // an unpublished local branch publishes; it is not pushed
+    cx.update_entity(&store, |s: &mut Store, _| {
+        let entry = s.repos.iter_mut().find(|r| r.name == "alpha").unwrap();
+        entry.git_branch_name = Some("feature".into());
+        entry.git_branch_published = false;
+        s.branches.push(GitBranchRef {
+            name: "feature".into(),
+            kind: GitBranchKind::Local,
+        });
+    });
+    cx.run_until_parked();
+    cx.update(|window, cx| drop(window.draw(cx)));
+    assert!(
+        cx.debug_bounds("rail-Publish").is_some(),
+        "unpublished branch"
+    );
+    assert!(cx.debug_bounds("rail-Push").is_none());
+
+    // a detached HEAD keeps Fetch but offers no branch verbs
+    cx.update_entity(&store, |s: &mut Store, _| {
+        let entry = s.repos.iter_mut().find(|r| r.name == "alpha").unwrap();
+        entry.git_branch_name = Some("(detached)".into());
+        entry.git_to_pull_count = 2;
+        entry.git_branch_published = false;
+    });
+    cx.run_until_parked();
+    cx.update(|window, cx| drop(window.draw(cx)));
+    assert!(
+        cx.debug_bounds("rail-Fetch").is_some(),
+        "fetch stays useful"
+    );
+    assert!(cx.debug_bounds("rail-Pull").is_none());
+    assert!(cx.debug_bounds("rail-Push").is_none());
+    assert!(cx.debug_bounds("rail-Publish").is_none());
+    assert!(cx.debug_bounds("rail-Sync").is_none());
+
+    // no remote: even Fetch steps aside
+    cx.update_entity(&store, |s: &mut Store, _| {
+        let entry = s.repos.iter_mut().find(|r| r.name == "alpha").unwrap();
+        entry.git_has_remote = false;
+    });
+    cx.run_until_parked();
+    cx.update(|window, cx| drop(window.draw(cx)));
+    assert!(cx.debug_bounds("rail-Fetch").is_none());
+}
+
+/// The commit wand can never leave "Generate & Commit" stuck: the progress
+/// chip's Cancel stops the live run, a cancel is not an error, and a draft
+/// that lands after a failed/cancelled run is not armed to commit itself.
+#[gpui_kit::gpui::test]
+fn a_failed_generation_disarms_generate_and_commit(cx: &mut TestAppContext) {
+    use warp_station::net::{NetCommand, UiEvent, WandKind};
+    use warp_station_core::model::{GitChangeSnapshot, GitChangedFile};
+    use warp_station_core::repo_store::RepoEntry;
+
+    cx.update(gpui_kit::init);
+    cx.update(warp_station::theme::apply_kit_theme);
+
+    fn file(path: &str) -> GitChangedFile {
+        GitChangedFile {
+            path: path.into(),
+            status_code: "M".into(),
+            additions: Some(1),
+            deletions: None,
+        }
+    }
+
+    // `git` is a real executable on PATH, so the wand gate opens without
+    // requiring a warp-agent install in the test environment
+    let settings =
+        std::env::temp_dir().join(format!("warp-station-probe-wand-{}", std::process::id()));
+    std::fs::write(
+        &settings,
+        r#"{"WarpAgent":{"EnableWarpAgent":true,"Executable":"git"},"OpenCode":{"DefaultModel":"probe/model"}}"#,
+    )
+    .expect("scratch settings");
+
+    let (net_tx, net_rx) = async_channel::unbounded();
+    let store = cx.new(|cx| {
+        let mut store = Store::with_settings(
+            net_tx,
+            std::sync::Arc::new(warp_station_core::settings::SettingsService::at(
+                settings.clone(),
+            )),
+        );
+        store.replace_repos(vec![RepoEntry {
+            name: "alpha".into(),
+            folder_path: std::path::PathBuf::from("/probe/alpha"),
+            solution_path: None,
+            tags: Vec::new(),
+            git_branch_name: Some("main".into()),
+            git_modified_count: 1,
+            git_to_push_count: 0,
+            git_to_pull_count: 0,
+            git_last_commit_at: None,
+            git_last_fetch_at: None,
+            git_has_remote: true,
+            git_branch_published: true,
+            git_status_loaded: true,
+            github_pr_count: 0,
+            github_issue_count: 0,
+        }]);
+        store.select_repo("/probe/alpha", cx);
+        store.open_detail_tab(warp_station::store::WorkspaceTab::Changes, cx);
+        store.changes_loaded_for = Some("/probe/alpha".into());
+        let staged = vec![file("staged.txt")];
+        store.set_changes(Some(GitChangeSnapshot {
+            status_files: staged.clone(),
+            staged_files: staged,
+            unstaged_files: Vec::new(),
+            worktree_counts: Default::default(),
+            cached_counts: Default::default(),
+        }));
+        store
+    });
+    let (_window, cx) = cx.add_window_view(|window, cx| MainWindow::new(store.clone(), window, cx));
+    cx.run_until_parked();
+    cx.update(|window, cx| drop(window.draw(cx)));
+
+    // an empty box over a staged file starts the wand
+    click(cx, "commit-button");
+    let mut started = false;
+    while let Ok(command) = net_rx.try_recv() {
+        if matches!(command, NetCommand::Wand { .. }) {
+            started = true;
+        }
+    }
+    assert!(started, "the click starts a wand run");
+    let run_id = cx
+        .read_entity(&store, |s, _| s.wand_id.clone())
+        .expect("the live run has an id");
+    cx.read_entity(&store, |s, _| {
+        assert_eq!(s.wand_busy, Some(WandKind::Commit))
+    });
+
+    // the progress chip offers Cancel, and it targets the live run
+    assert!(
+        cx.debug_bounds("wand-cancel").is_some(),
+        "the working chip carries a Cancel"
+    );
+    click(cx, "wand-cancel");
+    let mut cancelled = None;
+    while let Ok(command) = net_rx.try_recv() {
+        if let NetCommand::CancelWand { id } = command {
+            cancelled = Some(id);
+        }
+    }
+    assert_eq!(
+        cancelled.as_deref(),
+        Some(run_id.as_str()),
+        "Cancel stops exactly the live run"
+    );
+
+    // the stop answers like any run: busy clears, and it is not an error
+    cx.update_entity(&store, |s: &mut Store, cx| {
+        s.on_net_event(
+            UiEvent::WandDone {
+                wand_id: run_id.clone(),
+                kind: WandKind::Commit,
+                result: Err("cancelled".into()),
+            },
+            cx,
+        );
+    });
+    cx.run_until_parked();
+    cx.update(|window, cx| drop(window.draw(cx)));
+    cx.read_entity(&store, |s, _| {
+        assert!(s.wand_busy.is_none(), "cancelling clears busy");
+        assert!(s.wand_error.is_none(), "a cancel is not a wand error");
+    });
+
+    // a genuine failure also clears busy (the button returns to Commit
+    // instead of spinning forever)
+    click(cx, "commit-button");
+    while net_rx.try_recv().is_ok() {}
+    cx.update_entity(&store, |s: &mut Store, cx| {
+        s.on_net_event(
+            UiEvent::WandDone {
+                wand_id: "w".into(),
+                kind: WandKind::Commit,
+                result: Err("the model returned no text".into()),
+            },
+            cx,
+        );
+    });
+    cx.run_until_parked();
+    cx.update(|window, cx| drop(window.draw(cx)));
+    cx.read_entity(&store, |s, _| {
+        assert!(
+            s.wand_busy.is_none(),
+            "the failed run cleared the busy flag"
+        )
+    });
+    assert!(
+        cx.debug_bounds("commit-button").is_some(),
+        "the commit control is back"
+    );
+
+    // a late draft is just text: the failed click was disarmed
+    cx.update_entity(&store, |s: &mut Store, _| {
+        s.commit_message_draft = Some("late draft".into());
+    });
+    cx.run_until_parked();
+    cx.update(|window, cx| drop(window.draw(cx)));
+    assert!(
+        git_commands(&net_rx).is_empty(),
+        "no commit fires from a failed generation"
+    );
+}
+
 fn click(cx: &mut VisualTestContext, selector: &'static str) {
     let b = cx
         .debug_bounds(selector)

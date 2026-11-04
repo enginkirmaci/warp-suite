@@ -113,6 +113,11 @@ pub enum NetCommand {
         choice: ModelChoice,
         warp_exe: String,
     },
+    /// Stops one live wand run (the progress chip's Cancel). The run answers
+    /// with its usual WandDone, so the busy flag always clears.
+    CancelWand {
+        id: String,
+    },
     /// The warp-agent model catalog for one harness through its door (+
     /// cache). Passive: a closed door falls back to the cache, never a launch.
     LoadModels {
@@ -1110,6 +1115,13 @@ async fn net_main(cmd_rx: Receiver<NetCommand>, evt_tx: Sender<UiEvent>) {
                     });
                 });
             }
+            NetCommand::CancelWand { id } => {
+                // the wand task answers its own WandDone after the run stops,
+                // so the store's busy flag still clears through one path
+                if let Some(kill) = wands.lock().await.get(&id) {
+                    let _ = kill.send(()).await;
+                }
+            }
             NetCommand::WarpOpen { folder, warp_exe } => {
                 let evt_tx = evt_tx.clone();
                 tokio::spawn(async move {
@@ -1216,12 +1228,23 @@ async fn net_main(cmd_rx: Receiver<NetCommand>, evt_tx: Sender<UiEvent>) {
             }
             NetCommand::Git { folder, action } => {
                 let (ok, error, commit_hash) = run_git_action(&folder, &action).await;
+                // a remote pick lands on its local tracking branch; name that
+                // in the toast instead of the remote-tracking ref the user
+                // clicked
+                let detail = match &action {
+                    GitAction::Checkout(target) => {
+                        warp_station_core::git::read::remote_tracking_local(&folder, target)
+                            .map(|(local, _)| local)
+                            .or_else(|| action.detail())
+                    }
+                    _ => action.detail(),
+                };
                 let _ = evt_tx.send_blocking(UiEvent::GitDone {
                     folder: folder.to_string_lossy().to_string(),
                     label: action.label(),
                     error: if ok { None } else { error },
                     commit_hash,
-                    detail: action.detail(),
+                    detail,
                 });
                 // every mutation re-checks the repo it touched: the fresh
                 // status and the rebuilt changes snapshot land together, and

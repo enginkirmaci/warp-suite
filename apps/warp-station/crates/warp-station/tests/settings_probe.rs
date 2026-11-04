@@ -432,6 +432,99 @@ fn auto_fetch_row_picks_and_persists(cx: &mut TestAppContext) {
     let _ = std::fs::remove_dir_all(&home);
 }
 
+/// The Git card's auto-refresh picker sits under auto fetch with the same
+/// four options, and picking 15m persists AutoRefreshMinutes — the periodic
+/// rescan that mirrors the repository page's Refresh button.
+#[gpui_kit::gpui::test]
+fn auto_refresh_row_picks_and_persists(cx: &mut TestAppContext) {
+    let _home_guard = HOME_ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    cx.update(gpui_kit::init);
+    cx.update(warp_station::theme::apply_kit_theme);
+
+    let home = std::env::temp_dir().join(format!(
+        "warp-station-auto-refresh-probe-{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&home);
+    std::fs::create_dir_all(home.join(".warp")).unwrap();
+    // SAFETY: process-global env; set before the store reads settings; the
+    // sibling test tolerates a default-settings read while this runs
+    unsafe {
+        std::env::set_var("HOME", &home);
+        #[cfg(windows)]
+        std::env::set_var("USERPROFILE", &home);
+        std::env::set_var("XDG_CONFIG_HOME", home.join(".config"));
+    }
+
+    let scratch = home.join(".warp").join("settings.json");
+    std::fs::write(&scratch, "{}").expect("scratch settings");
+
+    let (net_tx, _net_rx) = async_channel::unbounded();
+    let store = cx.new(|_cx| {
+        Store::with_settings(
+            net_tx,
+            std::sync::Arc::new(warp_station_core::settings::SettingsService::at(
+                scratch.clone(),
+            )),
+        )
+    });
+    let handle = cx.open_window(
+        gpui::size(gpui::px(1400.), gpui::px(2400.)),
+        |window, cx| SettingsPage::new(store, window, cx),
+    );
+    let cx = gpui::VisualTestContext::from_window(handle.into(), cx).into_mut();
+    cx.run_until_parked();
+    cx.update(|window, cx| drop(window.draw(cx)));
+    click(cx, "settings-git");
+
+    assert!(
+        cx.debug_bounds("auto-refresh-row").is_some(),
+        "the auto refresh row renders"
+    );
+    for option in [
+        "auto-refresh-off",
+        "auto-refresh-15",
+        "auto-refresh-30",
+        "auto-refresh-60",
+    ] {
+        assert!(cx.debug_bounds(option).is_some(), "{option} renders");
+    }
+
+    let pick = cx.debug_bounds("auto-refresh-15").expect("15m button");
+    cx.simulate_click(pick.center(), gpui::Modifiers::default());
+    cx.run_until_parked();
+    cx.update(|window, cx| drop(window.draw(cx)));
+    // the pick commits itself — the page has no Save button
+    let json = std::fs::read_to_string(&scratch).expect("saved settings");
+    assert!(
+        json.contains("\"AutoRefreshMinutes\": 15"),
+        "the interval persisted (got {json})"
+    );
+
+    // the focus-regain sync switch sits under it and commits at once
+    assert!(
+        cx.debug_bounds("settings-row-Sync when window activates")
+            .is_some(),
+        "the focus sync switch row renders"
+    );
+    let row = cx
+        .debug_bounds("settings-row-Sync when window activates")
+        .expect("focus sync row bounds");
+    cx.simulate_click(
+        gpui::point(row.right() - gpui::px(20.), row.center().y),
+        gpui::Modifiers::default(),
+    );
+    cx.run_until_parked();
+    cx.update(|window, cx| drop(window.draw(cx)));
+    let json = std::fs::read_to_string(&scratch).expect("saved settings");
+    assert!(
+        json.contains("\"SyncOnFocus\": true"),
+        "the focus sync toggle persisted (got {json})"
+    );
+
+    let _ = std::fs::remove_dir_all(&home);
+}
+
 /// The AI features card's prompt-template manager. Templates live under the
 /// scratch HOME: the three rows render un-customized, a body modified
 /// straight on disk badges after the page re-opens, Edit round-trips

@@ -326,13 +326,37 @@ impl Render for ChangesView {
                 .update(cx, |state, cx| state.set_value(draft.as_str(), window, cx));
             if self.auto_commit_after_draft && !draft.is_empty() {
                 self.auto_commit_after_draft = false;
-                auto_commit_text = Some(draft);
+                // the user may have unstaged everything while the run was in
+                // flight: keep the message, but do not fire a commit that can
+                // only fail
+                let staged = self
+                    .store
+                    .read(cx)
+                    .changes()
+                    .is_some_and(|snapshot| !snapshot.staged_files.is_empty());
+                if staged {
+                    auto_commit_text = Some(draft);
+                }
             }
         }
         if let Some(message) = auto_commit_text {
             self.store.update(cx, |store, cx| {
                 store.run_git(GitAction::Commit(message), cx)
             });
+        }
+        // a generate-and-commit click stays armed only while this repo's run
+        // is actually in flight: a failed or cancelled wand, a run kicked for
+        // another repo, or a run that never started must not leave a commit
+        // armed for some later draft to fire
+        if self.auto_commit_after_draft {
+            let generating_here = {
+                let store = self.store.read(cx);
+                store.wand_busy == Some(crate::net::WandKind::Commit)
+                    && store.wand_repo == store.selected_repo
+            };
+            if !generating_here {
+                self.auto_commit_after_draft = false;
+            }
         }
         if let Some((key, patch)) = self
             .store
@@ -386,10 +410,13 @@ impl Render for ChangesView {
         let clean = groups.0.is_empty()
             && groups.1.is_empty()
             && self.store.read(cx).changes_loaded_for.is_some();
+        // only a staged file can be committed: an unstaged-only tree keeps the
+        // file list but grows no commit box (a commit here could only fail)
+        let committing = self.store.read(cx).running_job() == Some("commit");
         let body = if clean {
             clean_state(&self.store, cx)
         } else {
-            let files = div()
+            let mut files = div()
                 .w(px(warpui_kit_core::shell::scaled(FILE_COLUMN_W)))
                 .flex_shrink_0()
                 .h_full()
@@ -399,8 +426,12 @@ impl Render for ChangesView {
                 .bg(theme::surface())
                 .border_r_1()
                 .border_color(theme::hairline())
-                .child(self.render_file_list(&groups, cx))
-                .child(self.render_commit_card(busy, window, cx));
+                .child(self.render_file_list(&groups, cx));
+            files = if groups.0.is_empty() && !committing {
+                files.child(stage_hint())
+            } else {
+                files.child(self.render_commit_card(busy, window, cx))
+            };
             div()
                 .flex_1()
                 .min_h_0()
@@ -1360,14 +1391,18 @@ impl ChangesView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> gpui::AnyElement {
-        let wand_active = {
+        let (wand_active, wand_busy_elsewhere) = {
             let state = self.store.read(cx);
-            state.wand_busy == Some(crate::net::WandKind::Commit)
-                && state.wand_repo.as_deref() == state.selected_repo.as_deref()
+            let active = state.wand_busy == Some(crate::net::WandKind::Commit)
+                && state.wand_repo.as_deref() == state.selected_repo.as_deref();
+            (active, state.wand_busy.is_some() && !active)
         };
         let wand_on = self.store.read(cx).wand_available();
         let message_empty = self.commit_message.read(cx).value().trim().is_empty();
-        let generate_and_commit = message_empty && wand_on;
+        // a run already going for another repo owns the one wand slot: this
+        // box must not promise a generation that would be refused
+        let can_generate = wand_on && !wand_busy_elsewhere;
+        let generate_and_commit = message_empty && can_generate;
 
         let mut card = div()
             .w_full()
@@ -1411,7 +1446,7 @@ impl ChangesView {
                         .h_full(),
                     )
                     // the corner wand: overlay inside the message box
-                    .when(wand_on, |box_area| {
+                    .when(wand_on && !wand_busy_elsewhere, |box_area| {
                         let store = self.store.clone();
                         box_area.child(
                             div()
@@ -1444,13 +1479,10 @@ impl ChangesView {
             let store = self.store.clone();
             let message = self.commit_message.clone();
             let this = cx.entity();
-            let (generating, committing) = {
-                let store = self.store.read(cx);
-                (
-                    store.wand_busy == Some(crate::net::WandKind::Commit),
-                    store.running_job() == Some("commit"),
-                )
-            };
+            let (generating, committing) = (
+                wand_active,
+                self.store.read(cx).running_job() == Some("commit"),
+            );
             let working = generating || committing;
             let label = if generating {
                 "Generating…"
@@ -1461,7 +1493,7 @@ impl ChangesView {
             } else {
                 "Commit"
             };
-            let can_commit = !busy && (!message_empty || wand_on);
+            let can_commit = !busy && (!message_empty || can_generate);
             let color = if can_commit {
                 theme::on_accent()
             } else {
@@ -1469,6 +1501,7 @@ impl ChangesView {
             };
             div()
                 .id("commit-button")
+                .debug_selector(|| "commit-button".into())
                 .a11y_button(label)
                 .cursor_pointer()
                 .flex_1()
@@ -1487,9 +1520,20 @@ impl ChangesView {
                     if busy {
                         return;
                     }
+                    // the box only exists with staged files, but the state may
+                    // have changed since this frame was built
+                    let staged = store
+                        .read(cx)
+                        .changes()
+                        .is_some_and(|snapshot| !snapshot.staged_files.is_empty());
+                    if !staged {
+                        return;
+                    }
                     let text = message.read(cx).value().to_string();
                     if text.trim().is_empty() {
-                        if !wand_on {
+                        // no wand, or another repo's run owns the slot: there
+                        // is nothing this click could start
+                        if !can_generate {
                             return;
                         }
                         // empty box: generate first; the drained draft
@@ -1534,6 +1578,7 @@ impl ChangesView {
                 )
         });
         if wand_active {
+            let store = self.store.clone();
             button_row = button_row.child(
                 div()
                     .flex()
@@ -1546,7 +1591,23 @@ impl ChangesView {
                         px(theme::icon_small() - 1.),
                         theme::blue_bright(),
                     ))
-                    .child("working…"),
+                    .child("working…")
+                    // the one run can hang on a dead harness; never leave the
+                    // box without a way out
+                    .child(
+                        div()
+                            .id("wand-cancel")
+                            .debug_selector(|| "wand-cancel".into())
+                            .a11y_button("Cancel generation")
+                            .cursor_pointer()
+                            .ml_2()
+                            .px_1p5()
+                            .rounded(px(4.))
+                            .text_color(theme::text_dim())
+                            .hover(|s| s.bg(theme::hover_bg()).text_color(theme::text()))
+                            .on_click(move |_, _, cx| store.update(cx, |s, cx| s.cancel_wand(cx)))
+                            .child("Cancel"),
+                    ),
             );
         }
         card = card.child(button_row);
@@ -1643,7 +1704,14 @@ impl ChangesView {
                 })
         };
 
-        let bar = div()
+        // Only the verbs that can do something right now: a pull with nothing
+        // behind, a push with nothing ahead, or a fetch with no remote is not
+        // offered at all. The running/just-landed button stays visible so its
+        // progress and past-tense confirmation are not yanked away.
+        let on_branch = branch.as_deref().is_some_and(|name| name != "(detached)");
+        let visible =
+            |label: &str, relevant: bool| relevant || job == Some(label) || finished == Some(label);
+        let mut bar = div()
             .flex_shrink_0()
             .h(px(TOOLBAR_H))
             .px_2()
@@ -1653,45 +1721,68 @@ impl ChangesView {
             .gap_2()
             .border_b_1()
             .border_color(theme::hairline())
-            .child(div().w(px(BRANCH_W)).child(self.branch_picker.clone()))
-            .child(action(
+            .child(div().w(px(BRANCH_W)).child(self.branch_picker.clone()));
+        if visible("fetch", has_remote) {
+            bar = bar.child(action(
                 "icons/icon-cloud-download.svg",
                 "Fetch",
                 !busy,
                 None,
                 GitAction::Fetch,
-            ))
-            .child(action(
+            ));
+        }
+        if visible("pull", has_remote && on_branch && to_pull > 0) {
+            bar = bar.child(action(
                 "icons/icon-arrow-down.svg",
                 "Pull",
-                has_remote && !busy,
+                !busy,
                 (to_pull > 0).then_some((to_pull, theme::BEHIND)),
                 GitAction::Pull,
             ));
-        let bar = match branch.filter(|_| !published) {
-            Some(branch) => bar.child(action(
-                "icons/icon-arrow-up.svg",
-                "Publish",
-                has_remote && !busy,
+        }
+        match branch.clone() {
+            // a branch the remote does not have yet: publishing is the move
+            Some(name)
+                if has_remote
+                    && on_branch
+                    && (!published || job == Some("publish") || finished == Some("publish")) =>
+            {
+                bar = bar.child(action(
+                    "icons/icon-arrow-up.svg",
+                    "Publish",
+                    !busy,
+                    None,
+                    GitAction::Publish { branch: name },
+                ));
+            }
+            Some(_)
+                if has_remote
+                    && on_branch
+                    && (to_push > 0 || job == Some("push") || finished == Some("push")) =>
+            {
+                bar = bar.child(action(
+                    "icons/icon-arrow-up.svg",
+                    "Push",
+                    !busy,
+                    (to_push > 0).then_some((to_push, theme::AHEAD)),
+                    GitAction::Push,
+                ));
+            }
+            _ => {}
+        }
+        if visible(
+            "sync",
+            has_remote && on_branch && (to_pull > 0 || to_push > 0),
+        ) {
+            bar = bar.child(action(
+                "icons/icon-refresh.svg",
+                "Sync",
+                !busy,
                 None,
-                GitAction::Publish { branch },
-            )),
-            None => bar.child(action(
-                "icons/icon-arrow-up.svg",
-                "Push",
-                has_remote && published && !busy,
-                (to_push > 0).then_some((to_push, theme::AHEAD)),
-                GitAction::Push,
-            )),
-        };
-        bar.child(action(
-            "icons/icon-refresh.svg",
-            "Sync",
-            has_remote && !busy,
-            None,
-            GitAction::Sync,
-        ))
-        .into_any_element()
+                GitAction::Sync,
+            ));
+        }
+        bar.into_any_element()
     }
 }
 
@@ -1773,6 +1864,23 @@ fn section_header(
         header = header.child(crate::ui::with_tooltip(button, show_tooltips, action_label));
     }
     header
+}
+
+/// The no-staged-files footer: the commit box only exists when a commit can
+/// succeed, so this says why it is missing instead of leaving the column
+/// blank.
+fn stage_hint() -> gpui::AnyElement {
+    div()
+        .debug_selector(|| "changes-stage-hint".into())
+        .flex_shrink_0()
+        .px_3()
+        .py_2()
+        .border_t_1()
+        .border_color(theme::hairline())
+        .text_size(px(theme::font_meta()))
+        .text_color(theme::text_muted())
+        .child("Stage changes to write a commit")
+        .into_any_element()
 }
 
 /// The clean working tree: what is true, plus the last commit so the tab still

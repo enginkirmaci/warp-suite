@@ -104,15 +104,47 @@ pub fn summarize_sync_error(stderr: &str) -> Option<String> {
     fallback
 }
 
-pub async fn checkout(folder: &Path, branch: &str) -> GitOutcome {
-    let result = run_git(
-        folder,
-        &["checkout".into(), branch.into()],
-        PROCESS_TIMEOUT,
-        None,
-    )
-    .await;
-    match result {
+/// Check out a branch, tag or commit. A remote-tracking pick (`origin/main`)
+/// checks out its local tracking equivalent instead of detaching HEAD:
+/// the local branch when it exists, otherwise a new one tracking the remote.
+/// Anything else — a commit hash, a tag, a local branch — is a plain
+/// `git checkout`, so the history drill-down's commit checkout still detaches.
+pub async fn checkout(folder: &Path, target: &str) -> GitOutcome {
+    // the ref lookup is a git2 read; keep it off the async worker
+    let remote_pick = {
+        let folder = folder.to_path_buf();
+        let target = target.to_string();
+        tokio::task::spawn_blocking(move || read::remote_tracking_local(&folder, &target))
+            .await
+            .ok()
+            .flatten()
+    };
+    if let Some((local, exists)) = remote_pick {
+        return if exists {
+            checkout_ref(folder, &local).await
+        } else {
+            run_checkout(
+                folder,
+                &[
+                    "checkout".into(),
+                    "-b".into(),
+                    local,
+                    "--track".into(),
+                    target.into(),
+                ],
+            )
+            .await
+        };
+    }
+    checkout_ref(folder, target).await
+}
+
+async fn checkout_ref(folder: &Path, target: &str) -> GitOutcome {
+    run_checkout(folder, &["checkout".into(), target.into()]).await
+}
+
+async fn run_checkout(folder: &Path, args: &[String]) -> GitOutcome {
+    match run_git(folder, args, PROCESS_TIMEOUT, None).await {
         Ok(r) => GitOutcome::from(&r),
         Err(err) => GitOutcome {
             ok: false,
