@@ -15,7 +15,7 @@
 //! ```
 
 use gpui::prelude::*;
-use gpui::{Div, ElementId, FontWeight, SharedString, Stateful, div, px};
+use gpui::{AnyElement, Div, ElementId, FontWeight, SharedString, Stateful, canvas, div, px};
 
 use crate::a11y::A11y as _;
 use crate::icon::icon;
@@ -140,6 +140,56 @@ pub fn app_link(
             px(scaled(18.)),
             palette::text_dim(),
         ))
+}
+
+/// The titlebar zoom button's glyph: the window-state mark, one square while
+/// windowed and overlapping squares (the back one's top and right edges
+/// peeking out) while maximized. An svg can't say it — the restore state is
+/// two squares where only half of the back one shows — so it is painted, at
+/// the compact size the family's window controls have always carried. The
+/// color comes in from the caller: warp-agent doubles the stroke as its
+/// server-health gauge, the others pass the muted chrome ink.
+pub fn zoom_glyph(maximized: bool, color: gpui::Rgba) -> AnyElement {
+    let stroke = scaled(1.1);
+    let s = scaled(9.5);
+    // one Bounds per painted edge: [x, y, w, h] in the 14px icon box
+    let mut edges: Vec<(f32, f32, f32, f32)> = Vec::new();
+    if maximized {
+        // back square offset up-right; only its top and right edges peek out
+        edges.push((scaled(3.5), scaled(1.), s, stroke));
+        edges.push((scaled(3.5) + s - stroke, scaled(1.), stroke, s));
+        // front square offset down-left
+        let (fx, fy) = (scaled(1.25), scaled(4.));
+        edges.push((fx, fy, s, stroke));
+        edges.push((fx, fy + s - stroke, s, stroke));
+        edges.push((fx, fy, stroke, s));
+        edges.push((fx + s - stroke, fy, stroke, s));
+    } else {
+        let (x, y) = (scaled(2.25), scaled(2.25));
+        edges.push((x, y, s, stroke));
+        edges.push((x, y + s - stroke, s, stroke));
+        edges.push((x, y, stroke, s));
+        edges.push((x + s - stroke, y, stroke, s));
+    }
+    let gauge = canvas(
+        move |_, _, _| edges,
+        move |bounds, edges, window, _| {
+            for (ex, ey, ew, eh) in edges {
+                window.paint_quad(gpui::quad(
+                    gpui::Bounds {
+                        origin: gpui::point(bounds.origin.x + px(ex), bounds.origin.y + px(ey)),
+                        size: gpui::size(px(ew), px(eh)),
+                    },
+                    gpui::Corners::all(px(0.)),
+                    color,
+                    gpui::Edges::all(px(0.)),
+                    gpui::transparent_black(),
+                    gpui::BorderStyle::default(),
+                ));
+            }
+        },
+    );
+    div().size(px(scaled(14.))).child(gauge).into_any_element()
 }
 
 /// The app's sections. A spacer child pins Settings to the bottom.

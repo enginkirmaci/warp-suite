@@ -870,6 +870,26 @@ pub(crate) fn window_button(
     show_tooltip: bool,
     on_click: impl Fn(&gpui::ClickEvent, &mut Window, &mut App) + 'static,
 ) -> impl gpui::IntoElement {
+    window_button_glyph(
+        id,
+        hover_bg,
+        tooltip,
+        show_tooltip,
+        on_click,
+        icon(icon_path, px(theme::icon_medium()), theme::text_muted()).into_any_element(),
+    )
+}
+
+/// [`window_button`] carrying a prepared glyph: the zoom button passes the
+/// kit's window-state glyph so the family's maximize/restore reads alike.
+pub(crate) fn window_button_glyph(
+    id: &'static str,
+    hover_bg: gpui::Hsla,
+    tooltip: &'static str,
+    show_tooltip: bool,
+    on_click: impl Fn(&gpui::ClickEvent, &mut Window, &mut App) + 'static,
+    glyph: gpui::AnyElement,
+) -> impl gpui::IntoElement {
     div()
         .id(id)
         .debug_selector(move || id.into())
@@ -891,11 +911,7 @@ pub(crate) fn window_button(
         .when(show_tooltip, |d| {
             d.tooltip(crate::ui::tooltip_text(tooltip))
         })
-        .child(icon(
-            icon_path,
-            px(theme::icon_medium()),
-            theme::text_muted(),
-        ))
+        .child(glyph)
 }
 
 /// A title bar icon button: a control island inside the drag region.
@@ -994,13 +1010,8 @@ impl MainWindow {
                         show_tooltips,
                         |_, window, _| window.minimize_window(),
                     ))
-                    .child(window_button(
+                    .child(window_button_glyph(
                         "zoom",
-                        if window.is_maximized() {
-                            "icons/icon-window-restore.svg"
-                        } else {
-                            "icons/icon-window-maximize.svg"
-                        },
                         theme::hover_bg().into(),
                         if window.is_maximized() {
                             "Restore"
@@ -1014,6 +1025,7 @@ impl MainWindow {
                             // re-render so the maximize/restore glyph keeps up
                             cx.notify();
                         }),
+                        shell::zoom_glyph(window.is_maximized(), theme::text_muted()),
                     ))
                     .child(window_button(
                         "close-window",
