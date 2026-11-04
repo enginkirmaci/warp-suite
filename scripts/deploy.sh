@@ -12,7 +12,19 @@
 set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 root="$(cd "$here/.." && pwd)"
-repo="enginkirmaci/warp-suite"
+# the GitHub slug releases live under: derived from origin (github remotes
+# only — anything else is undecidable), WARP_SUITE_REPO overrides, and the
+# historical default stands in last
+repo="${WARP_SUITE_REPO:-}"
+if [ -z "$repo" ]; then
+    url="$(git -C "$root" remote get-url origin 2>/dev/null || true)"
+    case "$url" in
+        *github.com[:/]*)
+            repo="$(printf '%s' "$url" | sed -E 's#.*github\.com[:/]##; s#\.git$##')"
+            ;;
+    esac
+fi
+[ -n "$repo" ] || repo="enginkirmaci/warp-suite"
 
 mode=""
 tag="latest"

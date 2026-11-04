@@ -65,7 +65,9 @@ export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$root/.build/target}"
 suite_sha=""
 if git -C "$root" rev-parse HEAD >/dev/null 2>&1; then
     suite_sha="$(git -C "$root" rev-parse HEAD)"
-    [ -z "$(git -C "$root" status --porcelain -- apps kits 2>/dev/null)" ] || suite_sha="$suite_sha-dirty"
+    # the whole tree, not just apps/ and kits/: the deliverable also depends
+    # on scripts/, apps.toml, Cargo.toml and Cargo.lock
+    [ -z "$(git -C "$root" status --porcelain 2>/dev/null)" ] || suite_sha="$suite_sha-dirty"
 fi
 
 : > "$bundle/REVISIONS.txt"
@@ -115,8 +117,14 @@ while read -r app; do
     sed "s|^Exec=.*|Exec=__WARP_SUITE_BIN__/$bin_name|" "$desktop_src" \
         > "$bundle/applications/$app.desktop"
 
-    for f in "$app_dir/packaging/linux/icons/$icon_prefix"-*.png; do
-        [ -e "$f" ] || continue
+    # a missing or typo'd icon_prefix used to yield a silent iconless bundle;
+    # a missing .desktop was already a hard error, icons are too now
+    icon_glob="$app_dir/packaging/linux/icons/$icon_prefix"-*.png
+    compgen -G "$icon_glob" >/dev/null || {
+        echo "no icons match $icon_glob (check icon_prefix in apps.toml)" >&2
+        exit 1
+    }
+    for f in $icon_glob; do
         size="$(basename "$f" .png)"; size="${size#"$icon_prefix"-}"
         mkdir -p "$bundle/icons/hicolor/${size}x${size}/apps"
         cp "$f" "$bundle/icons/hicolor/${size}x${size}/apps/$icon_prefix.png"

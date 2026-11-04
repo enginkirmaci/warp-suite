@@ -26,6 +26,14 @@ $ErrorActionPreference = 'Stop'
 
 $here = $PSScriptRoot
 $root = Split-Path -Parent $here
+# the GitHub slug releases live under: derived from origin, WARP_SUITE_REPO
+# overrides, and the historical default stands in for anything undecidable
+if ($env:WARP_SUITE_REPO) {
+    $repo = $env:WARP_SUITE_REPO
+} else {
+    $url = & git -C $root remote get-url origin 2>$null
+    $repo = if ($url -match 'github\.com[:/](.+?)(\.git)?$') { $Matches[1] } else { 'enginkirmaci/warp-suite' }
+}
 $programs = Join-Path $env:LOCALAPPDATA 'Programs'
 $stateDir = Join-Path $env:LOCALAPPDATA 'warp-suite'
 $record = Join-Path $stateDir 'installed.txt'
@@ -71,7 +79,7 @@ function Install-Portable {
 }
 
 function Install-Release {
-    $api = 'https://api.github.com/repos/enginkirmaci/warp-suite/releases'
+    $api = "https://api.github.com/repos/$repo/releases"
     $url = if ($Tag -eq 'latest') { "$api/latest" } else { "$api/tags/$Tag" }
     if ($DryRun) { Write-Host "+ download release assets from $url"; return }
 

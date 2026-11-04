@@ -1,0 +1,13 @@
+name: 'GPUI build dependencies'
+description: 'The apt packages GPUI''s Linux backend needs, plus jq for the build scripts. One copy — the workflows used to repeat this list three times.'
+runs:
+  using: composite
+  steps:
+    - name: Install GPUI build dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends \
+          build-essential pkg-config jq \
+          libwayland-dev libxkbcommon-dev libxkbcommon-x11-dev libxcb1-dev \
+          libvulkan-dev libfontconfig1-dev
+      shell: bash
