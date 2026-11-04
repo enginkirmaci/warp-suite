@@ -917,8 +917,8 @@ async fn net_main(cmd_rx: Receiver<NetCommand>, evt_tx: Sender<UiEvent>) {
                         &warp_station_core::opencode::format_repositories_block(&activities),
                     );
 
-                    // the summary is a warp-agent General-workspace chat: it
-                    // stays visible there after the note is written
+                    // the summary runs silently in warp-agent's General
+                    // workspace: the note lands here, nothing surfaces there
                     let run = match warp_station_core::warp::connect_or_launch(
                         std::path::Path::new(&warp_exe),
                         None,
@@ -934,6 +934,7 @@ async fn net_main(cmd_rx: Receiver<NetCommand>, evt_tx: Sender<UiEvent>) {
                                     warp_station_core::warp::GENERAL,
                                     &prompt,
                                     &choice,
+                                    true,
                                     move |line| {
                                         let _ = logs.send_blocking(UiEvent::WandLog {
                                             wand_id: log_id.clone(),
@@ -1069,8 +1070,9 @@ async fn net_main(cmd_rx: Receiver<NetCommand>, evt_tx: Sender<UiEvent>) {
                     .await
                     .unwrap_or_default();
 
-                    // the turn runs as a warp-agent chat in this repo's
-                    // workspace — visible there while it works
+                    // the turn runs silently in this repo's warp-agent
+                    // workspace: station shows the wand's progress and result,
+                    // warp-agent's own UI stays untouched
                     let workspace = folder.to_string_lossy().to_string();
                     let result = match warp_station_core::warp::connect_or_launch(
                         std::path::Path::new(&warp_exe),
@@ -1086,6 +1088,7 @@ async fn net_main(cmd_rx: Receiver<NetCommand>, evt_tx: Sender<UiEvent>) {
                                     &workspace,
                                     &prompt,
                                     &choice,
+                                    true,
                                     move |line| {
                                         let _ = logs.send_blocking(UiEvent::WandLog {
                                             wand_id: log_id.clone(),

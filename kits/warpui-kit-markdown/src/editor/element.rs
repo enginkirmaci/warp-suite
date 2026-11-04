@@ -11,13 +11,13 @@ use super::display::{Band, Decor};
 use super::frame::{Frame, LaidBox, LaidLine, Rect, TableStrip};
 use super::icons::{self, Icon};
 use super::layout::{Piece, link_icon_width, remove_gap};
-use super::state::{self, KEY_CONTEXT, LiveEditorState, PasteHandler};
+use super::state::{self, KEY_CONTEXT, CodeBlock, LiveEditorState, PasteHandler};
 use super::theme::LiveColors;
 use gpui::prelude::*;
 use gpui::{
-    App, Bounds, ClipboardItem, ContentMask, Corners, CursorStyle, Element, ElementId, Entity,
-    GlobalElementId, Hitbox, HitboxBehavior, Hsla, InspectorElementId, IntoElement, LayoutId,
-    MouseButton, Pixels, Point, RenderOnce, SharedString, Style, TextAlign, TextRun,
+    AnyElement, App, Bounds, ClipboardItem, ContentMask, Corners, CursorStyle, Element, ElementId,
+    Entity, GlobalElementId, Hitbox, HitboxBehavior, Hsla, InspectorElementId, IntoElement,
+    LayoutId, MouseButton, Pixels, Point, RenderOnce, SharedString, Style, TextAlign, TextRun,
     TransformationMatrix, Window, div, fill, font, point, px, quad, relative, size,
 };
 use gpui_kit::base::input::{Copy, Cut, Paste, SelectAll};
@@ -25,6 +25,7 @@ use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::component::Sizable as _;
 use gpui_kit::component::input::Input;
 use gpui_kit::component::menu::ContextMenuExt as _;
+use std::collections::HashSet;
 use std::ops::Range;
 use std::panic::Location;
 use std::rc::Rc;
@@ -54,6 +55,11 @@ const BUTTON_ICON_SIZE: f32 = 1.;
 /// The widest gap between strikes of emboldened text, in logical px: below
 /// the quarter-pixel glyph positions, so the strokes merge.
 const STRIKE_STEP: f32 = 0.35;
+/// A read-only overlay button's slot between the code well's top-right
+/// corner and its language label, in em: the label shifts left of it.
+const OVERLAY_SLOT_EM: f32 = 2.25;
+/// A read-only overlay button's inset from the band corner, in logical px.
+const OVERLAY_INSET: f32 = 8.;
 
 /// The Obsidian-style live markdown editor; give it an
 /// `Entity<`[`LiveEditorState`]`>`.
@@ -64,7 +70,14 @@ pub struct LiveEditor {
     text_size: Option<Pixels>,
     surface: Option<Hsla>,
     paste_handler: Option<PasteHandler>,
+    read_only: Option<bool>,
+    fit_content: Option<bool>,
+    code_overlay: Option<CodeOverlay>,
 }
+
+/// A host element for a code block's top-right corner, read-only mode only:
+/// the kit positions it over the block's painted band.
+pub(crate) type CodeOverlay = Rc<dyn Fn(&CodeBlock) -> Option<AnyElement>>;
 
 impl LiveEditor {
     pub fn new(state: &Entity<LiveEditorState>) -> Self {
@@ -74,6 +87,9 @@ impl LiveEditor {
             text_size: None,
             surface: None,
             paste_handler: None,
+            read_only: None,
+            fit_content: None,
+            code_overlay: None,
         }
     }
 
@@ -104,28 +120,78 @@ impl LiveEditor {
         self.paste_handler = Some(Rc::new(handler));
         self
     }
+
+    /// Rendered-surface mode: no caret, no text input, no formatting, task
+    /// boxes inert — but selection and copy, clickable links, highlighted
+    /// code and the full live rendering stay. The surface takes no focus, so
+    /// clicking it never steals the keyboard from a field; copy goes through
+    /// the context menu and through [`read_only_selection_text`] on the
+    /// host's Ctrl+C fallback.
+    pub fn read_only(mut self, read_only: bool) -> Self {
+        self.read_only = Some(read_only);
+        self
+    }
+
+    /// Size the element to its content instead of its container: the state's
+    /// [`LiveEditorState::content_height`] follows the laid-out document and
+    /// notifies on moves, so a scrolling host wraps the editor in it.
+    pub fn fit_content(mut self, fit_content: bool) -> Self {
+        self.fit_content = Some(fit_content);
+        self
+    }
+
+    /// One element per code block, placed in its band's top-right corner —
+    /// a copy button. Read-only mode only: the live editor has no corners a
+    /// host would decorate. The block's language label shifts left of the
+    /// slot; the returned element owns its (globally unique) element id.
+    pub fn code_block_overlay(
+        mut self,
+        overlay: impl Fn(&CodeBlock) -> Option<AnyElement> + 'static,
+    ) -> Self {
+        self.code_overlay = Some(Rc::new(overlay));
+        self
+    }
 }
 
 impl RenderOnce for LiveEditor {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
-        let state = self.state;
-        let handler = self.paste_handler;
-        let text_size = self.text_size;
-        let surface = self.surface;
+        let Self {
+            state,
+            aria_label,
+            text_size,
+            surface,
+            paste_handler,
+            read_only,
+            fit_content,
+            code_overlay,
+        } = self;
         state.update(cx, |editor, cx| {
-            editor.set_paste_handler(handler);
+            editor.set_paste_handler(paste_handler);
             editor.set_surface(surface, cx);
             if let Some(text_size) = text_size {
                 editor.set_text_size(text_size, cx);
             }
+            if let Some(read_only) = read_only {
+                editor.set_read_only(read_only, cx);
+            }
+            if let Some(fit_content) = fit_content {
+                editor.set_fit_content(fit_content, cx);
+            }
         });
         let editor = state.read(cx);
+        let read_only = editor.read_only();
         let focus = editor.focus_handle().clone();
         let scroll = editor.scroll_handle();
-        let label = self.aria_label.unwrap_or_else(|| "Note".into());
+        let hover_state = state.clone();
+
+        if read_only {
+            return Self::render_read_only(state, aria_label, code_overlay, window, cx);
+        }
+
+        let label = aria_label.unwrap_or_else(|| "Note".into());
+
         let menu_focus = focus.clone();
         let menu_state = state.clone();
-        let hover_state = state.clone();
         let find_bar = editor.find_bar().open.then(|| find_bar(&state, cx));
         let surface = div()
             .id(ElementId::View(state.entity_id()))
@@ -236,6 +302,116 @@ impl RenderOnce for LiveEditor {
             .size_full()
             .child(surface)
             .children(find_bar)
+            .into_any_element()
+    }
+}
+
+impl LiveEditor {
+    /// The read-only surface: mouse selection, links and scroll, one overlay
+    /// child per visible code block, and a zero-sized focus anchor that
+    /// carries the context menu's actions. The text itself never takes
+    /// focus, so a click on it never moves the keyboard off a host field.
+    fn render_read_only(
+        state: Entity<LiveEditorState>,
+        label: Option<SharedString>,
+        code_overlay: Option<CodeOverlay>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> AnyElement {
+        let editor = state.read(cx);
+        let focus = editor.focus_handle().clone();
+        let scroll = editor.scroll_handle();
+        let viewport = editor.viewport_height();
+
+        // one host element per visible code block, in the band's top-right
+        // corner. Positions come from the last frame's bands minus the
+        // scroll; every scroll tick notifies, so each render re-places them.
+        let mut overlays: Vec<AnyElement> = Vec::new();
+        let mut overlay_blocks: HashSet<usize> = HashSet::new();
+        if let Some(overlay) = &code_overlay {
+            let scroll_top = editor.scroll_top();
+            for block in editor.code_blocks() {
+                let top = block.top - scroll_top;
+                if top + block.height < 0. || top > viewport {
+                    continue;
+                }
+                if let Some(child) = overlay(&block) {
+                    overlay_blocks.insert(block.index);
+                    overlays.push(
+                        div()
+                            .absolute()
+                            .top(px(top + OVERLAY_INSET))
+                            .right(px(OVERLAY_INSET))
+                            .on_mouse_down(MouseButton::Left, |_, _, cx| {
+                                // the press belongs to the button: no text
+                                // selection may start underneath it
+                                cx.stop_propagation();
+                            })
+                            .child(child)
+                            .into_any_element(),
+                    );
+                }
+            }
+        }
+        state.update(cx, |editor, _| {
+            editor.overlay_blocks = overlay_blocks;
+        });
+
+        let menu_focus = focus.clone();
+        let hover_state = state.clone();
+        div()
+            .id(ElementId::View(state.entity_id()))
+            .role(gpui::Role::Document)
+            .aria_label(label.unwrap_or_else(|| "Document".into()))
+            .relative()
+            .size_full()
+            .overflow_hidden()
+            .cursor(CursorStyle::IBeam)
+            .on_mouse_down(
+                MouseButton::Left,
+                window.listener_for(&state, LiveEditorState::mouse_down),
+            )
+            .on_mouse_up(
+                MouseButton::Left,
+                window.listener_for(&state, LiveEditorState::mouse_up),
+            )
+            .on_mouse_up_out(
+                MouseButton::Left,
+                window.listener_for(&state, LiveEditorState::mouse_up),
+            )
+            .on_mouse_move(window.listener_for(&state, LiveEditorState::mouse_move))
+            .on_scroll_wheel(window.listener_for(&state, LiveEditorState::scroll_wheel))
+            .on_hover(move |hovered, _, cx| {
+                if !hovered {
+                    hover_state.update(cx, LiveEditorState::clear_hover);
+                }
+            })
+            .child(LiveSurface {
+                state: state.clone(),
+            })
+            .child(state::scrollbar(&scroll))
+            .children(overlays)
+            .child(
+                // the actions anchor: focusable but zero-sized, so the
+                // auto-focus on mousedown never sees a pointer inside it;
+                // the context menu focuses it before dispatching, which is
+                // all its two actions need
+                div()
+                    .id("live-editor-actions")
+                    .track_focus(&focus)
+                    .absolute()
+                    .top_0()
+                    .left_0()
+                    .size(px(0.))
+                    .on_action(window.listener_for(&state, LiveEditorState::copy))
+                    .on_action(window.listener_for(&state, LiveEditorState::select_all)),
+            )
+            .context_menu(move |menu, _, _| {
+                menu.action_context(menu_focus.clone())
+                    .menu("Copy", Box::new(Copy))
+                    .menu("Select all", Box::new(SelectAll))
+            })
+            .into_any_element()
     }
 }
 
@@ -457,7 +633,11 @@ impl Element for LiveSurface {
         cx: &mut App,
     ) {
         let focus = self.state.read(cx).focus_handle().clone();
-        window.handle_input(&focus, state::input_handler(bounds, self.state.clone()), cx);
+        // read-only registers no platform input handler: the surface takes
+        // no focus, and IME or typed insertions must not reach the document
+        if !self.state.read(cx).read_only() {
+            window.handle_input(&focus, state::input_handler(bounds, self.state.clone()), cx);
+        }
         if let Some(pointer) = self.state.read(cx).pointer() {
             window.set_cursor_style(pointer, &prepared.hitbox);
         }
@@ -535,7 +715,17 @@ impl Painter {
             ));
         }
         for line in &lines {
-            self.paint_decor(line, origin, em, window, cx);
+            // the language label of a code block a host hung an overlay
+            // button on shifts left of the button's slot
+            let label_shift = if line.view.decor.iter().any(|d| matches!(d, Decor::Label(_)))
+                && overlay_code_index(&doc, line.source.start)
+                    .is_some_and(|ix| self.state.read(cx).overlay_blocks.contains(&ix))
+            {
+                em * OVERLAY_SLOT_EM
+            } else {
+                0.
+            };
+            self.paint_decor(line, origin, em, label_shift, window, cx);
             for laid in &line.boxes {
                 self.paint_box(line, laid, origin, window, cx);
             }
@@ -619,6 +809,7 @@ impl Painter {
         line: &LaidLine,
         origin: Point<Pixels>,
         em: f32,
+        label_shift: f32,
         window: &mut Window,
         cx: &mut App,
     ) {
@@ -711,6 +902,7 @@ impl Painter {
                         + point(
                             px(self.frame.column_width
                                 - em * LABEL_INSET_RIGHT
+                                - label_shift
                                 - shaped.width().as_f32()),
                             px(top + em * LABEL_INSET_TOP),
                         );
@@ -1052,6 +1244,19 @@ fn plain_run(len: usize, color: Hsla, cx: &App) -> TextRun {
         underline: None,
         strikethrough: None,
     }
+}
+
+/// The n-th code block containing `byte`, when it is one: a line's label
+/// shifts only for blocks a host overlaid.
+fn overlay_code_index(doc: &crate::live::LiveDocument, byte: usize) -> Option<usize> {
+    let line = doc.line_at(byte);
+    let block = doc.lines.get(line)?.block?;
+    matches!(doc.blocks[block].kind, crate::live::LiveBlockKind::Code { .. }).then(|| {
+        doc.blocks[..block]
+            .iter()
+            .filter(|b| matches!(b.kind, crate::live::LiveBlockKind::Code { .. }))
+            .count()
+    })
 }
 
 /// A paint call that failed cost one glyph or icon this frame; log and go on.

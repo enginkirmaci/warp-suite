@@ -634,6 +634,87 @@ fn read_json<T: for<'de> Deserialize<'de>>(path: &Path) -> Option<T> {
     }
 }
 
+/// Replace `path` with `contents` atomically: a uniquely named temp file next
+/// to the target, then rename over it (atomic on the same volume), so a crash
+/// mid-write never leaves a truncated file behind. Both Warp Station and this
+/// companion read these files; the notes app's writer is the family's
+/// reference, duplicated here rather than reached across apps.
+pub fn write_atomically(path: &Path, contents: &str) -> std::io::Result<()> {
+    if let Some(dir) = path.parent()
+        && !dir.as_os_str().is_empty()
+    {
+        fs::create_dir_all(dir)?;
+    }
+    let file_name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| "file".into());
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let tmp = path.with_file_name(format!("{file_name}.{nanos:x}-{}.tmp", std::process::id()));
+    fs::write(&tmp, contents)?;
+    if let Err(err) = fs::rename(&tmp, path) {
+        // a destination held open without FILE_SHARE_DELETE (an editor) —
+        // drop it and retry once, keeping the temp file (the only surviving
+        // copy) if even that fails
+        if fs::remove_file(path).is_ok() && fs::rename(&tmp, path).is_ok() {
+            return Ok(());
+        }
+        return Err(err);
+    }
+    Ok(())
+}
+
+fn write_json_atomically<T: Serialize>(path: &Path, value: &T) {
+    match serde_json::to_string_pretty(value) {
+        Ok(json) => {
+            if let Err(err) = write_atomically(path, &json) {
+                log::line(&format!("could not write {}: {err}", path.display()));
+            }
+        }
+        Err(err) => log::line(&format!("could not serialize {}: {err}", path.display())),
+    }
+}
+
+/// The engine's one live copy of Settings.json. Reads deref to [`Settings`];
+/// mutations go through [`update`](Self::update), which applies and persists
+/// as one step — a mutation cannot forget its write, and a crash mid-write
+/// cannot truncate the file both implementations read. The settings change
+/// by user action only (rare clicks), so the write rides the mutation
+/// straight through instead of a debounce timer.
+pub struct SettingsStore {
+    path: PathBuf,
+    settings: Settings,
+}
+
+impl SettingsStore {
+    /// Wraps an already-loaded settings value at the given path — the engine
+    /// (Windows-only) takes the `Config`'s read, and the tests aim the store
+    /// at temp files.
+    #[allow(dead_code)]
+    pub(crate) fn at(path: PathBuf, settings: Settings) -> Self {
+        Self { path, settings }
+    }
+
+    /// Applies `mutate` to the live settings and writes the file before
+    /// returning. An unwritable file leaves the in-memory value applied and
+    /// the failure in the log: the engine keeps working this session.
+    pub fn update(&mut self, mutate: impl FnOnce(&mut Settings)) {
+        mutate(&mut self.settings);
+        write_json_atomically(&self.path, &self.settings);
+    }
+}
+
+impl std::ops::Deref for SettingsStore {
+    type Target = Settings;
+
+    fn deref(&self) -> &Settings {
+        &self.settings
+    }
+}
+
 /// Reads `Settings.json`; a missing file gets the .NET app's defaults written
 /// so both implementations start from the same state.
 pub fn load_settings() -> Settings {
@@ -644,15 +725,7 @@ pub fn load_settings() -> Settings {
 
     let settings = Settings::default();
     if !path.exists() {
-        let _ = fs::create_dir_all(snapit_root());
-        if let Ok(json) = serde_json::to_string_pretty(&settings)
-            && let Err(err) = fs::write(&path, json)
-        {
-            log::line(&format!(
-                "could not write the default {}: {err}",
-                path.display()
-            ));
-        }
+        write_json_atomically(&path, &settings);
     }
     settings
 }
@@ -665,16 +738,7 @@ pub fn load_excluded_applications() -> Vec<ExcludedApplication> {
             // The .NET FileOperationService writes an empty default when the
             // file is missing; do the same so both apps share one file.
             if !path.exists() {
-                let _ = fs::create_dir_all(snapit_root());
-                if let Ok(json) =
-                    serde_json::to_string_pretty(&ExcludedApplicationSettings::default())
-                    && let Err(err) = fs::write(&path, json)
-                {
-                    log::line(&format!(
-                        "could not write the default {}: {err}",
-                        path.display()
-                    ));
-                }
+                write_json_atomically(&path, &ExcludedApplicationSettings::default());
             }
             Vec::new()
         }
@@ -965,5 +1029,50 @@ mod tests {
 
         assert!(is_deactivated(&settings, &["\\\\.\\display2".to_string()]));
         assert!(!is_deactivated(&settings, &["\\\\.\\DISPLAY1".to_string()]));
+    }
+
+    #[test]
+    fn atomic_write_replaces_and_leaves_no_temp_files() {
+        let dir = std::env::temp_dir().join(format!("snapit-atomic-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let target = dir.join("note.json");
+        write_atomically(&target, "first").unwrap();
+        write_atomically(&target, "second").unwrap();
+        assert_eq!(fs::read_to_string(&target).unwrap(), "second");
+        let leftovers: Vec<_> = fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|e| e.file_name().to_string_lossy().ends_with(".tmp"))
+            .collect();
+        assert!(
+            leftovers.is_empty(),
+            "no temp files left behind: {leftovers:?}"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn settings_store_updates_persist_and_reload() {
+        let dir = std::env::temp_dir().join(format!("snapit-store-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("Settings.json");
+
+        let mut store = SettingsStore::at(path.clone(), Settings::default());
+        assert!(store.enable_mouse, "the store reads like the settings");
+        store.update(|settings| {
+            settings.enable_mouse = false;
+            settings.mouse_button = MouseButton::Middle;
+        });
+
+        // the mutation is on disk before update returns, as PascalCase JSON
+        // the .NET app also reads
+        let text = fs::read_to_string(&path).unwrap();
+        assert!(text.contains("\"EnableMouse\": false"), "{text}");
+        let reread = SettingsStore::at(path, serde_json::from_str(&text).unwrap());
+        assert!(!reread.enable_mouse);
+        assert_eq!(reread.mouse_button, MouseButton::Middle);
+        let _ = fs::remove_dir_all(&dir);
     }
 }

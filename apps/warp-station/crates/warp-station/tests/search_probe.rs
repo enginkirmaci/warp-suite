@@ -10,6 +10,24 @@ use warp_station::ui::window::MainWindow;
 use warp_station_core::code_search::CodeHit;
 use warp_station_core::repo_store::RepoEntry;
 
+/// Scratch settings for one probe, keyed by the test's name, the pid and a
+/// per-call counter so parallel probes never share a file. Arrangement state
+/// (selection, open tabs, the archive toggle) persists now, so an unisolated
+/// store would read the developer's live arrangement — the first-row probe
+/// flaked on exactly that — and write test choices into the real
+/// ~/.warp/settings.json.
+fn scratch_service(name: &str) -> std::sync::Arc<warp_station_core::settings::SettingsService> {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static SEQ: AtomicU64 = AtomicU64::new(0);
+    let seq = SEQ.fetch_add(1, Ordering::SeqCst);
+    let path = std::env::temp_dir().join(format!(
+        "warp-station-probe-search-{name}-{}-{seq}.json",
+        std::process::id()
+    ));
+    std::fs::write(&path, "{}").expect("scratch settings");
+    std::sync::Arc::new(warp_station_core::settings::SettingsService::at(path))
+}
+
 fn entry(name: &str, path: &str) -> RepoEntry {
     RepoEntry {
         name: name.into(),
@@ -32,8 +50,9 @@ fn entry(name: &str, path: &str) -> RepoEntry {
 
 fn fake_store(cx: &mut TestAppContext) -> gpui::Entity<Store> {
     let (net_tx, _net_rx) = async_channel::unbounded();
-    cx.new(|cx| {
-        let mut store = Store::new(cx, net_tx);
+    cx.new(|_cx| {
+        let mut store =
+            Store::with_settings(net_tx, scratch_service("search-fake_store"));
         // pin the flat layout: the developer's live settings must never
         // re-shape the probes' row math (the grouping probes seed their own
         // scratch-settings store)

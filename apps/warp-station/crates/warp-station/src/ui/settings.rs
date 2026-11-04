@@ -1,9 +1,10 @@
 //! The Settings page: every settings section as a card of labeled inputs and
-//! switches, seeded from the live settings when the page opens. Save writes
-//! the whole graph atomically and live-applies (a scan-related change also
-//! kicks a rescan). The AI features card's harness radio scopes the Model and
-//! Variant pickers to warp-agent's catalog, and it manages the wand prompt
-//! templates.
+//! switches, seeded from the live settings when the page opens. Every
+//! mutation autosaves: a keystroke or toggle schedules a debounced commit
+//! that writes the whole graph atomically and live-applies (a scan-related
+//! change also kicks a rescan), so no Save step exists. The AI card's
+//! harness radio scopes the Model and Variant pickers to warp-agent's
+//! catalog, and it manages the wand prompt templates.
 
 use crate::net::TemplateOp;
 use crate::store::Store;
@@ -11,7 +12,7 @@ use crate::theme;
 use crate::ui::A11y;
 use gpui::prelude::*;
 use gpui::{App, Context, Entity, FontWeight, SharedString, Window, div, px, relative};
-use gpui_kit::component::input::{Editor, EditorState, InputState, TextareaState};
+use gpui_kit::component::input::{Editor, EditorState, InputEvent, InputState, TextareaState};
 use std::cell::RefCell;
 use std::rc::Rc;
 use warpui_kit_core::settings as kit_settings;
@@ -153,6 +154,9 @@ pub struct SettingsPage {
     azure_pat: Entity<InputState>,
     azure_url: Entity<InputState>,
     saved_note: Option<std::time::Instant>,
+    /// The pending debounced commit: a keystroke bumps it, and only the
+    /// newest scheduled timer lands (see schedule_commit).
+    commit_seq: u64,
     /// set by the header back button; MainWindow drains it and swaps pages
     section: Section,
 }
@@ -287,8 +291,51 @@ impl SettingsPage {
             azure_pat: field(window, cx, &repos.azure_dev_ops_pat),
             azure_url: field(window, cx, &repos.azure_dev_ops_url),
             saved_note: None,
+            commit_seq: 0,
             section: Section::General,
         };
+        // The page has no Save button: every text field schedules the
+        // debounced commit on a keystroke (a picker pick writes through
+        // set_value, which stays silent, so those hooks live in the pick
+        // callbacks), and the toggles schedule one as they flip.
+        for field in [
+            &page.notes_store_path,
+            &page.git_folder_pattern,
+            &page.solution_file_pattern,
+            &page.platform_folder_name,
+            &page.max_scan_depth,
+            &page.branch_name_prefix,
+            &page.vscode_executable,
+            &page.vscode_profile,
+            &page.terminal_executable,
+            &page.ide_executable,
+            &page.opencode_executable,
+            &page.deepseek_executable,
+            &page.code_search_executable,
+            &page.snap_it_executable,
+            &page.warp_executable,
+            &page.model,
+            &page.variant,
+            &page.warp_notes_executable,
+            &page.github_executable,
+            &page.azure_pat,
+            &page.azure_url,
+        ] {
+            cx.subscribe(field, |this, _, event: &InputEvent, cx| {
+                if matches!(event, InputEvent::Change) {
+                    this.schedule_commit(cx);
+                }
+            })
+            .detach();
+        }
+        for area in [&page.scan_folders, &page.excluded_folders] {
+            cx.subscribe(area, |this, _, event: &InputEvent, cx| {
+                if matches!(event, InputEvent::Change) {
+                    this.schedule_commit(cx);
+                }
+            })
+            .detach();
+        }
         store.update(cx, |s, cx| s.load_models_for(selected_harness, cx));
         page
     }
@@ -464,6 +511,26 @@ impl SettingsPage {
         self.saved_note = Some(std::time::Instant::now());
         cx.notify();
     }
+
+    /// One commit a beat after the last keystroke: save() re-reads the whole
+    /// page on every schedule but only the newest timer lands, so typing
+    /// costs one settings write and the page never asks for a Save press.
+    /// The toggles and pickers commit at once — they are discrete actions.
+    fn schedule_commit(&mut self, cx: &mut Context<Self>) {
+        self.commit_seq += 1;
+        let seq = self.commit_seq;
+        cx.spawn(async move |this, cx| {
+            cx.background_executor()
+                .timer(std::time::Duration::from_millis(600))
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                if this.commit_seq == seq {
+                    this.save(cx);
+                }
+            });
+        })
+        .detach();
+    }
 }
 
 impl Render for SettingsPage {
@@ -580,11 +647,13 @@ impl Render for SettingsPage {
             })
             // Appearance applies at once and has nothing to save, so its head
             // carries no actions (the prototype: `plain = k === 'appearance'`
-            // drops the Save and Data folder buttons)
+            // drops the Data folder button; the Save button is gone — every
+            // mutation commits itself)
             .when(section != Section::Appearance, |row| {
                 row.child(
                     div()
                         .id("settings-open-folder")
+                        .debug_selector(|| "settings-open-folder".into())
                         .a11y_button("Open data folder")
                         .cursor_pointer()
                         .flex_shrink_0()
@@ -615,7 +684,6 @@ impl Render for SettingsPage {
                         ))
                         .child("Data folder"),
                 )
-                .child(save_button(cx))
             });
 
         let rows = self.section_rows(section, window, cx);
@@ -673,6 +741,7 @@ impl SettingsPage {
                     rows.is_empty(),
                     cx.listener(|this, _, _, cx| {
                         this.start_at_boot = !this.start_at_boot;
+                        this.save(cx);
                         cx.notify();
                     }),
                 ));
@@ -684,6 +753,7 @@ impl SettingsPage {
                     rows.is_empty(),
                     cx.listener(|this, _, _, cx| {
                         this.start_minimized = !this.start_minimized;
+                        this.save(cx);
                         cx.notify();
                     }),
                 ));
@@ -695,6 +765,7 @@ impl SettingsPage {
                     rows.is_empty(),
                     cx.listener(|this, _, _, cx| {
                         this.show_tooltips = !this.show_tooltips;
+                        this.save(cx);
                         cx.notify();
                     }),
                 ));
@@ -813,6 +884,7 @@ impl SettingsPage {
                     rows.is_empty(),
                     cx.listener(|this, _, _, cx| {
                         this.group_by_root = !this.group_by_root;
+                        this.save(cx);
                         cx.notify();
                     }),
                 ));
@@ -838,6 +910,7 @@ impl SettingsPage {
                     rows.is_empty(),
                     cx.listener(|this, _, _, cx| {
                         this.auto_fetch_only_focused = !this.auto_fetch_only_focused;
+                        this.save(cx);
                         cx.notify();
                     }),
                 ));
@@ -851,6 +924,7 @@ impl SettingsPage {
                     rows.is_empty(),
                     cx.listener(|this, _, _, cx| {
                         this.enable_visual_studio = !this.enable_visual_studio;
+                        this.save(cx);
                         cx.notify();
                     }),
                 ));
@@ -862,6 +936,7 @@ impl SettingsPage {
                     rows.is_empty(),
                     cx.listener(|this, _, _, cx| {
                         this.enable_vscode = !this.enable_vscode;
+                        this.save(cx);
                         cx.notify();
                     }),
                 ));
@@ -887,6 +962,7 @@ impl SettingsPage {
                     rows.is_empty(),
                     cx.listener(|this, _, _, cx| {
                         this.enable_terminal = !this.enable_terminal;
+                        this.save(cx);
                         cx.notify();
                     }),
                 ));
@@ -912,6 +988,7 @@ impl SettingsPage {
                     rows.is_empty(),
                     cx.listener(|this, _, _, cx| {
                         this.enable_code_search = !this.enable_code_search;
+                        this.save(cx);
                         cx.notify();
                     }),
                 ));
@@ -931,6 +1008,7 @@ impl SettingsPage {
                         rows.is_empty(),
                         cx.listener(|this, _, _, cx| {
                             this.snap_it_auto_start = !this.snap_it_auto_start;
+                            this.save(cx);
                             cx.notify();
                         }),
                     ));
@@ -951,6 +1029,7 @@ impl SettingsPage {
                     rows.is_empty(),
                     cx.listener(|this, _, _, cx| {
                         this.enable_opencode = !this.enable_opencode;
+                        this.save(cx);
                         cx.notify();
                     }),
                 ));
@@ -970,6 +1049,7 @@ impl SettingsPage {
                     rows.is_empty(),
                     cx.listener(|this, _, _, cx| {
                         this.enable_deepseek = !this.enable_deepseek;
+                        this.save(cx);
                         cx.notify();
                     }),
                 ));
@@ -990,6 +1070,7 @@ impl SettingsPage {
                     rows.is_empty(),
                     cx.listener(|this, _, _, cx| {
                         this.warp_enabled = !this.warp_enabled;
+                        this.save(cx);
                         cx.notify();
                     }),
                 ));
@@ -1031,6 +1112,7 @@ impl SettingsPage {
                     rows.is_empty(),
                     cx.listener(|this, _, _, cx| {
                         this.warp_notes_enabled = !this.warp_notes_enabled;
+                        this.save(cx);
                         cx.notify();
                     }),
                 ));
@@ -1049,6 +1131,7 @@ impl SettingsPage {
                     rows.is_empty(),
                     cx.listener(|this, _, _, cx| {
                         this.enable_github = !this.enable_github;
+                        this.save(cx);
                         cx.notify();
                     }),
                 ));
@@ -1067,6 +1150,7 @@ impl SettingsPage {
                     rows.is_empty(),
                     cx.listener(|this, _, _, cx| {
                         this.enable_azure = !this.enable_azure;
+                        this.save(cx);
                         cx.notify();
                     }),
                 ));
@@ -1320,26 +1404,6 @@ impl SettingsPage {
     }
 }
 
-fn save_button(cx: &mut Context<SettingsPage>) -> gpui::AnyElement {
-    div()
-        .id("settings-save")
-        .debug_selector(|| "settings-save".into())
-        .a11y_button("Save settings")
-        .cursor_pointer()
-        .flex_shrink_0()
-        .rounded_md()
-        .bg(theme::accent())
-        .px_4()
-        .py_1p5()
-        .text_size(px(theme::font_body()))
-        .font_weight(FontWeight::SEMIBOLD)
-        .text_color(theme::on_accent())
-        .hover(|s| s.opacity(0.9))
-        .on_click(cx.listener(|this, _, _, cx| this.save(cx)))
-        .child("Save")
-        .into_any_element()
-}
-
 /// A small bordered row action; the armed state turns red with "Confirm".
 fn template_action_button(
     id: String,
@@ -1452,6 +1516,7 @@ fn group_depth_row(
             let level = key.parse::<usize>().unwrap_or(1);
             entity.update(cx, |this, cx| {
                 this.group_depth = level;
+                this.save(cx);
                 cx.notify();
             });
         });
@@ -1493,6 +1558,7 @@ fn auto_fetch_row(
             };
             entity.update(cx, |this, cx| {
                 this.auto_fetch_minutes = picked;
+                this.save(cx);
                 cx.notify();
             });
         });
@@ -1517,6 +1583,7 @@ impl SettingsPage {
             .update(cx, |state, cx| state.set_value("", window, cx));
         self.store
             .update(cx, |store, cx| store.load_models_for(harness, cx));
+        self.schedule_commit(cx);
         cx.notify();
     }
 
@@ -1614,6 +1681,9 @@ fn model_picker(
     );
     let refresh_store = store.clone();
     let refresh_scope = scope.clone();
+    // a pick lands through set_value, which emits no Change event: the
+    // callback schedules the page's autosave commit itself
+    let page = cx.entity();
     cx.new(|cx| {
         let data = {
             let scope = scope.clone();
@@ -1626,9 +1696,11 @@ fn model_picker(
         let target = PickerTarget::Callback(Box::new({
             let field = field.clone();
             let variant_field = variant_field.clone();
+            let page = page.clone();
             move |value, window, cx| {
                 field.update(cx, |state, cx| state.set_value(value, window, cx));
                 variant_field.update(cx, |state, cx| state.set_value("", window, cx));
+                page.update(cx, |this, cx| this.save(cx));
             }
         }));
         let mut picker = FilteredPicker::new(spec, target, data, window, cx);
@@ -1654,6 +1726,9 @@ fn variant_picker(
     cx: &mut Context<SettingsPage>,
 ) -> Entity<FilteredPicker> {
     let spec = picker_spec("Variant", "Variant", "Filter variants", false, false, "");
+    // the pick lands through set_value (no Change event), so this picker
+    // writes and schedules the page's autosave commit in one callback
+    let page = cx.entity();
     cx.new(|cx| {
         let data = {
             let scope = scope.clone();
@@ -1666,7 +1741,14 @@ fn variant_picker(
         };
         let mut picker = FilteredPicker::new(
             spec,
-            PickerTarget::Field(variant_field.clone()),
+            PickerTarget::Callback(Box::new({
+                let variant_field = variant_field.clone();
+                let page = page.clone();
+                move |value, window, cx| {
+                    variant_field.update(cx, |state, cx| state.set_value(value, window, cx));
+                    page.update(cx, |this, cx| this.save(cx));
+                }
+            })),
             data,
             window,
             cx,

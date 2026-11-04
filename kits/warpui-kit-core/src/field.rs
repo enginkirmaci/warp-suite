@@ -251,6 +251,7 @@ mod tests {
     /// larger text setting moves the field with the type inside it.
     #[test]
     fn the_field_box_rides_the_text_factor() {
+        let _turn = crate::fonts::factor_lock::serial();
         assert_eq!(shell::scaled(PAD_X), PAD_X);
         assert_eq!(shell::scaled(GAP), GAP);
     }

@@ -139,6 +139,15 @@ pub struct Store {
     /// Tabs from the last run whose repos haven't landed yet. The first full
     /// scan settles them: found, they join the strip; gone, they are dropped.
     pending_tabs: Vec<String>,
+    /// The resting detail tabs the last run left each pending tab on.
+    pending_views: std::collections::HashMap<String, WorkspaceTab>,
+    /// The strip tab the last run left on screen, still waiting for its repo
+    /// to land. Resolves in [Self::ensure_row_selected] like pending_tabs.
+    pending_open_tab: Option<String>,
+    /// The repo row the last run showed, waiting for the scan to name it.
+    /// Resolves like pending_open_tab; a repo that left for good falls back
+    /// to the first row.
+    pending_selection: Option<String>,
     /// The list pane's width while it is dragged; the settings hold it after.
     list_width: Option<f32>,
     /// The tab on screen; None is the Repositories tab with the list.
@@ -201,7 +210,7 @@ impl Store {
             settings,
             repos: cached,
             tag_filters: Vec::new(),
-            show_archived: false,
+            show_archived: app_settings.repos.show_archived.unwrap_or(false),
             attention_only: false,
             sort_mode: app_settings.repos.sort_mode,
             sort_ascending: app_settings
@@ -264,6 +273,9 @@ impl Store {
                 .unwrap_or_default(),
             repo_tabs: Vec::new(),
             pending_tabs: Vec::new(),
+            pending_views: std::collections::HashMap::new(),
+            pending_open_tab: None,
+            pending_selection: None,
             list_width: None,
             active_repo_tab: None,
             home_repo: None,
@@ -281,6 +293,27 @@ impl Store {
             code_searching: false,
         };
         store.pending_tabs = store.settings().repos.repo_tabs.unwrap_or_default();
+        // the rest of the last run's arrangement waits for its repos to land:
+        // each tab's resting view, the on-screen tab and the selected row
+        // resolve in ensure_row_selected as the scan names them
+        store.pending_views = app_settings
+            .repos
+            .tab_views
+            .iter()
+            .flatten()
+            .filter_map(|view| {
+                WorkspaceTab::parse(&view.tab).map(|tab| (view.folder.clone(), tab))
+            })
+            .collect();
+        store.pending_open_tab = app_settings.repos.open_tab.clone();
+        store.pending_selection = app_settings.repos.selected_repo.clone();
+        if let Some(view) = &app_settings.repos.home_view {
+            store.home_repo = (!view.folder.trim().is_empty()).then(|| view.folder.clone());
+            store.home_tab = WorkspaceTab::parse(&view.tab).unwrap_or_default();
+            // nothing is open yet, so the detail pane rests where the
+            // Repositories tab left it
+            store.detail_tab = store.home_tab;
+        }
         store.reproject();
         store.refresh_auto_fetch_schedule();
 
@@ -319,6 +352,9 @@ impl Store {
                 })
         {
             let folder = entry.folder_path.to_string_lossy().to_string();
+            // the hook is an explicit ask: it outranks the restored selection
+            store.pending_selection = None;
+            store.pending_open_tab = None;
             store.load_repo_workspace(&folder);
             store.selected_repo = Some(folder);
         }
@@ -1408,6 +1444,7 @@ impl Store {
             return;
         }
         self.selected_repo = Some(folder.to_string());
+        self.update_settings(|s| s.repos.selected_repo = Some(folder.to_string()));
         self.reset_repo_workspace();
         self.load_repo_workspace(folder);
         cx.notify();
@@ -1443,10 +1480,20 @@ impl Store {
             })
     }
 
-    /// Shows `tab` in the detail pane.
+    /// Shows `tab` in the detail pane, and records it as the current tab's
+    /// resting view so a restart opens the pane where the user left it.
     pub fn open_detail_tab(&mut self, tab: WorkspaceTab, cx: &mut Context<Self>) {
         self.detail_tab = tab;
+        match &self.active_repo_tab {
+            Some(folder) => {
+                if let Some(entry) = self.repo_tabs.iter_mut().find(|t| &t.folder == folder) {
+                    entry.tab = tab;
+                }
+            }
+            None => self.home_tab = tab,
+        }
         self.open_pull = None;
+        self.save_repo_tabs();
         cx.notify();
     }
 
@@ -1617,6 +1664,9 @@ impl Store {
         self.show_repo_tab(Some(folder.to_string()), cx);
     }
 
+    /// Persists the whole tab arrangement: the strip, each tab's resting
+    /// detail tab, the on-screen tab and what the Repositories tab was
+    /// showing. One write per arrangement change.
     fn save_repo_tabs(&self) {
         let folders: Vec<String> = self
             .repo_tabs
@@ -1624,10 +1674,30 @@ impl Store {
             .map(|tab| tab.folder.clone())
             .chain(self.pending_tabs.iter().cloned())
             .collect();
-        self.update_settings(|s| s.repos.repo_tabs = Some(folders));
+        let views: Vec<warp_station_core::settings::RepoTabView> = self
+            .repo_tabs
+            .iter()
+            .map(|tab| warp_station_core::settings::RepoTabView {
+                folder: tab.folder.clone(),
+                tab: tab.tab.label().to_string(),
+            })
+            .collect();
+        let home = self.home_repo.as_ref().map(|folder| {
+            warp_station_core::settings::RepoTabView {
+                folder: folder.clone(),
+                tab: self.home_tab.label().to_string(),
+            }
+        });
+        self.update_settings(|s| {
+            s.repos.repo_tabs = Some(folders);
+            s.repos.tab_views = (!views.is_empty()).then_some(views);
+            s.repos.open_tab = self.active_repo_tab.clone();
+            s.repos.home_view = home;
+        });
     }
 
-    /// Brings last run's tabs into the strip as their repos land.
+    /// Brings last run's tabs into the strip as their repos land, each with
+    /// the detail tab it was left on.
     fn settle_pending_tabs(&mut self) {
         if self.pending_tabs.is_empty() {
             return;
@@ -1639,17 +1709,16 @@ impl Store {
                     .iter()
                     .any(|repo| repo.folder_path.to_string_lossy() == folder.as_str())
             });
-        self.repo_tabs
-            .extend(found.into_iter().map(|folder| RepoTab {
-                folder,
-                tab: WorkspaceTab::default(),
-            }));
-        // once a scan has settled, what is still missing has left for good
+        self.repo_tabs.extend(found.into_iter().map(|folder| {
+            let tab = self.pending_views.remove(&folder).unwrap_or_default();
+            RepoTab { folder, tab }
+        }));
+        // once a scan has settled, what is still missing has left for good —
+        // and the strip (with its resting views) is final enough to write
         let settled = !self.scanning && !self.repos.is_empty();
         if settled {
-            if !waiting.is_empty() {
-                self.save_repo_tabs();
-            }
+            self.pending_views.clear();
+            self.save_repo_tabs();
         } else {
             self.pending_tabs = waiting;
         }
@@ -1676,7 +1745,8 @@ impl Store {
     }
 
     /// Moves to a repo tab, or to the Repositories tab with `None`. Each keeps
-    /// its own detail tab.
+    /// its own detail tab. The arrangement writes back, so a restart lands on
+    /// the tab the user left on screen.
     pub fn show_repo_tab(&mut self, target: Option<String>, cx: &mut Context<Self>) {
         let tab = self.detail_tab;
         match &self.active_repo_tab {
@@ -1691,6 +1761,7 @@ impl Store {
             }
         }
         self.load_view(target, cx);
+        self.save_repo_tabs();
     }
 
     fn load_view(&mut self, target: Option<String>, cx: &mut Context<Self>) {
@@ -1713,13 +1784,13 @@ impl Store {
     }
 
     /// Closes a repo tab. The active one hands over to its neighbour, or to
-    /// Repositories when none is left.
+    /// Repositories when none is left. The arrangement writes back after the
+    /// handover, so the persisted open tab is the one now on screen.
     pub fn close_repo_tab(&mut self, folder: &str, cx: &mut Context<Self>) {
         let Some(ix) = self.repo_tabs.iter().position(|tab| tab.folder == folder) else {
             return;
         };
         self.repo_tabs.remove(ix);
-        self.save_repo_tabs();
         if self.active_repo_tab.as_deref() == Some(folder) {
             let next = self
                 .repo_tabs
@@ -1730,6 +1801,7 @@ impl Store {
         } else {
             cx.notify();
         }
+        self.save_repo_tabs();
     }
 
     /// Steps along the strip, Repositories included, wrapping at the ends.
@@ -1799,6 +1871,7 @@ impl Store {
     /// how the selected repo leaves the rail.
     pub fn clear_selection(&mut self, cx: &mut Context<Self>) {
         self.selected_repo = None;
+        self.update_settings(|s| s.repos.selected_repo = None);
         self.reset_repo_workspace();
         cx.notify();
     }
@@ -1894,6 +1967,31 @@ impl Store {
             .collect();
         for folder in gone {
             self.close_repo_tab(&folder, cx);
+        }
+        // last run's on-screen tab lands as its repo arrives
+        if let Some(folder) = self.pending_open_tab.clone()
+            && self.repo_tabs.iter().any(|tab| tab.folder == folder)
+        {
+            self.pending_open_tab = None;
+            self.pending_selection = None;
+            self.load_view(Some(folder), cx);
+            return;
+        }
+        // so does last run's selected row; one the scan no longer finds falls
+        // back to the first row below
+        if let Some(folder) = self.pending_selection.clone() {
+            if self
+                .repos
+                .iter()
+                .any(|repo| repo.folder_path.to_string_lossy() == folder.as_str())
+            {
+                self.pending_selection = None;
+                self.select_repo(&folder, cx);
+                return;
+            }
+            if !self.scanning && !self.repos.is_empty() {
+                self.pending_selection = None;
+            }
         }
         // a tab holds its repo whatever the list is filtered to
         if self.active_repo_tab.is_some() {
@@ -2071,9 +2169,13 @@ impl Store {
     }
 
     /// The toolbar's Archive chip: flips whether archived rows join the
-    /// projection (sorted below the live ones).
+    /// projection (sorted below the live ones). The choice persists — the
+    /// next launch opens on the same view of the list.
     pub fn toggle_show_archived(&mut self, cx: &mut Context<Self>) {
         self.show_archived = !self.show_archived;
+        // absence IS the off state, so only the opt-in is written
+        let on = self.show_archived;
+        self.update_settings(|s| s.repos.show_archived = on.then_some(true));
         self.reproject();
         cx.notify();
     }

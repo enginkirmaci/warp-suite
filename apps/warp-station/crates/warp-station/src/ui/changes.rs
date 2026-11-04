@@ -76,6 +76,11 @@ pub struct ChangesView {
     detail_armed: Option<&'static str>,
     detail_patches: std::collections::HashMap<String, String>,
     expanded_details: std::collections::HashSet<String>,
+    /// One scroll handle per expanded commit-detail patch. The patches scroll
+    /// inside the commit detail's own scroller, so each consumes the wheel
+    /// events it can act on (see the on_scroll_wheel at the patch) instead of
+    /// letting one event move both it and the pane behind it.
+    patch_scrolls: std::collections::HashMap<String, gpui::ScrollHandle>,
     /// The repo the view's local state belongs to; a mismatch resets it all.
     loaded_for: Option<String>,
     /// Staged/unstaged groups, rebuilt only when the store's change snapshot
@@ -118,6 +123,7 @@ impl ChangesView {
             detail_armed: None,
             detail_patches: std::collections::HashMap::new(),
             expanded_details: std::collections::HashSet::new(),
+            patch_scrolls: std::collections::HashMap::new(),
             loaded_for: None,
             groups_cache: None,
             history_rows: Vec::new(),
@@ -154,6 +160,7 @@ impl ChangesView {
         self.detail_armed = None;
         self.detail_patches.clear();
         self.expanded_details.clear();
+        self.patch_scrolls.clear();
     }
 
     /// Closes the branch picker from an outside click or Escape. Returns
@@ -1257,6 +1264,11 @@ impl ChangesView {
                     .get(&key)
                     .map(|p| p.as_str())
                     .unwrap_or("loading patch…");
+                let handle = self
+                    .patch_scrolls
+                    .entry(file.path.clone())
+                    .or_insert_with(gpui::ScrollHandle::new)
+                    .clone();
                 row = row.child(
                     div()
                         .id(SharedString::from(format!("detail-patch-{}", file.path)))
@@ -1271,6 +1283,18 @@ impl ChangesView {
                         .max_h(px(220.))
                         .overflow_hidden()
                         .overflow_y_scroll()
+                        .track_scroll(&handle)
+                        // the patch scrolls inside the commit detail's own
+                        // scroller: an event it can act on is consumed here,
+                        // so it never also moves the pane behind it, while an
+                        // edge event still chains outward, browser-style
+                        .on_scroll_wheel(move |event: &gpui::ScrollWheelEvent, window, cx| {
+                            let delta = event.delta.pixel_delta(window.line_height()).y;
+                            let handle = &handle;
+                            if wheel_reaches_content(handle.offset(), handle.max_offset(), delta) {
+                                cx.stop_propagation();
+                            }
+                        })
                         .child(warpui_kit_diff::render_diff(
                             patch,
                             None,
@@ -2230,4 +2254,24 @@ fn new_branch_form(
                 ),
         )
         .into_any_element()
+}
+
+/// True when a vertical scroller at `offset` (≤ 0, clamped to `max_offset`)
+/// has room to move for `delta` — the "the inner one handled it" test. A
+/// wheel event routed to an inner scrollable must not also scroll an outer
+/// one, but a scroller already hard against the edge in the wheel's
+/// direction lets the event pass, as browsers chain it. The notes app's
+/// proven pattern, copied rather than shared.
+fn wheel_reaches_content(
+    offset: gpui::Point<gpui::Pixels>,
+    max_offset: gpui::Point<gpui::Pixels>,
+    delta: gpui::Pixels,
+) -> bool {
+    if delta < px(0.) {
+        // scrolling toward the bottom: room is whatever is left below
+        -offset.y < max_offset.y
+    } else {
+        // scrolling back toward the top: any offset off the top moves
+        offset.y < px(0.)
+    }
 }

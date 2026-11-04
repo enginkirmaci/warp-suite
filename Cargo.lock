@@ -8379,6 +8379,7 @@ dependencies = [
  "unicode-segmentation",
  "warpui-kit-core",
  "warpui-kit-diff",
+ "warpui-kit-markdown",
  "warpui-kit-picker",
  "winresource",
 ]

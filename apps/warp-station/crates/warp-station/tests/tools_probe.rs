@@ -10,13 +10,33 @@ use warp_station::ui::nuget::NugetDrawer;
 use warp_station::ui::windows_tools::SnapItPage;
 use warp_station_core::snapit::{SnapLayout, SnapLine};
 
+/// Scratch settings for one probe, keyed by the test's name, the pid and a
+/// per-call counter so parallel probes never share a file. Arrangement state
+/// (selection, open tabs, the archive toggle) persists now, so an unisolated
+/// store would read the developer's live arrangement — the first-row probe
+/// flaked on exactly that — and write test choices into the real
+/// ~/.warp/settings.json.
+fn scratch_service(name: &str) -> std::sync::Arc<warp_station_core::settings::SettingsService> {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static SEQ: AtomicU64 = AtomicU64::new(0);
+    let seq = SEQ.fetch_add(1, Ordering::SeqCst);
+    let path = std::env::temp_dir().join(format!(
+        "warp-station-probe-tools-{name}-{}-{seq}.json",
+        std::process::id()
+    ));
+    std::fs::write(&path, "{}").expect("scratch settings");
+    std::sync::Arc::new(warp_station_core::settings::SettingsService::at(path))
+}
+
+
 #[gpui_kit::gpui::test]
 fn clipboard_password_drawer_draws(cx: &mut TestAppContext) {
     cx.update(gpui_kit::init);
     cx.update(warp_station::theme::apply_kit_theme);
 
     let (net_tx, _net_rx) = async_channel::unbounded();
-    let store = cx.new(|cx| Store::new(cx, net_tx));
+    let store =
+        cx.new(|_cx| Store::with_settings(net_tx, scratch_service("tools-clipboard_password_drawer_draws")));
     let (_handle, cx) =
         cx.add_window_view(|window, cx| ClipboardPasswordDrawer::new(store, window, cx));
     cx.run_until_parked();
@@ -30,7 +50,8 @@ fn nuget_drawer_draws(cx: &mut TestAppContext) {
     cx.update(warp_station::theme::apply_kit_theme);
 
     let (net_tx, _net_rx) = async_channel::unbounded();
-    let store = cx.new(|cx| Store::new(cx, net_tx));
+    let store =
+        cx.new(|_cx| Store::with_settings(net_tx, scratch_service("tools-nuget_drawer_draws")));
     let probe_store = store.clone();
     let (_handle, cx) = cx.add_window_view(|window, cx| NugetDrawer::new(store, window, cx));
     cx.run_until_parked();
@@ -47,7 +68,8 @@ fn the_formatters_run_button_sits_in_the_head(cx: &mut TestAppContext) {
     cx.update(warp_station::theme::apply_kit_theme);
 
     let (net_tx, _net_rx) = async_channel::unbounded();
-    let store = cx.new(|cx| Store::new(cx, net_tx));
+    let store =
+        cx.new(|_cx| Store::with_settings(net_tx, scratch_service("tools-the_formatters_run_button_sits_in_the_head")));
     let (_handle, cx) = cx.add_window_view(|window, cx| FormattersDrawer::new(store, window, cx));
     cx.run_until_parked();
     cx.update(|window, cx| drop(window.draw(cx)));
@@ -81,7 +103,8 @@ fn the_tool_head_actions_stay_inside_the_pane(cx: &mut TestAppContext) {
     cx.update(warp_station::theme::apply_kit_theme);
 
     let (net_tx, _net_rx) = async_channel::unbounded();
-    let store = cx.new(|cx| Store::new(cx, net_tx));
+    let store =
+        cx.new(|_cx| Store::with_settings(net_tx, scratch_service("tools-the_tool_head_actions_stay_inside_the_pane")));
     let (_handle, cx) =
         cx.add_window_view(|window, cx| ClipboardPasswordDrawer::new(store, window, cx));
     cx.run_until_parked();
@@ -123,7 +146,8 @@ fn the_snapit_page_previews_its_layouts(cx: &mut TestAppContext) {
         },
     ];
     let (net_tx, _net_rx) = async_channel::unbounded();
-    let store = cx.new(|cx| Store::new(cx, net_tx));
+    let store =
+        cx.new(|_cx| Store::with_settings(net_tx, scratch_service("tools-the_snapit_page_previews_its_layouts")));
     let (_handle, cx) = cx.add_window_view(|_, _| SnapItPage::with_layouts(store, layouts));
     cx.run_until_parked();
     cx.update(|window, cx| drop(window.draw(cx)));
@@ -154,7 +178,8 @@ fn main_window_draws_the_tools_section(cx: &mut TestAppContext) {
     // SAFETY: single-threaded test setup, read once at MainWindow::new
     unsafe { std::env::set_var("WARP_STATION_PAGE", "tools") };
     let (net_tx, _net_rx) = async_channel::unbounded();
-    let store = cx.new(|cx| Store::new(cx, net_tx));
+    let store =
+        cx.new(|_cx| Store::with_settings(net_tx, scratch_service("tools-main_window_draws_the_tools_section")));
     let (_handle, cx) = cx
         .add_window_view(|window, cx| warp_station::ui::window::MainWindow::new(store, window, cx));
     cx.run_until_parked();
@@ -173,7 +198,8 @@ fn both_nuget_head_buttons_are_addressable(cx: &mut TestAppContext) {
     cx.update(warp_station::theme::apply_kit_theme);
 
     let (net_tx, _net_rx) = async_channel::unbounded();
-    let store = cx.new(|cx| Store::new(cx, net_tx));
+    let store =
+        cx.new(|_cx| Store::with_settings(net_tx, scratch_service("tools-both_nuget_head_buttons_are_addressable")));
     let (_handle, cx) = cx.add_window_view(|window, cx| NugetDrawer::new(store, window, cx));
     cx.run_until_parked();
     cx.update(|window, cx| drop(window.draw(cx)));

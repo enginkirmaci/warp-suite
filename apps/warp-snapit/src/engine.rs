@@ -23,7 +23,7 @@ use crate::hooks::{
 };
 use crate::log;
 use crate::overlay::Overlay;
-use crate::settings::{self, Config, ExcludedApplication, HoldKeyBehaviour, Layout, Settings};
+use crate::settings::{self, Config, ExcludedApplication, HoldKeyBehaviour, Layout, SettingsStore};
 use crate::win32;
 use crate::zones::ZoneRef;
 
@@ -64,7 +64,9 @@ struct DragState {
 pub struct Engine {
     hwnd: HWND,
     runtime: Arc<Runtime>,
-    settings: Settings,
+    /// The live settings: reads deref, and any mutation goes through
+    /// `SettingsStore::update`, which lands the change on disk atomically.
+    settings: SettingsStore,
     layouts: Vec<Layout>,
     excluded: Vec<ExcludedApplication>,
     overlays: Vec<Overlay>,
@@ -86,7 +88,7 @@ impl Engine {
         let mut engine = Self {
             hwnd,
             runtime,
-            settings,
+            settings: SettingsStore::at(settings::snapit_root().join("Settings.json"), settings),
             layouts,
             excluded: excluded_applications,
             overlays: Vec::new(),

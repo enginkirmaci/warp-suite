@@ -10,6 +10,24 @@ use warp_station::ui::window::MainWindow;
 /// Serializes the HOME-swapping new-branch probe against its siblings.
 static HOME_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+/// Scratch settings for one probe, keyed by the test's name, the pid and a
+/// per-call counter so parallel probes never share a file. Arrangement state
+/// (selection, open tabs, the archive toggle) persists now, so an unisolated
+/// store would read the developer's live arrangement — the first-row probe
+/// flaked on exactly that — and write test choices into the real
+/// ~/.warp/settings.json.
+fn scratch_service(name: &str) -> std::sync::Arc<warp_station_core::settings::SettingsService> {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static SEQ: AtomicU64 = AtomicU64::new(0);
+    let seq = SEQ.fetch_add(1, Ordering::SeqCst);
+    let path = std::env::temp_dir().join(format!(
+        "warp-station-probe-changes-{name}-{}-{seq}.json",
+        std::process::id()
+    ));
+    std::fs::write(&path, "{}").expect("scratch settings");
+    std::sync::Arc::new(warp_station_core::settings::SettingsService::at(path))
+}
+
 #[gpui_kit::gpui::test]
 fn changes_view_draws_over_real_data(cx: &mut TestAppContext) {
     cx.update(gpui_kit::init);
@@ -23,7 +41,8 @@ fn changes_view_draws_over_real_data(cx: &mut TestAppContext) {
 
     let (net_tx, _net_rx) = async_channel::unbounded();
     let store = cx.new(|cx| {
-        let mut store = Store::new(cx, net_tx);
+        let mut store =
+            Store::with_settings(net_tx, scratch_service("changes-changes_view_draws_over_real_data"));
         // prime the bottom bar with a REAL snapshot of this repository
         let snapshot = warp_station_core::git::read::change_snapshot(&here);
         let branches = warp_station_core::git::read::branches(&here).unwrap_or_default();
@@ -82,7 +101,8 @@ fn history_and_drill_down_draw(cx: &mut TestAppContext) {
 
     let (net_tx, _net_rx) = async_channel::unbounded();
     let store = cx.new(|cx| {
-        let mut store = Store::new(cx, net_tx);
+        let mut store =
+            Store::with_settings(net_tx, scratch_service("changes-history_and_drill_down_draw"));
         store.replace_repos(vec![warp_station_core::repo_store::RepoEntry {
             name: "probe-repo".into(),
             folder_path: here.clone(),
@@ -183,7 +203,8 @@ fn branch_delete_gates_on_kind_current_and_two_clicks(cx: &mut TestAppContext) {
     // the receiver stays bound: the confirmed delete must arrive on it
     let (net_tx, net_rx) = async_channel::unbounded();
     let store = cx.new(|cx| {
-        let mut store = Store::new(cx, net_tx);
+        let mut store =
+            Store::with_settings(net_tx, scratch_service("changes-branch_delete_gates_on_kind_current_and_two_clicks"));
         store.replace_repos(vec![warp_station_core::repo_store::RepoEntry {
             name: "probe-repo".into(),
             folder_path: "/probe/alpha".into(),
@@ -444,7 +465,8 @@ fn the_history_list_lays_out_only_its_visible_rows(cx: &mut TestAppContext) {
 
     let (net_tx, _net_rx) = async_channel::unbounded();
     let store = cx.new(|cx| {
-        let mut store = Store::new(cx, net_tx);
+        let mut store =
+            Store::with_settings(net_tx, scratch_service("changes-the_history_list_lays_out_only_its_visible_rows"));
         store.replace_repos(vec![warp_station_core::repo_store::RepoEntry {
             name: "probe-repo".into(),
             folder_path: here.clone(),

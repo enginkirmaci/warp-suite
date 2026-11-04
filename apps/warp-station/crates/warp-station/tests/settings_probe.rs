@@ -330,9 +330,8 @@ fn harness_model_and_variant_persist(cx: &mut TestAppContext) {
         "the picked model's variant renders"
     );
     click(&mut wcx, "variant-row-max");
-
-    let save = wcx.debug_bounds("settings-save").expect("save button");
-    wcx.simulate_click(save.center(), gpui::Modifiers::default());
+    // the page has no Save button: the pick (like every discrete settings
+    // action) commits itself
     wcx.run_until_parked();
 
     let json = std::fs::read_to_string(&scratch).expect("saved settings");
@@ -423,11 +422,7 @@ fn auto_fetch_row_picks_and_persists(cx: &mut TestAppContext) {
     cx.simulate_click(pick.center(), gpui::Modifiers::default());
     cx.run_until_parked();
     cx.update(|window, cx| drop(window.draw(cx)));
-
-    let save = cx.debug_bounds("settings-save").expect("save button");
-    cx.simulate_click(save.center(), gpui::Modifiers::default());
-    cx.run_until_parked();
-
+    // the pick commits itself — the page has no Save button
     let json = std::fs::read_to_string(&scratch).expect("saved settings");
     assert!(
         json.contains("\"AutoFetchMinutes\": 30"),
@@ -643,7 +638,7 @@ fn group_repos_switch_toggles_and_persists(cx: &mut TestAppContext) {
     );
 
     // the design's row ends with its control: a click near the right edge
-    // flips the switch
+    // flips the switch — and the toggle commits itself, no Save press
     let row = wcx
         .debug_bounds("settings-row-Group repos by folder")
         .expect("grouping switch row bounds");
@@ -653,10 +648,6 @@ fn group_repos_switch_toggles_and_persists(cx: &mut TestAppContext) {
     );
     wcx.run_until_parked();
     wcx.update(|window, cx| drop(window.draw(cx)));
-
-    let save = wcx.debug_bounds("settings-save").expect("save button");
-    wcx.simulate_click(save.center(), gpui::Modifiers::default());
-    wcx.run_until_parked();
 
     let json = std::fs::read_to_string(&scratch).expect("saved settings");
     assert!(
@@ -732,11 +723,7 @@ fn group_depth_picker_renders_grouped_and_persists(cx: &mut TestAppContext) {
     wcx.simulate_click(segment.center(), gpui::Modifiers::default());
     wcx.run_until_parked();
     wcx.update(|window, cx| drop(window.draw(cx)));
-
-    let save = wcx.debug_bounds("settings-save").expect("save button");
-    wcx.simulate_click(save.center(), gpui::Modifiers::default());
-    wcx.run_until_parked();
-
+    // the pick commits itself — the page has no Save button
     let json = std::fs::read_to_string(&scratch).expect("saved settings");
     assert!(
         json.contains("\"GroupRootDepth\": 2"),
@@ -846,10 +833,8 @@ fn code_search_rows_render_and_persist(cx: &mut TestAppContext) {
     wcx.run_until_parked();
     wcx.simulate_keystrokes("ctrl-a");
     wcx.simulate_input("rgz");
-    wcx.run_until_parked();
-
-    let save = wcx.debug_bounds("settings-save").expect("save button");
-    wcx.simulate_click(save.center(), gpui::Modifiers::default());
+    // a keystroke commit is debounced: beat the clock past it, no Save press
+    wcx.executor().advance_clock(std::time::Duration::from_millis(700));
     wcx.run_until_parked();
 
     let json = std::fs::read_to_string(&scratch).expect("saved settings");
@@ -945,9 +930,10 @@ fn opencode_cli_and_warp_agent_switches_are_separate(cx: &mut TestAppContext) {
 }
 
 /// The head keeps its actions inside the pane on every section: a long hint
-/// used to widen the row and push Save past the window edge.
+/// used to widen the row and push the actions past the window edge. The page
+/// autosaves now, so the one action left in the head is Data folder.
 #[gpui_kit::gpui::test]
-fn the_settings_head_keeps_save_inside_the_pane(cx: &mut TestAppContext) {
+fn the_settings_head_keeps_its_actions_inside_the_pane(cx: &mut TestAppContext) {
     let _home_guard = HOME_ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
     cx.update(gpui_kit::init);
     cx.update(warp_station::theme::apply_kit_theme);
@@ -993,10 +979,16 @@ fn the_settings_head_keeps_save_inside_the_pane(cx: &mut TestAppContext) {
             cx.update(|window, cx| drop(window.draw(cx)));
         }
         let pane = cx.debug_bounds("settings-detail").expect("detail pane");
-        let save = cx.debug_bounds("settings-save").expect("Save");
+        let folder = cx
+            .debug_bounds("settings-open-folder")
+            .unwrap_or_else(|| panic!("{section} carries the head's Data folder action"));
         assert!(
-            save.right() <= pane.right(),
-            "{section}: Save {save:?} runs past the pane {pane:?}"
+            folder.right() <= pane.right(),
+            "{section}: the head action {folder:?} runs past the pane {pane:?}"
+        );
+        assert!(
+            cx.debug_bounds("settings-save").is_none(),
+            "{section}: the Save button is gone — the page autosaves"
         );
     }
 }

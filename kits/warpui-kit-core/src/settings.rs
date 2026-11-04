@@ -319,6 +319,7 @@ mod tests {
     /// text factor like every other shell metric.
     #[test]
     fn a_settings_row_is_sixty_high() {
+        let _turn = crate::fonts::factor_lock::serial();
         assert_eq!(shell::scaled(60.), 60.);
     }
 

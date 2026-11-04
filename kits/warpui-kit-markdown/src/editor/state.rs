@@ -5,7 +5,7 @@
 
 use super::code::CodeTokens;
 use super::diagram::{Diagrams, Look};
-use super::display::{LineView, Reveal, ViewContext, build_view};
+use super::display::{Band, Decor, LineView, Reveal, ViewContext, build_view};
 use super::frame::{self, Frame, Hit, HitKind, Hover, ShapeCache, TableStrip};
 use super::images::ImageStore;
 use super::layout::Fonts;
@@ -20,7 +20,7 @@ use gpui::{
     App, Bounds, ClipboardItem, Context, CursorStyle, Entity, EntityInputHandler, EventEmitter,
     FocusHandle, Focusable, Hsla, KeyBinding, MouseButton, MouseDownEvent, MouseMoveEvent,
     MouseUpEvent, Pixels, Point, ScrollWheelEvent, SharedString, Subscription, UTF16Selection,
-    Window, font, point, px, size,
+    WeakEntity, Window, font, point, px, size,
 };
 use gpui_kit::base::actions::{SelectDown, SelectLeft, SelectRight, SelectUp};
 use gpui_kit::base::input::{
@@ -85,6 +85,48 @@ pub enum LiveEditorEvent {
 }
 
 impl EventEmitter<LiveEditorEvent> for LiveEditorState {}
+
+/// One fenced code block of a read-only editor, with the geometry of its
+/// painted band: what a host needs to hang an action (a copy button) in the
+/// band's top-right corner.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CodeBlock {
+    /// The n-th fenced block of the document, in order.
+    pub index: usize,
+    /// The info string after the opening fence.
+    pub language: Option<SharedString>,
+    /// The code between the fences, verbatim.
+    pub code: SharedString,
+    /// Top of the painted code well, in document coordinates.
+    pub top: f32,
+    /// Height of the painted code well, in document coordinates.
+    pub height: f32,
+}
+
+/// The read-only editor that last owned a mouse selection, for a host's
+/// Ctrl+C fallback: the kit's TextSelection machinery covers TextView
+/// surfaces, and this covers read-only live editors, which take no focus —
+/// a click on chat text must not move focus off a composer.
+pub struct ReadOnlySelection {
+    editor: WeakEntity<LiveEditorState>,
+}
+
+impl gpui::Global for ReadOnlySelection {}
+
+impl ReadOnlySelection {
+    /// The selected text of the read-only editor that last held a selection,
+    /// or `None` when no editor does (nothing selected, or it went away).
+    pub fn selected_text(&self, cx: &App) -> Option<String> {
+        let editor = self.editor.upgrade()?;
+        editor.read(cx).selected_text()
+    }
+}
+
+/// The selected text of the last read-only editor to hold a mouse selection.
+pub fn read_only_selection_text(cx: &App) -> Option<String> {
+    cx.try_global::<ReadOnlySelection>()
+        .and_then(|global| global.selected_text(cx))
+}
 
 pub(super) type PasteHandler = Rc<dyn Fn(&ClipboardItem, &mut Window, &mut App) -> bool>;
 
@@ -300,6 +342,18 @@ pub struct LiveEditorState {
     notes: Option<HashSet<String>>,
     /// What the host paints behind the text, when not the theme's background.
     surface: Option<Hsla>,
+    /// Rendered-surface mode: no caret, no input, no formatting; the syntax
+    /// stays hidden everywhere, as when the live editor has no focus.
+    read_only: bool,
+    /// Host sizes the element to the content: the next layout reports a
+    /// height change so the host's wrapper can follow (a chat message that
+    /// grows while streaming).
+    fit_content: bool,
+    /// The content height last reported to a fit-content host.
+    fit_height: f32,
+    /// Code blocks a host hung an overlay child on this render, by
+    /// [`CodeBlock::index`] — their language labels shift left of the slot.
+    pub(super) overlay_blocks: HashSet<usize>,
     find: FindBar,
     _subscriptions: Vec<Subscription>,
 }
@@ -376,6 +430,10 @@ impl LiveEditorState {
             paste_handler: None,
             notes: None,
             surface: None,
+            read_only: false,
+            fit_content: false,
+            fit_height: 0.,
+            overlay_blocks: HashSet::new(),
             find: FindBar {
                 open: false,
                 replacing: false,
@@ -444,6 +502,151 @@ impl LiveEditorState {
 
     pub(super) fn set_paste_handler(&mut self, handler: Option<PasteHandler>) {
         self.paste_handler = handler;
+    }
+
+    /// Rendered-surface mode: no caret, no text input, no formatting, task
+    /// boxes inert; selection, copy (the host wires the keys — the surface
+    /// takes no focus), links, scroll and the full rendering stay.
+    pub fn set_read_only(&mut self, read_only: bool, cx: &mut Context<Self>) {
+        if self.read_only == read_only {
+            return;
+        }
+        self.read_only = read_only;
+        // the surface takes no focus, so the handle is only the context
+        // menu's dispatch anchor; it must not join the tab order
+        self.focus_handle = self.focus_handle.clone().tab_stop(!read_only);
+        if read_only {
+            self.press = None;
+            self.hover = Hover::default();
+        }
+        // the reveal rules differ: read-only parks every construct
+        self.views_revision = u64::MAX;
+        self.frame_key = None;
+        cx.notify();
+    }
+
+    /// Host sizes the element to its content: the next layout notifies when
+    /// the content height moves, so the host's wrapper can follow.
+    pub fn set_fit_content(&mut self, fit_content: bool, cx: &mut Context<Self>) {
+        if self.fit_content == fit_content {
+            return;
+        }
+        self.fit_content = fit_content;
+        cx.notify();
+    }
+
+    pub fn read_only(&self) -> bool {
+        self.read_only
+    }
+
+    /// How far the view is scrolled down, in pixels.
+    pub fn scroll_top(&self) -> f32 {
+        self.scroll.top()
+    }
+
+    /// The laid-out content height; the height a fit-content host wraps the
+    /// element in. Updates one frame behind the first layout of new text —
+    /// the layout notifies, the host's next render picks the number up.
+    pub fn content_height(&self) -> f32 {
+        self.frame.as_ref().map_or(self.fit_height, |f| f.height)
+    }
+
+    /// The laid-out viewport height, for culling overlay children.
+    pub(super) fn viewport_height(&self) -> f32 {
+        self.bounds.size.height.as_f32()
+    }
+
+    /// The selected text, or `None` when the selection is empty.
+    pub fn selected_text(&self) -> Option<String> {
+        let range = self.selection.range();
+        (!range.is_empty()).then(|| self.text[range].to_string())
+    }
+
+    /// Publishes this editor's mouse selection to the read-only selection
+    /// global, so a host's Ctrl+C fallback can copy it (the surface holds no
+    /// focus, so no Copy action ever dispatches on its own).
+    fn publish_read_only_selection(&mut self, cx: &mut Context<Self>) {
+        if !self.read_only {
+            return;
+        }
+        let selected = self.selected_text().is_some();
+        let mine = cx
+            .try_global::<ReadOnlySelection>()
+            .is_some_and(|global| global.editor.upgrade().as_ref() == Some(&cx.entity()));
+        if selected {
+            cx.set_global(ReadOnlySelection {
+                editor: cx.entity().downgrade(),
+            });
+        } else if mine {
+            cx.remove_global::<ReadOnlySelection>();
+        }
+    }
+
+    /// Every fenced code block with its painted band's geometry, in document
+    /// order. The band's first line carries the language label, so a host
+    /// overlay button in the top-right corner needs the label shifted left
+    /// of its slot (`overlay_blocks`).
+    pub fn code_blocks(&self) -> Vec<CodeBlock> {
+        let Some(frame) = self.frame.as_ref() else {
+            return Vec::new();
+        };
+        let mut bands: Vec<(usize, f32, f32)> = Vec::new();
+        let mut open: Option<(usize, f32)> = None;
+        for (ix, line) in frame.lines.iter().enumerate() {
+            let Some(block) = self.doc.lines.get(ix).and_then(|l| l.block) else {
+                continue;
+            };
+            for decor in &line.view.decor {
+                let Decor::Band {
+                    band: Band::Code,
+                    first,
+                    last,
+                } = decor
+                else {
+                    continue;
+                };
+                if *first {
+                    open = Some((block, line.top));
+                }
+                if *last && let Some((found, top)) = open.take_if(|(found, _)| *found == block) {
+                    bands.push((found, top, line.top + line.height));
+                }
+            }
+        }
+        bands
+            .into_iter()
+            .map(|(block, top, bottom)| {
+                let LiveBlockKind::Code { lang } = &self.doc.blocks[block].kind else {
+                    unreachable!("a code band belongs to a code block");
+                };
+                CodeBlock {
+                    index: self.doc.blocks[..block]
+                        .iter()
+                        .filter(|b| matches!(b.kind, LiveBlockKind::Code { .. }))
+                        .count(),
+                    language: lang.clone().map(SharedString::from),
+                    code: self.block_code(block),
+                    top,
+                    height: bottom - top,
+                }
+            })
+            .collect()
+    }
+
+    /// The code between a block's fences: the closing fence's start bounds
+    /// it when the block is closed, otherwise it runs to the document end.
+    fn block_code(&self, block: usize) -> SharedString {
+        let block = &self.doc.blocks[block];
+        let first = &self.doc.lines[block.lines.start];
+        let last = &self.doc.lines[block.lines.end - 1];
+        let (start, end) = if last.kind == LiveLineKind::Fence && block.lines.len() >= 2 {
+            (first.range.end + 1, last.range.start)
+        } else {
+            (first.range.end + 1, last.range.end)
+        };
+        let start = start.min(self.text.len());
+        let end = end.max(start).min(self.text.len());
+        self.text[start..end].trim_end_matches('\n').to_string().into()
     }
 
     /// The document text.
@@ -579,7 +782,7 @@ impl LiveEditorState {
 
     /// The caret's frame-independent facts, for tests and the painter.
     pub(super) fn caret_visible(&self, window: &Window) -> bool {
-        self.caret_on && self.focus_handle.is_focused(window)
+        !self.read_only && self.caret_on && self.focus_handle.is_focused(window)
     }
 
     pub(super) fn selection(&self) -> Selection {
@@ -693,7 +896,10 @@ impl LiveEditorState {
             self.images_revision = self.revision;
         }
         let focused = self.focus_handle.is_focused(window);
-        let selection = focused.then(|| self.selection.range());
+        // a read-only surface holds no focus (a click must not steal it from
+        // a field), and its reveal is None whatever happens: every construct
+        // stays rendered
+        let selection = (focused && !self.read_only).then(|| self.selection.range());
         let mut colors = LiveColors::from_theme(cx);
         colors.background = self.surface.unwrap_or(colors.background);
         let look = Look {
@@ -757,6 +963,13 @@ impl LiveEditorState {
             .update_extent(bounds, frame.height, frame.max_scroll);
         if std::mem::take(&mut self.reveal_caret) {
             self.scroll_caret_into_view(&frame, bounds.size.height.as_f32());
+        }
+        // a fit-content host wraps the element in the content height; report
+        // a move so its next render re-sizes the wrapper (and stop there, or
+        // every layout of the same height would ask for another)
+        if self.fit_content && self.fit_height != frame.height {
+            self.fit_height = frame.height;
+            cx.notify();
         }
         frame
     }
@@ -940,6 +1153,7 @@ impl LiveEditorState {
             .retain(|at| span.start <= *at && *at <= span.end);
         self.restart_blink(cx);
         self.settle_draft(Some(line), cx);
+        self.publish_read_only_selection(cx);
         cx.notify();
     }
 
@@ -2067,10 +2281,16 @@ impl LiveEditorState {
     }
 
     pub(super) fn search(&mut self, _: &Search, window: &mut Window, cx: &mut Context<Self>) {
+        if self.read_only {
+            return;
+        }
         self.open_find_bar(false, window, cx);
     }
 
     pub(super) fn replace(&mut self, _: &Replace, window: &mut Window, cx: &mut Context<Self>) {
+        if self.read_only {
+            return;
+        }
         self.open_find_bar(true, window, cx);
     }
 
@@ -2242,6 +2462,11 @@ impl LiveEditorState {
         let Some(hit) = self.hit_at(event.position) else {
             return;
         };
+        // read-only: only the text itself answers a press — selection and
+        // links work, checkboxes, table strips and the property panel do not
+        if self.read_only && hit.kind != HitKind::Text {
+            return;
+        }
         let focused = self.focus_handle.is_focused(window);
         match &hit.kind {
             HitKind::Text => {}
@@ -2325,6 +2550,9 @@ impl LiveEditorState {
     }
 
     fn toggle_box(&mut self, range: Range<usize>, cx: &mut Context<Self>) {
+        if self.read_only {
+            return;
+        }
         if matches!(&self.text[range.clone()], "true" | "false") {
             let change = ops::toggle_property(&self.text, range, self.selection);
             return self.apply(change, Group::Single, cx);
@@ -2366,6 +2594,7 @@ impl LiveEditorState {
                     self.goal_x = None;
                     self.selection.head = head;
                     self.restart_blink(cx);
+                    self.publish_read_only_selection(cx);
                     cx.notify();
                 }
                 self.drag_scroll(event.position, cx);
@@ -2388,10 +2617,16 @@ impl LiveEditorState {
                     HitKind::Inert | HitKind::Diagram(_) => Some(CursorStyle::Arrow),
                     _ => Some(CursorStyle::PointingHand),
                 });
-                let hover = self.frame.as_ref().map_or(Hover::default(), |frame| {
-                    let (x, y) = self.window_to_doc(frame, event.position);
-                    frame.hover_at(x, y)
-                });
+                // read-only hides the edit-only hover affordances: no table
+                // add strips, no diagram edit button
+                let hover = if self.read_only {
+                    Hover::default()
+                } else {
+                    self.frame.as_ref().map_or(Hover::default(), |frame| {
+                        let (x, y) = self.window_to_doc(frame, event.position);
+                        frame.hover_at(x, y)
+                    })
+                };
                 if pointer != self.pointer || hover != self.hover {
                     self.pointer = pointer;
                     self.hover = hover;
@@ -2440,7 +2675,16 @@ impl LiveEditorState {
         cx: &mut Context<Self>,
     ) {
         let delta = event.delta.pixel_delta(px(self.em * WHEEL_LINE_EM));
+        let before = self.scroll.top();
         self.scroll.set_top(self.scroll.top() - delta.y.as_f32());
+        // nothing moved (the view fits, or the wheel ran past an edge): let
+        // the event reach an enclosing scrollable. What moved was consumed —
+        // stopping it here keeps the outer surface (a chat's transcript) from
+        // scrolling the same wheel tick twice, scrollbar hover included.
+        if self.scroll.top() == before {
+            return;
+        }
+        cx.stop_propagation();
         cx.notify();
     }
 
@@ -2590,6 +2834,11 @@ impl EntityInputHandler for LiveEditorState {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // read-only registers no input handler, so this should not fire; the
+        // guard keeps an IME or platform insertion from landing regardless
+        if self.read_only {
+            return;
+        }
         let target = range
             .as_ref()
             .map(|range| self.range_from_utf16(range))

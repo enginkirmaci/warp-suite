@@ -14,7 +14,9 @@ use gpui_kit::base::input::{
 use std::cell::RefCell;
 use std::rc::Rc;
 use warpui_kit_core::palette;
-use warpui_kit_markdown::{LiveColors, LiveEditor, LiveEditorEvent, LiveEditorState};
+use warpui_kit_markdown::{
+    LiveColors, LiveEditor, LiveEditorEvent, LiveEditorState, read_only_selection_text,
+};
 
 struct Probe {
     editor: Entity<LiveEditorState>,
@@ -23,6 +25,19 @@ struct Probe {
 impl Render for Probe {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         div().size_full().child(LiveEditor::new(&self.editor))
+    }
+}
+
+/// The read-only surface: no focus is taken, so a host field keeps typing.
+struct ReadOnlyProbe {
+    editor: Entity<LiveEditorState>,
+}
+
+impl Render for ReadOnlyProbe {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .size_full()
+            .child(LiveEditor::new(&self.editor).read_only(true))
     }
 }
 
@@ -84,6 +99,30 @@ impl Harness {
             secondary: false,
             shift: false,
         });
+    }
+
+    /// A read-only surface over `text`: rendered everywhere, nothing takes
+    /// focus, nothing edits.
+    fn open_read_only(tcx: &mut TestAppContext, text: &str) -> Self {
+        tcx.update(gpui_kit::init);
+        let mut editor = None;
+        let handle = tcx.open_window(gpui::size(px(900.), px(700.)), |window, cx| {
+            let state = cx.new(|cx| {
+                let mut state = LiveEditorState::new(window, cx);
+                state.set_read_only(true, cx);
+                state.set_value(text.to_string(), window, cx);
+                state
+            });
+            editor = Some(state.clone());
+            ReadOnlyProbe { editor: state }
+        });
+        let cx = VisualTestContext::from_window(handle.into(), tcx).into_mut();
+        let mut this = Self {
+            cx,
+            editor: editor.expect("the window was built"),
+        };
+        this.settle();
+        this
     }
 
     /// The offset of the first `needle` in the text.
@@ -884,4 +923,103 @@ mod diagrams {
             "{source:?} {end:?}"
         );
     }
+}
+
+// ---- read-only ------------------------------------------------------------
+
+#[gpui::test]
+fn read_only_takes_no_input_and_no_formatting(tcx: &mut TestAppContext) {
+    let mut h = Harness::open_read_only(tcx, "kept text");
+    h.typed("typed");
+    assert_eq!(h.cx.read(|cx| h.editor.read(cx).value()), "kept text");
+}
+
+#[gpui::test]
+fn read_only_task_boxes_do_not_toggle(tcx: &mut TestAppContext) {
+    let mut h = Harness::open_read_only(tcx, "- [ ] a task\n- [x] done");
+    let first = h.point_of(h.offset_of("a task"));
+    let second = h.point_of(h.offset_of("done"));
+    h.click(first);
+    h.click(second);
+    assert_eq!(
+        h.cx.read(|cx| h.editor.read(cx).value()),
+        "- [ ] a task\n- [x] done",
+        "the boxes render but a click does nothing"
+    );
+}
+
+#[gpui::test]
+fn read_only_links_still_open(tcx: &mut TestAppContext) {
+    let mut h = Harness::open_read_only(tcx, "see [docs](https://e.co) end");
+    let events = Rc::new(RefCell::new(Vec::new()));
+    {
+        let events = events.clone();
+        let editor = h.editor.clone();
+        h.cx.update(|_, cx| {
+            cx.subscribe(&editor, move |_, event: &LiveEditorEvent, _| {
+                events.borrow_mut().push(event.clone());
+            })
+            .detach();
+        });
+    }
+    let link = h.point_of(h.offset_of("docs"));
+    h.click(link);
+    assert_eq!(
+        *events.borrow(),
+        [LiveEditorEvent::OpenUrl("https://e.co".into())]
+    );
+}
+
+#[gpui::test]
+fn read_only_selection_publishes_for_a_hosts_copy_fallback(tcx: &mut TestAppContext) {
+    let h = Harness::open_read_only(tcx, "first line\nsecond");
+    h.cx.update(|_, cx| {
+        h.editor
+            .update(cx, |editor, cx| editor.set_selected_range(0..5, cx));
+    });
+    assert_eq!(
+        h.cx.read(read_only_selection_text).as_deref(),
+        Some("first"),
+        "the host's Ctrl+C fallback copies the mouse selection"
+    );
+    // collapsing the selection withdraws it again
+    h.cx.update(|_, cx| {
+        h.editor
+            .update(cx, |editor, cx| editor.set_selected_range(2..2, cx));
+    });
+    assert_eq!(h.cx.read(read_only_selection_text), None);
+}
+
+#[gpui::test]
+fn read_only_code_blocks_carry_language_and_code(tcx: &mut TestAppContext) {
+    let h = Harness::open_read_only(tcx, "before\n\n```rust\nlet a = 1;\nlet b = 2;\n```\n\nafter");
+    let blocks = h.cx.read(|cx| h.editor.read(cx).code_blocks());
+    assert_eq!(blocks.len(), 1);
+    assert_eq!(blocks[0].index, 0);
+    assert_eq!(blocks[0].language.as_deref(), Some("rust"));
+    assert_eq!(blocks[0].code, "let a = 1;\nlet b = 2;");
+    assert!(blocks[0].height > 0., "the band is laid out");
+}
+
+#[gpui::test]
+fn read_only_fit_content_reports_the_document_height(tcx: &mut TestAppContext) {
+    let mut h = Harness::open_read_only(tcx, "one\n\ntwo\n\nthree");
+    h.cx.update(|window, cx| {
+        h.editor.update(cx, |editor, cx| {
+            editor.set_fit_content(true, cx);
+            let _ = window;
+        });
+    });
+    h.settle();
+    let height = h.cx.read(|cx| h.editor.read(cx).content_height());
+    assert!(height > 0., "the laid-out document height is reported");
+    // a taller document reports a taller height through the same call
+    h.cx.update(|window, cx| {
+        h.editor.update(cx, |editor, cx| {
+            editor.set_value("one\n\ntwo\n\nthree\n\nfour\n\nfive", window, cx);
+        });
+    });
+    h.settle();
+    let grown = h.cx.read(|cx| h.editor.read(cx).content_height());
+    assert!(grown > height, "{grown} > {height}");
 }

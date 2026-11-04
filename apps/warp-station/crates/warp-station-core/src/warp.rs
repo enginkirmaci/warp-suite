@@ -247,20 +247,26 @@ impl Client {
     }
 
     /// Runs one prompt in a fresh warp-agent chat and returns the final
-    /// assistant text. `on_log` receives the run's progress lines; a signal
-    /// on `cancel` aborts the run server-side and settles as an error.
+    /// assistant text. `background` keeps the run out of warp-agent's own
+    /// UI — no tile, no focus, no sidebar row — which every Warp Station
+    /// consumer wants: the result is parsed here, not read off a chat there.
+    /// `on_log` receives the run's progress lines; a signal on `cancel`
+    /// aborts the run server-side and settles as an error.
     pub async fn run_prompt(
         &mut self,
         workspace: &str,
         prompt: &str,
         choice: &ModelChoice,
+        background: bool,
         mut on_log: impl FnMut(String),
         cancel: async_channel::Receiver<()>,
     ) -> Result<String> {
         let id = self.next_id;
         self.next_id += 1;
-        let mut params =
-            json!({"id": id, "cmd": "run-prompt", "workspace": workspace, "prompt": prompt});
+        let mut params = json!(
+            {"id": id, "cmd": "run-prompt", "workspace": workspace, "prompt": prompt,
+             "background": background}
+        );
         choice.apply(&mut params);
         self.write(&params).await?;
 

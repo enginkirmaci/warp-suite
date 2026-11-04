@@ -56,7 +56,7 @@ impl Default for NugetLocalSettings {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase", default)]
 pub struct ReposSettings {
     pub repo_scan_folders: Option<Vec<String>>,
@@ -117,6 +117,29 @@ pub struct ReposSettings {
     pub repo_tabs: Option<Vec<String>>,
     /// The list pane's width in layout pixels; None = the shell's default.
     pub list_width: Option<f32>,
+    /// The toolbar's Archive toggle; None = off. Absence-meaningful like
+    /// sort_ascending.
+    pub show_archived: Option<bool>,
+    /// The repo row the list last showed; None = the first row stands in.
+    pub selected_repo: Option<String>,
+    /// The strip's on-screen tab (a repo folder); None = the Repositories tab.
+    pub open_tab: Option<String>,
+    /// Each repo tab's resting detail tab, matched to the strip by folder;
+    /// None = every tab opens on Overview.
+    pub tab_views: Option<Vec<RepoTabView>>,
+    /// What the Repositories tab was showing when a repo tab took over;
+    /// None = the defaults.
+    pub home_view: Option<RepoTabView>,
+}
+
+/// One user-arranged view that survives a restart: a repo folder and the
+/// detail tab it was left on. `tab` carries the WorkspaceTab label so the
+/// file stays readable.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "PascalCase")]
+pub struct RepoTabView {
+    pub folder: String,
+    pub tab: String,
 }
 
 impl Default for ReposSettings {
@@ -155,6 +178,11 @@ impl Default for ReposSettings {
             issue_sort: None,
             repo_tabs: None,
             list_width: None,
+            show_archived: None,
+            selected_repo: None,
+            open_tab: None,
+            tab_views: None,
+            home_view: None,
         }
     }
 }
@@ -660,5 +688,45 @@ mod tests {
         .unwrap();
         assert!(!off.warp_agent.enable_warp_agent);
         assert_eq!(off.warp_agent.executable, "wa");
+    }
+
+    #[test]
+    fn ui_state_keys_round_trip_and_absent_means_defaults() {
+        // legacy files predate every UI-state key: absence reads as the
+        // launch defaults (no archive toggle, first row, Repositories tab)
+        let legacy: AppSettings = serde_json::from_str("{}").unwrap();
+        assert_eq!(legacy.repos.show_archived, None);
+        assert_eq!(legacy.repos.selected_repo, None);
+        assert_eq!(legacy.repos.open_tab, None);
+        assert_eq!(legacy.repos.tab_views, None);
+        assert_eq!(legacy.repos.home_view, None);
+
+        let arranged: AppSettings = serde_json::from_str(
+            r#"{
+                "Repos": {
+                    "ShowArchived": true,
+                    "SelectedRepo": "/work/alpha",
+                    "OpenTab": "/work/beta",
+                    "TabViews": [{"Folder": "/work/beta", "Tab": "Changes"}],
+                    "HomeView": {"Folder": "/work/alpha", "Tab": "History"}
+                }
+            }"#,
+        )
+        .unwrap();
+        assert_eq!(arranged.repos.show_archived, Some(true));
+        assert_eq!(arranged.repos.selected_repo.as_deref(), Some("/work/alpha"));
+        assert_eq!(arranged.repos.open_tab.as_deref(), Some("/work/beta"));
+        assert_eq!(arranged.repos.tab_views.as_ref().map(|v| v.len()), Some(1));
+        assert_eq!(arranged.repos.home_view.as_ref().map(|v| v.tab.as_str()), Some("History"));
+
+        // and the whole graph serializes back under the same PascalCase keys
+        let json = serde_json::to_string_pretty(&arranged).unwrap();
+        assert!(json.contains("\"ShowArchived\": true"));
+        assert!(json.contains("\"SelectedRepo\": \"/work/alpha\""));
+        assert!(json.contains("\"OpenTab\""));
+        assert!(json.contains("\"TabViews\""));
+        assert!(json.contains("\"HomeView\""));
+        let back: AppSettings = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.repos, arranged.repos);
     }
 }

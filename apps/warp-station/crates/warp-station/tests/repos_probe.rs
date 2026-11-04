@@ -920,6 +920,9 @@ fn load_changes_folders(
 fn fetch_settled_reloads_the_selected_workspace(cx: &mut TestAppContext) {
     use warp_station_core::repo_store::StatusProbe;
 
+    // like every probe here: the scratch HOME must be in place before the
+    // store reads settings, whatever order the parallel tests start in
+    scratch_home();
     let (net_tx, net_rx) = async_channel::unbounded();
     let store = cx.new(|cx| {
         let mut store = Store::new(cx, net_tx);
