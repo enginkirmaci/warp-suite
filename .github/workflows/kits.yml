@@ -43,8 +43,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+      - name: Read the pinned channel
+        run: echo "channel=$(sed -n 's/^channel = "\(.*\)"/\1/p' rust-toolchain.toml)" >> "$GITHUB_OUTPUT"
+        id: toolchain
       - uses: dtolnay/rust-toolchain@stable
         with:
+          toolchain: ${{ steps.toolchain.outputs.channel }}
           components: rustfmt
       - name: cargo fmt --check
         run: cargo fmt --all --check
@@ -56,8 +60,12 @@ jobs:
 
       - uses: ./.github/actions/gpui-deps
 
+      - name: Read the pinned channel
+        run: echo "channel=$(sed -n 's/^channel = "\(.*\)"/\1/p' rust-toolchain.toml)" >> "$GITHUB_OUTPUT"
+        id: toolchain
       - uses: dtolnay/rust-toolchain@stable
         with:
+          toolchain: ${{ steps.toolchain.outputs.channel }}
           components: clippy
 
       # rust-cache keys on the rustc version, the lockfiles and
@@ -107,7 +115,12 @@ jobs:
 
       - uses: ./.github/actions/gpui-deps
 
+      - name: Read the pinned channel
+        run: echo "channel=$(sed -n 's/^channel = "\(.*\)"/\1/p' rust-toolchain.toml)" >> "$GITHUB_OUTPUT"
+        id: toolchain
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ steps.toolchain.outputs.channel }}
 
       # ONE workspace and ONE lockfile, so a single cache entry covers every
       # app: the old "two anchor workspaces" split (listing apps/* separately
