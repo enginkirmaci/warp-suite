@@ -217,6 +217,12 @@ impl LiveScroll {
         self.inner.top.get()
     }
 
+    /// Whether the last layout left anything to scroll — a fit-content host
+    /// keeps the extent at zero, and a scrollbar there would only lie.
+    pub(super) fn can_scroll(&self) -> bool {
+        self.inner.max.get() > 0.
+    }
+
     fn set_top(&self, top: f32) {
         self.inner.top.set(top.clamp(0., self.inner.max.get()));
     }
@@ -351,6 +357,11 @@ pub struct LiveEditorState {
     fit_content: bool,
     /// The content height last reported to a fit-content host.
     fit_height: f32,
+    /// The fenced blocks of the last laid-out frame. A read-only host asks
+    /// for them on every render (a chat transcript re-renders per scroll
+    /// tick); recomputing them walks every line and copies every block's
+    /// source, so they are taken once, with the frame they describe.
+    block_cache: Vec<CodeBlock>,
     /// Code blocks a host hung an overlay child on this render, by
     /// [`CodeBlock::index`] — their language labels shift left of the slot.
     pub(super) overlay_blocks: HashSet<usize>,
@@ -433,6 +444,7 @@ impl LiveEditorState {
             read_only: false,
             fit_content: false,
             fit_height: 0.,
+            block_cache: Vec::new(),
             overlay_blocks: HashSet::new(),
             find: FindBar {
                 open: false,
@@ -586,10 +598,15 @@ impl LiveEditorState {
     /// order. The band's first line carries the language label, so a host
     /// overlay button in the top-right corner needs the label shifted left
     /// of its slot (`overlay_blocks`).
+    ///
+    /// Taken from the frame's cache: the walk is per line and the source
+    /// copy is per block, and a read-only host asks on every render.
     pub fn code_blocks(&self) -> Vec<CodeBlock> {
-        let Some(frame) = self.frame.as_ref() else {
-            return Vec::new();
-        };
+        self.block_cache.clone()
+    }
+
+    /// Scans `frame` for its fenced blocks — with the layout, not per render.
+    fn scan_code_blocks(&self, frame: &Frame) -> Vec<CodeBlock> {
         let mut bands: Vec<(usize, f32, f32)> = Vec::new();
         let mut open: Option<(usize, f32)> = None;
         for (ix, line) in frame.lines.iter().enumerate() {
@@ -646,7 +663,10 @@ impl LiveEditorState {
         };
         let start = start.min(self.text.len());
         let end = end.max(start).min(self.text.len());
-        self.text[start..end].trim_end_matches('\n').to_string().into()
+        self.text[start..end]
+            .trim_end_matches('\n')
+            .to_string()
+            .into()
     }
 
     /// The document text.
@@ -956,11 +976,22 @@ impl LiveEditorState {
                 ));
                 self.frame = Some(frame.clone());
                 self.frame_key = Some(key);
+                let blocks = self.scan_code_blocks(&frame);
+                self.block_cache = blocks;
                 frame
             }
         };
-        self.scroll
-            .update_extent(bounds, frame.height, frame.max_scroll);
+        // a fit-content host wraps this element in the whole content height
+        // and scrolls it as a whole, so the editor must keep no scroll
+        // extent of its own: the frame's `max_scroll` carries a reading tail
+        // (half a viewport) that would otherwise let a wheel over a message
+        // shift its text inside its own box instead of scrolling the host.
+        let max_scroll = if self.fit_content {
+            0.
+        } else {
+            frame.max_scroll
+        };
+        self.scroll.update_extent(bounds, frame.height, max_scroll);
         if std::mem::take(&mut self.reveal_caret) {
             self.scroll_caret_into_view(&frame, bounds.size.height.as_f32());
         }

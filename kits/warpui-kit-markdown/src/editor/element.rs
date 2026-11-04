@@ -11,7 +11,7 @@ use super::display::{Band, Decor};
 use super::frame::{Frame, LaidBox, LaidLine, Rect, TableStrip};
 use super::icons::{self, Icon};
 use super::layout::{Piece, link_icon_width, remove_gap};
-use super::state::{self, KEY_CONTEXT, CodeBlock, LiveEditorState, PasteHandler};
+use super::state::{self, CodeBlock, KEY_CONTEXT, LiveEditorState, PasteHandler};
 use super::theme::LiveColors;
 use gpui::prelude::*;
 use gpui::{
@@ -389,7 +389,8 @@ impl LiveEditor {
             .child(LiveSurface {
                 state: state.clone(),
             })
-            .child(state::scrollbar(&scroll))
+            // a fit-content host owns the scrolling: no extent, no bar
+            .when(scroll.can_scroll(), |d| d.child(state::scrollbar(&scroll)))
             .children(overlays)
             .child(
                 // the actions anchor: focusable but zero-sized, so the
@@ -673,8 +674,8 @@ impl Painter {
         let empty = editor.value().is_empty();
         let scroll = editor.scroll_handle().top();
         let hover = editor.hover();
-        let viewport = self.bounds.size.height.as_f32();
-        let visible = scroll..scroll + viewport;
+        // paint only what the window can show: see `visible_band`
+        let visible = visible_band(self.bounds, window.content_mask().bounds, scroll);
         let first = self.frame.first_visible(visible.start);
         let lines: Vec<&LaidLine> = self.frame.lines[first..]
             .iter()
@@ -1251,7 +1252,11 @@ fn plain_run(len: usize, color: Hsla, cx: &App) -> TextRun {
 fn overlay_code_index(doc: &crate::live::LiveDocument, byte: usize) -> Option<usize> {
     let line = doc.line_at(byte);
     let block = doc.lines.get(line)?.block?;
-    matches!(doc.blocks[block].kind, crate::live::LiveBlockKind::Code { .. }).then(|| {
+    matches!(
+        doc.blocks[block].kind,
+        crate::live::LiveBlockKind::Code { .. }
+    )
+    .then(|| {
         doc.blocks[..block]
             .iter()
             .filter(|b| matches!(b.kind, crate::live::LiveBlockKind::Code { .. }))
@@ -1259,7 +1264,83 @@ fn overlay_code_index(doc: &crate::live::LiveDocument, byte: usize) -> Option<us
     })
 }
 
+/// The document band to paint for an element at `bounds`, scrolled `scroll`
+/// pixels down, inside an ancestor clip `clip`.
+///
+/// An element sized to its viewport is fully shown, and the band is its own
+/// height. A fit-content host — a chat message — sizes the element to the
+/// whole document instead and clips it to the transcript's viewport, so the
+/// ancestor clip is what says which lines the window can show; painting the
+/// rest costs the whole conversation on every frame.
+fn visible_band(bounds: Bounds<Pixels>, clip: Bounds<Pixels>, scroll: f32) -> Range<f32> {
+    let top = (clip.top() - bounds.top())
+        .clamp(px(0.), bounds.size.height)
+        .as_f32();
+    let bottom = (clip.bottom() - bounds.top())
+        .clamp(px(0.), bounds.size.height)
+        .as_f32();
+    (scroll + top)..(scroll + bottom.max(top))
+}
+
 /// A paint call that failed cost one glyph or icon this frame; log and go on.
 fn paint_failed(err: &anyhow::Error) {
     log::warn!("live editor paint: {err}");
+}
+
+#[cfg(test)]
+mod band_tests {
+    use super::*;
+    use gpui::{point, size};
+
+    fn band(element: (f32, f32, f32), clip: (f32, f32, f32), scroll: f32) -> (f32, f32) {
+        let (x, y, h) = element;
+        let (cx, cy, ch) = clip;
+        let b = visible_band(
+            Bounds::new(point(px(x), px(y)), size(px(400.), px(h))),
+            Bounds::new(point(px(cx), px(cy)), size(px(400.), px(ch))),
+            scroll,
+        );
+        (b.start, b.end)
+    }
+
+    /// A viewport-sized element is painted whole.
+    #[test]
+    fn a_clip_that_holds_the_element_keeps_it_whole() {
+        assert_eq!(band((0., 0., 500.), (0., 0., 500.), 0.), (0., 500.));
+    }
+
+    /// A fit-content element clipped by its host paints only the visible part:
+    /// 3000px of message, its top 1000px scrolled past the 700px transcript
+    /// window (the message itself never scrolls — the host does).
+    #[test]
+    fn a_clip_cuts_the_tail_of_a_tall_element() {
+        assert_eq!(
+            band((0., -1000., 3000.), (0., 0., 700.), 0.),
+            (1000., 1700.)
+        );
+    }
+
+    /// A clip starting inside the element drops the lines above it.
+    #[test]
+    fn a_clip_cuts_the_head_too() {
+        assert_eq!(band((50., 100., 800.), (0., 400., 200.), 0.), (300., 500.));
+    }
+
+    /// An element scrolled off the clip paints nothing, and the empty band
+    /// never runs backwards.
+    #[test]
+    fn an_element_past_the_clip_paints_nothing() {
+        // entirely above the clip
+        let (start, end) = band((0., -800., 500.), (0., 0., 700.), 0.);
+        assert_eq!(start, end);
+        // entirely below it
+        let (start, end) = band((0., 900., 500.), (0., 0., 700.), 0.);
+        assert_eq!(start, end);
+    }
+
+    /// A clip larger than the element cannot paint past its own content.
+    #[test]
+    fn a_clip_bigger_than_the_element_stops_at_its_height() {
+        assert_eq!(band((0., 100., 300.), (0., 0., 700.), 0.), (0., 300.));
+    }
 }

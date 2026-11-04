@@ -41,6 +41,23 @@ impl Render for ReadOnlyProbe {
     }
 }
 
+/// A fit-content host, the shape a chat message takes: the element is as
+/// tall as its whole document and the host scrolls around it.
+struct FitProbe {
+    editor: Entity<LiveEditorState>,
+}
+
+impl Render for FitProbe {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let height = self.editor.read(cx).content_height().max(1.);
+        div().w_full().h(px(height)).child(
+            LiveEditor::new(&self.editor)
+                .read_only(true)
+                .fit_content(true),
+        )
+    }
+}
+
 struct Harness {
     cx: &'static mut VisualTestContext,
     editor: Entity<LiveEditorState>,
@@ -123,6 +140,43 @@ impl Harness {
         };
         this.settle();
         this
+    }
+
+    /// A read-only surface sized to its document by a host that scrolls
+    /// around it, as a chat message is.
+    fn open_fit_read_only(tcx: &mut TestAppContext, text: &str) -> Self {
+        tcx.update(gpui_kit::init);
+        let mut editor = None;
+        let handle = tcx.open_window(gpui::size(px(900.), px(700.)), |window, cx| {
+            let state = cx.new(|cx| {
+                let mut state = LiveEditorState::new(window, cx);
+                state.set_read_only(true, cx);
+                state.set_fit_content(true, cx);
+                state.set_value(text.to_string(), window, cx);
+                state
+            });
+            editor = Some(state.clone());
+            FitProbe { editor: state }
+        });
+        let cx = VisualTestContext::from_window(handle.into(), tcx).into_mut();
+        let mut this = Self {
+            cx,
+            editor: editor.expect("the window was built"),
+        };
+        this.settle();
+        this
+    }
+
+    /// One wheel notch of `dy` pixels over `at`.
+    fn wheel(&mut self, at: Point<gpui::Pixels>, dy: f32) {
+        self.cx.simulate_mouse_move(at, None, Modifiers::default());
+        self.cx.simulate_event(gpui::ScrollWheelEvent {
+            position: at,
+            delta: gpui::ScrollDelta::Pixels(gpui::point(px(0.), px(dy))),
+            modifiers: Modifiers::default(),
+            touch_phase: gpui::TouchPhase::Moved,
+        });
+        self.settle();
     }
 
     /// The offset of the first `needle` in the text.
@@ -992,7 +1046,10 @@ fn read_only_selection_publishes_for_a_hosts_copy_fallback(tcx: &mut TestAppCont
 
 #[gpui::test]
 fn read_only_code_blocks_carry_language_and_code(tcx: &mut TestAppContext) {
-    let h = Harness::open_read_only(tcx, "before\n\n```rust\nlet a = 1;\nlet b = 2;\n```\n\nafter");
+    let h = Harness::open_read_only(
+        tcx,
+        "before\n\n```rust\nlet a = 1;\nlet b = 2;\n```\n\nafter",
+    );
     let blocks = h.cx.read(|cx| h.editor.read(cx).code_blocks());
     assert_eq!(blocks.len(), 1);
     assert_eq!(blocks[0].index, 0);
@@ -1022,4 +1079,32 @@ fn read_only_fit_content_reports_the_document_height(tcx: &mut TestAppContext) {
     h.settle();
     let grown = h.cx.read(|cx| h.editor.read(cx).content_height());
     assert!(grown > height, "{grown} > {height}");
+}
+
+/// A fit-content host sizes the element to the whole document and scrolls
+/// around it; the wheel must belong to that host, not to the message. The
+/// frame's reading tail (half a viewport) used to survive as the editor's
+/// own scroll extent, so a wheel over a reply slid its text inside its box
+/// and stopped the event from reaching the transcript.
+#[gpui::test]
+fn read_only_fit_content_leaves_the_wheel_to_its_host(tcx: &mut TestAppContext) {
+    let body = "a paragraph of the message\n\n".repeat(80);
+
+    // control: the same document in a viewport-sized read-only surface does
+    // scroll, so the wheel is being delivered where this test points it
+    let mut plain = Harness::open_read_only(tcx, &body);
+    let at = plain.point_of(0);
+    plain.wheel(at, -120.);
+    let scrolled = plain.cx.read(|cx| plain.editor.read(cx).scroll_top());
+    assert!(scrolled > 0., "the wheel reaches a scrollable surface");
+
+    // and the fit-content one keeps its offset: it has no extent to scroll
+    let mut fit = Harness::open_fit_read_only(tcx, &body);
+    let at = fit.point_of(0);
+    fit.wheel(at, -120.);
+    let after = fit.cx.read(|cx| fit.editor.read(cx).scroll_top());
+    assert_eq!(
+        after, 0.,
+        "a message laid out at its own height has nothing to scroll"
+    );
 }
