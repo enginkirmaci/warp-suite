@@ -34,21 +34,7 @@ gpui-kit = { version = "0.7" }
 # the shared component family (local sibling repos; swap to version deps to publish)
 warpui-kit-core = { path = "../../../../kits/warpui-kit-core" }
 warpui-kit-platform = { path = "../../../../kits/warpui-kit-platform" }
-warpui-kit-diff = { path = "../../../../kits/warpui-kit-diff", features = [
-    "tree-sitter-bash",
-    "tree-sitter-c",
-    "tree-sitter-cpp",
-    "tree-sitter-css",
-    "tree-sitter-go",
-    "tree-sitter-html",
-    "tree-sitter-javascript",
-    "tree-sitter-python",
-    "tree-sitter-rust",
-    "tree-sitter-toml",
-    "tree-sitter-typescript",
-    "tree-sitter-tsx",
-    "tree-sitter-yaml",
-] }
+warpui-kit-diff = { path = "../../../../kits/warpui-kit-diff", features = ["all-languages"] }
 warpui-kit-markdown = { path = "../../../../kits/warpui-kit-markdown" }
 warpui-kit-picker = { path = "../../../../kits/warpui-kit-picker" }
 

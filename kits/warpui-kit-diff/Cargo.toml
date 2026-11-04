@@ -19,6 +19,9 @@ tree-sitter-toml = ["gpui-kit/tree-sitter-toml"]
 tree-sitter-typescript = ["gpui-kit/tree-sitter-typescript"]
 tree-sitter-tsx = ["gpui-kit/tree-sitter-tsx"]
 tree-sitter-yaml = ["gpui-kit/tree-sitter-yaml"]
+# every language the suite renders; the apps ask for this one instead of
+# repeating the list per dependency
+all-languages = ["gpui-kit/tree-sitter-bash", "gpui-kit/tree-sitter-c", "gpui-kit/tree-sitter-cpp", "gpui-kit/tree-sitter-css", "gpui-kit/tree-sitter-go", "gpui-kit/tree-sitter-html", "gpui-kit/tree-sitter-javascript", "gpui-kit/tree-sitter-python", "gpui-kit/tree-sitter-rust", "gpui-kit/tree-sitter-toml", "gpui-kit/tree-sitter-tsx", "gpui-kit/tree-sitter-typescript", "gpui-kit/tree-sitter-yaml"]
 tree-sitter-javascript = ["gpui-kit/tree-sitter-javascript"]
 
 [dependencies]

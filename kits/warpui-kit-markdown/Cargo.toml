@@ -22,6 +22,7 @@ tree-sitter-toml = ["warpui-kit-diff/tree-sitter-toml"]
 tree-sitter-tsx = ["warpui-kit-diff/tree-sitter-tsx"]
 tree-sitter-typescript = ["warpui-kit-diff/tree-sitter-typescript"]
 tree-sitter-yaml = ["warpui-kit-diff/tree-sitter-yaml"]
+all-languages = ["warpui-kit-diff/tree-sitter-bash", "warpui-kit-diff/tree-sitter-c", "warpui-kit-diff/tree-sitter-cpp", "warpui-kit-diff/tree-sitter-css", "warpui-kit-diff/tree-sitter-go", "warpui-kit-diff/tree-sitter-html", "warpui-kit-diff/tree-sitter-javascript", "warpui-kit-diff/tree-sitter-python", "warpui-kit-diff/tree-sitter-rust", "warpui-kit-diff/tree-sitter-toml", "warpui-kit-diff/tree-sitter-tsx", "warpui-kit-diff/tree-sitter-typescript", "warpui-kit-diff/tree-sitter-yaml"]
 
 [dependencies]
 # gpui-pre: crates.io snapshots of zed's gpui, pinned to the exact rev
