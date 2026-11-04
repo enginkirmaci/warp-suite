@@ -301,9 +301,7 @@ impl Store {
             .tab_views
             .iter()
             .flatten()
-            .filter_map(|view| {
-                WorkspaceTab::parse(&view.tab).map(|tab| (view.folder.clone(), tab))
-            })
+            .filter_map(|view| WorkspaceTab::parse(&view.tab).map(|tab| (view.folder.clone(), tab)))
             .collect();
         store.pending_open_tab = app_settings.repos.open_tab.clone();
         store.pending_selection = app_settings.repos.selected_repo.clone();
@@ -1682,12 +1680,13 @@ impl Store {
                 tab: tab.tab.label().to_string(),
             })
             .collect();
-        let home = self.home_repo.as_ref().map(|folder| {
-            warp_station_core::settings::RepoTabView {
+        let home = self
+            .home_repo
+            .as_ref()
+            .map(|folder| warp_station_core::settings::RepoTabView {
                 folder: folder.clone(),
                 tab: self.home_tab.label().to_string(),
-            }
-        });
+            });
         self.update_settings(|s| {
             s.repos.repo_tabs = Some(folders);
             s.repos.tab_views = (!views.is_empty()).then_some(views);

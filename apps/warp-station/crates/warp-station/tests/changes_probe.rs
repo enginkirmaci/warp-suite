@@ -41,8 +41,10 @@ fn changes_view_draws_over_real_data(cx: &mut TestAppContext) {
 
     let (net_tx, _net_rx) = async_channel::unbounded();
     let store = cx.new(|cx| {
-        let mut store =
-            Store::with_settings(net_tx, scratch_service("changes-changes_view_draws_over_real_data"));
+        let mut store = Store::with_settings(
+            net_tx,
+            scratch_service("changes-changes_view_draws_over_real_data"),
+        );
         // prime the bottom bar with a REAL snapshot of this repository
         let snapshot = warp_station_core::git::read::change_snapshot(&here);
         let branches = warp_station_core::git::read::branches(&here).unwrap_or_default();
@@ -101,8 +103,10 @@ fn history_and_drill_down_draw(cx: &mut TestAppContext) {
 
     let (net_tx, _net_rx) = async_channel::unbounded();
     let store = cx.new(|cx| {
-        let mut store =
-            Store::with_settings(net_tx, scratch_service("changes-history_and_drill_down_draw"));
+        let mut store = Store::with_settings(
+            net_tx,
+            scratch_service("changes-history_and_drill_down_draw"),
+        );
         store.replace_repos(vec![warp_station_core::repo_store::RepoEntry {
             name: "probe-repo".into(),
             folder_path: here.clone(),
@@ -203,8 +207,10 @@ fn branch_delete_gates_on_kind_current_and_two_clicks(cx: &mut TestAppContext) {
     // the receiver stays bound: the confirmed delete must arrive on it
     let (net_tx, net_rx) = async_channel::unbounded();
     let store = cx.new(|cx| {
-        let mut store =
-            Store::with_settings(net_tx, scratch_service("changes-branch_delete_gates_on_kind_current_and_two_clicks"));
+        let mut store = Store::with_settings(
+            net_tx,
+            scratch_service("changes-branch_delete_gates_on_kind_current_and_two_clicks"),
+        );
         store.replace_repos(vec![warp_station_core::repo_store::RepoEntry {
             name: "probe-repo".into(),
             folder_path: "/probe/alpha".into(),
@@ -465,8 +471,10 @@ fn the_history_list_lays_out_only_its_visible_rows(cx: &mut TestAppContext) {
 
     let (net_tx, _net_rx) = async_channel::unbounded();
     let store = cx.new(|cx| {
-        let mut store =
-            Store::with_settings(net_tx, scratch_service("changes-the_history_list_lays_out_only_its_visible_rows"));
+        let mut store = Store::with_settings(
+            net_tx,
+            scratch_service("changes-the_history_list_lays_out_only_its_visible_rows"),
+        );
         store.replace_repos(vec![warp_station_core::repo_store::RepoEntry {
             name: "probe-repo".into(),
             folder_path: here.clone(),

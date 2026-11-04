@@ -717,7 +717,10 @@ mod tests {
         assert_eq!(arranged.repos.selected_repo.as_deref(), Some("/work/alpha"));
         assert_eq!(arranged.repos.open_tab.as_deref(), Some("/work/beta"));
         assert_eq!(arranged.repos.tab_views.as_ref().map(|v| v.len()), Some(1));
-        assert_eq!(arranged.repos.home_view.as_ref().map(|v| v.tab.as_str()), Some("History"));
+        assert_eq!(
+            arranged.repos.home_view.as_ref().map(|v| v.tab.as_str()),
+            Some("History")
+        );
 
         // and the whole graph serializes back under the same PascalCase keys
         let json = serde_json::to_string_pretty(&arranged).unwrap();

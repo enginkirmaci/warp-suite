@@ -169,8 +169,10 @@ fn rail_star_toggles_the_favourite(cx: &mut TestAppContext) {
 
     let (net_tx, _net_rx) = async_channel::unbounded();
     let store = cx.new(|_cx| {
-        let mut store =
-            Store::with_settings(net_tx, scratch_service("split-rail_star_toggles_the_favourite"));
+        let mut store = Store::with_settings(
+            net_tx,
+            scratch_service("split-rail_star_toggles_the_favourite"),
+        );
         store.group_by_root = false;
         store.replace_repos(vec![entry("alpha", "/probe/alpha")]);
         store
@@ -206,8 +208,10 @@ fn rail_sync_verbs_reach_the_net_thread(cx: &mut TestAppContext) {
 
     let (net_tx, net_rx) = async_channel::unbounded();
     let store = cx.new(|_cx| {
-        let mut store =
-            Store::with_settings(net_tx, scratch_service("split-rail_sync_verbs_reach_the_net_thread"));
+        let mut store = Store::with_settings(
+            net_tx,
+            scratch_service("split-rail_sync_verbs_reach_the_net_thread"),
+        );
         store.group_by_root = false;
         // both directions waiting, so both Needs-you verbs render
         let mut repo = entry("alpha", "/probe/alpha");
@@ -255,8 +259,10 @@ fn keymap_steps_rows_and_favorites(cx: &mut TestAppContext) {
 
     let (net_tx, _net_rx) = async_channel::unbounded();
     let store = cx.new(|_cx| {
-        let mut store =
-            Store::with_settings(net_tx, scratch_service("split-keymap_steps_rows_and_favorites"));
+        let mut store = Store::with_settings(
+            net_tx,
+            scratch_service("split-keymap_steps_rows_and_favorites"),
+        );
         store.group_by_root = false;
         store.replace_repos(vec![
             entry("alpha", "/probe/alpha"),
@@ -305,8 +311,10 @@ fn commit_key_opens_the_changes_tab(cx: &mut TestAppContext) {
 
     let (net_tx, _net_rx) = async_channel::unbounded();
     let store = cx.new(|_cx| {
-        let mut store =
-            Store::with_settings(net_tx, scratch_service("split-commit_key_opens_the_changes_tab"));
+        let mut store = Store::with_settings(
+            net_tx,
+            scratch_service("split-commit_key_opens_the_changes_tab"),
+        );
         store.group_by_root = false;
         store.replace_repos(vec![entry("alpha", "/probe/alpha")]);
         store
@@ -335,8 +343,10 @@ fn rail_menu_opens_and_the_tag_chip_switches_to_an_editor(cx: &mut TestAppContex
 
     let (net_tx, _net_rx) = async_channel::unbounded();
     let store = cx.new(|_cx| {
-        let mut store =
-            Store::with_settings(net_tx, scratch_service("split-rail_menu_opens_and_the_tag_chip_switches_to_an_editor"));
+        let mut store = Store::with_settings(
+            net_tx,
+            scratch_service("split-rail_menu_opens_and_the_tag_chip_switches_to_an_editor"),
+        );
         store.group_by_root = false;
         store.replace_repos(vec![entry("alpha", "/probe/alpha")]);
         store
@@ -403,8 +413,10 @@ fn scope_segments_filter_the_projected_list(cx: &mut TestAppContext) {
 
     let (net_tx, _net_rx) = async_channel::unbounded();
     let store = cx.new(|_cx| {
-        let mut store =
-            Store::with_settings(net_tx, scratch_service("split-scope_segments_filter_the_projected_list"));
+        let mut store = Store::with_settings(
+            net_tx,
+            scratch_service("split-scope_segments_filter_the_projected_list"),
+        );
         store.group_by_root = false;
         let mut clean = entry("beta", "/probe/beta");
         clean.git_modified_count = 0;
@@ -483,8 +495,10 @@ fn rail_file_rows_render_from_a_snapshot(cx: &mut TestAppContext) {
 
     let (net_tx, _net_rx) = async_channel::unbounded();
     let store = cx.new(|_cx| {
-        let mut store =
-            Store::with_settings(net_tx, scratch_service("split-rail_file_rows_render_from_a_snapshot"));
+        let mut store = Store::with_settings(
+            net_tx,
+            scratch_service("split-rail_file_rows_render_from_a_snapshot"),
+        );
         store.group_by_root = false;
         store.replace_repos(vec![entry("alpha", "/probe/alpha")]);
         store.set_changes(Some(warp_station_core::model::GitChangeSnapshot {
@@ -524,8 +538,10 @@ fn rail_issue_rows_render_from_a_github_snapshot(cx: &mut TestAppContext) {
 
     let (net_tx, _net_rx) = async_channel::unbounded();
     let store = cx.new(|_cx| {
-        let mut store =
-            Store::with_settings(net_tx, scratch_service("split-rail_issue_rows_render_from_a_github_snapshot"));
+        let mut store = Store::with_settings(
+            net_tx,
+            scratch_service("split-rail_issue_rows_render_from_a_github_snapshot"),
+        );
         store.group_by_root = false;
         store.replace_repos(vec![entry("alpha", "/probe/alpha")]);
         let snapshot = warp_station_core::github::GitHubSnapshot {
@@ -573,8 +589,10 @@ fn pressing_the_selected_row_keeps_it_selected(cx: &mut TestAppContext) {
 
     let (net_tx, _net_rx) = async_channel::unbounded();
     let store = cx.new(|_cx| {
-        let mut store =
-            Store::with_settings(net_tx, scratch_service("split-pressing_the_selected_row_keeps_it_selected"));
+        let mut store = Store::with_settings(
+            net_tx,
+            scratch_service("split-pressing_the_selected_row_keeps_it_selected"),
+        );
         store.group_by_root = false;
         store.replace_repos(vec![
             entry("alpha", "/probe/alpha"),
@@ -610,8 +628,10 @@ fn stepping_past_the_list_ends_keeps_the_selection(cx: &mut TestAppContext) {
 
     let (net_tx, _net_rx) = async_channel::unbounded();
     let store = cx.new(|_cx| {
-        let mut store =
-            Store::with_settings(net_tx, scratch_service("split-stepping_past_the_list_ends_keeps_the_selection"));
+        let mut store = Store::with_settings(
+            net_tx,
+            scratch_service("split-stepping_past_the_list_ends_keeps_the_selection"),
+        );
         store.group_by_root = false;
         store.replace_repos(vec![
             entry("alpha", "/probe/alpha"),
@@ -654,8 +674,10 @@ fn the_first_row_is_selected_and_loaded_without_a_press(cx: &mut TestAppContext)
 
     let (net_tx, net_rx) = async_channel::unbounded();
     let store = cx.new(|_cx| {
-        let mut store =
-            Store::with_settings(net_tx, scratch_service("split-the_first_row_is_selected_and_loaded_without_a_press"));
+        let mut store = Store::with_settings(
+            net_tx,
+            scratch_service("split-the_first_row_is_selected_and_loaded_without_a_press"),
+        );
         store.group_by_root = false;
         store.replace_repos(vec![
             entry("alpha", "/probe/alpha"),
@@ -706,8 +728,10 @@ fn the_first_repo_to_arrive_is_selected(cx: &mut TestAppContext) {
 
     let (net_tx, net_rx) = async_channel::unbounded();
     let store = cx.new(|_cx| {
-        let mut store =
-            Store::with_settings(net_tx, scratch_service("split-the_first_repo_to_arrive_is_selected"));
+        let mut store = Store::with_settings(
+            net_tx,
+            scratch_service("split-the_first_repo_to_arrive_is_selected"),
+        );
         store.group_by_root = false;
         store.replace_repos(Vec::new());
         store
@@ -740,8 +764,7 @@ fn open_changes_tab(
 
     let (net_tx, _net_rx) = async_channel::unbounded();
     let store = cx.new(|_cx| {
-        let mut store =
-            Store::with_settings(net_tx, scratch_service("split-open_changes_tab"));
+        let mut store = Store::with_settings(net_tx, scratch_service("split-open_changes_tab"));
         store.group_by_root = false;
         store.replace_repos(vec![entry("alpha", "/probe/alpha")]);
         store.branches = vec![GitBranchRef {
@@ -2200,8 +2223,10 @@ fn dialogs_render_over_the_split_layout(cx: &mut TestAppContext) {
 
     let (net_tx, _net_rx) = async_channel::unbounded();
     let store = cx.new(|_cx| {
-        let mut store =
-            Store::with_settings(net_tx, scratch_service("split-dialogs_render_over_the_split_layout"));
+        let mut store = Store::with_settings(
+            net_tx,
+            scratch_service("split-dialogs_render_over_the_split_layout"),
+        );
         store.group_by_root = false;
         store.replace_repos(vec![entry("alpha", "/probe/alpha")]);
         store
@@ -2419,8 +2444,8 @@ fn the_rail_moves_between_sections(cx: &mut TestAppContext) {
 /// each while its repo is still waiting for the scan to name it.
 #[gpui::test]
 fn the_last_arrangement_restores_on_a_restart(cx: &mut TestAppContext) {
-    use warp_station_core::settings::RepoTabView;
     use std::sync::Arc;
+    use warp_station_core::settings::RepoTabView;
 
     let (store, _net_rx) = scratch_store(
         cx,
@@ -2434,9 +2459,21 @@ fn the_last_arrangement_restores_on_a_restart(cx: &mut TestAppContext) {
         s.toggle_show_archived(cx);
     });
     let saved = cx.read_entity(&store, |s, _| s.settings().repos.clone());
-    assert_eq!(saved.open_tab.as_deref(), Some("/probe/beta"), "the open tab persisted");
-    assert_eq!(saved.selected_repo.as_deref(), Some("/probe/beta"), "the selection persisted");
-    assert_eq!(saved.show_archived, Some(true), "the archive toggle persisted");
+    assert_eq!(
+        saved.open_tab.as_deref(),
+        Some("/probe/beta"),
+        "the open tab persisted"
+    );
+    assert_eq!(
+        saved.selected_repo.as_deref(),
+        Some("/probe/beta"),
+        "the selection persisted"
+    );
+    assert_eq!(
+        saved.show_archived,
+        Some(true),
+        "the archive toggle persisted"
+    );
     assert_eq!(
         saved.tab_views,
         Some(vec![RepoTabView {

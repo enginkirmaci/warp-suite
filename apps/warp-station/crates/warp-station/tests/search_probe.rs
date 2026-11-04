@@ -51,8 +51,7 @@ fn entry(name: &str, path: &str) -> RepoEntry {
 fn fake_store(cx: &mut TestAppContext) -> gpui::Entity<Store> {
     let (net_tx, _net_rx) = async_channel::unbounded();
     cx.new(|_cx| {
-        let mut store =
-            Store::with_settings(net_tx, scratch_service("search-fake_store"));
+        let mut store = Store::with_settings(net_tx, scratch_service("search-fake_store"));
         // pin the flat layout: the developer's live settings must never
         // re-shape the probes' row math (the grouping probes seed their own
         // scratch-settings store)

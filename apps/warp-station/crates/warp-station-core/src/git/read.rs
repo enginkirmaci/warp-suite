@@ -138,7 +138,8 @@ pub fn change_snapshot(folder: &Path) -> Option<GitChangeSnapshot> {
         // gutters carry the file's line count, like the staged view's.
         let index = repo.index().ok()?;
         let mut diff_opts = diff_options(repo);
-        diff_opts.include_untracked(true)
+        diff_opts
+            .include_untracked(true)
             .recurse_untracked_dirs(true)
             .show_untracked_content(true);
         if let Ok(mut diff) = repo.diff_index_to_workdir(Some(&index), Some(&mut diff_opts))
@@ -551,7 +552,8 @@ pub fn day_activity(folder: &Path, day: chrono::NaiveDate) -> Option<GitDayActiv
             let index = repo.index().ok()?;
             let mut diff_opts = diff_options(repo);
             // untracked rows carry their line counts like staged ones do
-            diff_opts.include_untracked(true)
+            diff_opts
+                .include_untracked(true)
                 .recurse_untracked_dirs(true)
                 .show_untracked_content(true);
             if let Ok(mut diff) = repo.diff_index_to_workdir(Some(&index), Some(&mut diff_opts))
@@ -1046,7 +1048,8 @@ mod untracked_patch_tests {
     /// gets its own folder: the tests run in parallel and a shared `.git`
     /// locks up.
     fn scratch_repo(name: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!("ws-read-untracked-{name}-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("ws-read-untracked-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let repo = git2::Repository::init(&dir).unwrap();

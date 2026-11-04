@@ -834,7 +834,8 @@ fn code_search_rows_render_and_persist(cx: &mut TestAppContext) {
     wcx.simulate_keystrokes("ctrl-a");
     wcx.simulate_input("rgz");
     // a keystroke commit is debounced: beat the clock past it, no Save press
-    wcx.executor().advance_clock(std::time::Duration::from_millis(700));
+    wcx.executor()
+        .advance_clock(std::time::Duration::from_millis(700));
     wcx.run_until_parked();
 
     let json = std::fs::read_to_string(&scratch).expect("saved settings");
