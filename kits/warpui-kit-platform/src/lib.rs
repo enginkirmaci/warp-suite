@@ -1,7 +1,7 @@
 //! warpui-kit-platform: the platform plumbing the suite apps had each re-grown
 //! by hand — atomic file replace, file logging, the notes store's shared read
-//! side — plus, under the `assets` feature, the rust-embed-over-gpui-kit
-//! `AssetSource`.
+//! side, the warp-agent door's wire contract — plus, under the `assets`
+//! feature, the rust-embed-over-gpui-kit `AssetSource`.
 //!
 //! Unlike the rest of the family this crate carries no design system; it
 //! exists so the per-app copies (which had already drifted in their error
@@ -9,6 +9,7 @@
 //! (`default-features = false`) so headless service crates can take the
 //! io/logging halves.
 
+pub mod door;
 pub mod io;
 pub mod logging;
 pub mod notes;

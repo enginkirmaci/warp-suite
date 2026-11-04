@@ -16,6 +16,7 @@
 //! - [`mod@icon`] — tinted svg icon builders (asset path or inline source)
 //! - [`bootstrap`] — the one app startup: kit init, shared scale and palette,
 //!   follow hooks, first theme pass, reduced motion
+//! - [`pump`] — the net-event drain loop both store-driven apps ran by hand
 //! - [`controls`] — the one button look, menu row, popover card and fold body
 //! - [`field`] — the one text box: `.field`, `.area` and the `.kbd` chip
 //! - [`media`] — attachment mime guesses and inline images from bytes
@@ -36,6 +37,7 @@ pub mod kit;
 pub mod media;
 pub mod motion;
 pub mod palette;
+pub mod pump;
 pub mod scale;
 pub mod settings;
 pub mod shell;

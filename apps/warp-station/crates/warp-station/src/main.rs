@@ -76,42 +76,18 @@ fn main() {
                 }
             }
 
-            // net events → store. Polled with a timer fallback: this gpui rev
-            // does not service cross-thread channel wakeups on foreground tasks,
-            // so a plain recv().await would sleep forever (async_channel recv is
-            // cancel-safe, re-creating the future each lap is fine). A wake drains
-            // the whole pending burst in one pass — one timer and one frame per
-            // burst instead of one per event.
-            let event_store = store.downgrade();
-            cx.spawn(async move |cx| {
-                loop {
-                    let timeout = cx
-                        .background_executor()
-                        .timer(std::time::Duration::from_millis(200));
-                    let mut recv = Box::pin(event_rx.recv());
-                    match futures_util::future::select(recv.as_mut(), timeout).await {
-                        futures_util::future::Either::Left((received, _)) => {
-                            let Ok(first) = received else { break };
-                            let Some(store) = event_store.upgrade() else {
-                                break;
-                            };
-                            store.update(cx, |s, cx| s.on_net_event(first, cx));
-                            let mut batch = 1;
-                            while batch < 64 {
-                                match event_rx.try_recv() {
-                                    Ok(event) => {
-                                        store.update(cx, |s, cx| s.on_net_event(event, cx));
-                                        batch += 1;
-                                    }
-                                    Err(_) => break,
-                                }
-                            }
-                        }
-                        futures_util::future::Either::Right((_, _)) => continue,
-                    }
+            // net events → store; the timer-fallback cadence, the burst cap
+            // and the gpui-rev caveat live in the pump
+            warpui_kit_core::pump::spawn(cx, event_rx, {
+                let store = store.downgrade();
+                move |cx, event| {
+                    let Some(store) = store.upgrade() else {
+                        return false;
+                    };
+                    store.update(cx, |s, cx| s.on_net_event(event, cx));
+                    true
                 }
-            })
-            .detach();
+            });
 
             // toasts expire on a once-per-second beat; the same beat polls the
             // focus edge and the periodic fetch/refresh schedules

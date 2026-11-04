@@ -11,6 +11,7 @@ use std::time::Duration;
 
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpStream;
+use warpui_kit_platform::door::{self, ANSWER_TIMEOUT, MAX_LINE, cmd};
 
 use crate::opencode::{CatalogHarness, CatalogModel, ModelCatalog, default_harnesses};
 use crate::settings::AppSettings;
@@ -68,19 +69,8 @@ impl ModelChoice {
     }
 }
 
-/// How long a door command may take to answer (run-prompt waits for the
-/// turn itself and is exempt on the server side).
-const ANSWER_TIMEOUT: Duration = Duration::from_secs(60);
 /// How long a launch-and-connect attempt keeps polling the door.
 const LAUNCH_DEADLINE: Duration = Duration::from_secs(15);
-
-pub fn port_file() -> PathBuf {
-    config_dir().join("ipc.port")
-}
-
-pub fn token_file() -> PathBuf {
-    config_dir().join("ipc.token")
-}
 
 fn config_dir() -> PathBuf {
     crate::paths::home().join(".warp-agent")
@@ -88,19 +78,7 @@ fn config_dir() -> PathBuf {
 
 /// The door endpoint as published by a running warp-agent.
 pub fn read_endpoint() -> Option<(u16, String)> {
-    let port = std::fs::read_to_string(port_file())
-        .ok()?
-        .trim()
-        .parse()
-        .ok()?;
-    let token = std::fs::read_to_string(token_file())
-        .ok()?
-        .trim()
-        .to_string();
-    if token.is_empty() {
-        return None;
-    }
-    Some((port, token))
+    door::read_endpoint_in(&config_dir())
 }
 
 /// One authenticated door connection. Line frames: requests out, responses
@@ -146,7 +124,7 @@ impl Client {
     /// True when a running warp-agent answered a ping.
     pub async fn probe() -> bool {
         match Self::connect().await {
-            Ok(mut client) => client.request("ping", json!({})).await.is_ok(),
+            Ok(mut client) => client.request(cmd::PING, json!({})).await.is_ok(),
             Err(_) => false,
         }
     }
@@ -161,12 +139,12 @@ impl Client {
     /// Reads one NDJSON frame; an oversized line drops the connection (the
     /// door promises the same cap on its side).
     async fn read_frame(&mut self) -> Result<Value> {
-        let mut limited = (&mut self.reader).take(8 * 1024 * 1024 + 1);
+        let mut limited = (&mut self.reader).take(MAX_LINE as u64 + 1);
         let mut line = String::new();
         if limited.read_line(&mut line).await? == 0 {
             return Err(anyhow!("warp-agent closed the door"));
         }
-        if line.len() > 8 * 1024 * 1024 {
+        if line.len() > MAX_LINE {
             return Err(anyhow!("oversized frame from warp-agent"));
         }
         Ok(serde_json::from_str(line.trim())?)
@@ -182,12 +160,8 @@ impl Client {
     pub async fn request(&mut self, cmd: &str, params: Value) -> Result<Value> {
         let id = self.next_id;
         self.next_id += 1;
-        let mut frame = json!({"id": id, "cmd": cmd});
-        if let (Some(target), Some(extra)) = (frame.as_object_mut(), params.as_object()) {
-            for (key, value) in extra {
-                target.insert(key.clone(), value.clone());
-            }
-        }
+        // frame building (id/cmd + params merge) is the protocol crate's
+        let frame = door::request_frame(id, cmd, params);
         self.write(&frame).await?;
         let deadline = tokio::time::sleep(ANSWER_TIMEOUT);
         tokio::pin!(deadline);
@@ -211,7 +185,7 @@ impl Client {
     }
 
     pub async fn open_workspace(&mut self, path: &Path) -> Result<()> {
-        self.request("open-workspace", json!({"path": path.to_string_lossy()}))
+        self.request(cmd::OPEN_WORKSPACE, json!({"path": path.to_string_lossy()}))
             .await
             .map(|_| ())
     }
@@ -226,19 +200,21 @@ impl Client {
         let mut params =
             json!({"workspace": workspace, "prefill": prefill, "auto_send": auto_send});
         choice.apply(&mut params);
-        self.request("new-chat", params).await.map(|_| ())
+        self.request(cmd::NEW_CHAT, params).await.map(|_| ())
     }
 
     /// The harness's model catalog with the variants each model offers. The
     /// door starts that harness when it has no catalog yet, so this can take
     /// as long as a server boot.
     pub async fn models(&mut self, harness: &str) -> Result<ModelCatalog> {
-        let answer = self.request("models", json!({"harness": harness})).await?;
+        let answer = self
+            .request(cmd::MODELS, json!({"harness": harness}))
+            .await?;
         Ok(catalog_from_answer(&answer, harness))
     }
 
     pub async fn status(&mut self) -> Result<Value> {
-        self.request("status", json!({})).await.map(|answer| {
+        self.request(cmd::STATUS, json!({})).await.map(|answer| {
             answer
                 .get("workspaces")
                 .cloned()
@@ -263,12 +239,11 @@ impl Client {
     ) -> Result<String> {
         let id = self.next_id;
         self.next_id += 1;
-        let mut params = json!(
-            {"id": id, "cmd": "run-prompt", "workspace": workspace, "prompt": prompt,
-             "background": background}
-        );
+        let mut params =
+            json!({"workspace": workspace, "prompt": prompt, "background": background});
         choice.apply(&mut params);
-        self.write(&params).await?;
+        let frame = door::request_frame(id, cmd::RUN_PROMPT, params);
+        self.write(&frame).await?;
 
         let deadline = tokio::time::sleep(crate::opencode::RUN_CAP);
         tokio::pin!(deadline);
@@ -277,13 +252,14 @@ impl Client {
             let answer = tokio::select! {
                 biased;
                 _ = &mut deadline, if !cancelled => {
-                    let _ = self.request("cancel", json!({"run": id})).await;
+                    let _ = self.request(cmd::CANCEL, json!({"run": id})).await;
                     return Err(anyhow!("the wand run exceeded its time cap"));
                 }
                 stopped = cancel.recv(), if !cancelled => {
                     if stopped.is_ok() {
                         cancelled = true;
-                        let cancel_frame = json!({"id": self.next_id, "cmd": "cancel", "run": id});
+                        let cancel_frame =
+                            door::request_frame(self.next_id, cmd::CANCEL, json!({"run": id}));
                         self.next_id += 1;
                         self.write(&cancel_frame).await?;
                     }
