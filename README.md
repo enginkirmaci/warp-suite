@@ -125,9 +125,9 @@ together. When one changes, update the other side in the **same** commit.
 
 1. Import it with history: `git subtree add --prefix=apps/<name> <repo> <ref>`.
 2. Add a section to `apps.toml` if it needs non-default build knobs
-   (`linux_build`/`linux_skip`/`icon_prefix`/`scalable_svg`) — `build.sh`
-   picks it up automatically. Windows needs no entry: `build.ps1` discovers
-   every app under `apps/` and compiles an installer only when
+   (`linux_build`/`linux_skip`/`icon_prefix`/`scalable_svg`) — both build
+   scripts read that one manifest, so `build.sh` and `build.ps1` pick it up
+   automatically. Windows compiles an installer only when
    `packaging/windows/<app>.iss` exists.
 3. If it needs a shared library crate, add it to the `kits/`
    workspace.
@@ -151,13 +151,13 @@ C#/.NET SnapIt repo would join the same way if ever wanted.
   (wayland, xkbcommon, vulkan, fontconfig); expect to touch it when GPUI's
   requirements grow.
 - **Kit crates:** the apps depend on `warpui-kit-core`/`-diff`/`-markdown`/`-picker`/`-platform`
-  through `../../kits/*` path deps. They live in this repo as the
-  `kits/` cargo workspace, so a release builds from this repo alone.
-  The suite commit is the kits' provenance — no sync step, no second copy.
-  Run `cargo test` in `kits/` after changing one; the apps' lock files
-  alone do not describe the libraries. `kits/Cargo.lock` is committed (the
-  only workspace that keeps one) so `cargo --locked` in CI resolves the same
-  versions every run.
+  through `../../kits/*` path deps. They live in this repo as members of the
+  one suite workspace (root `Cargo.toml`), so a release builds from this
+  repo alone. The suite commit is the kits' provenance — no sync step, no
+  second copy. Everything resolves from the one committed root
+  `Cargo.lock`, so `cargo --locked` in CI resolves the same versions every
+  run; `cargo test` after changing a kit builds the apps against it
+  directly.
 
 ## CI caching
 
@@ -165,14 +165,18 @@ Both workflows use `Swatinem/rust-cache`, and both must name the target dir
 explicitly (`workspaces: <workspace> -> <target>`):
 
 - `.cargo/config.toml` sends every workspace to `.build/target`, so the
-  action's default `<workspace>/target` does not exist. A bare
-  `workspaces: kits` caches only the registry, and the build stays cold.
-- The five app workspaces share that one target dir. The action prunes a
-  target dir down to the owning workspace's dependency closure, so listing
-  several workspaces runs several prune passes over the same tree and the
-  last one wins — warp-snapit keeps ~31 of ~816 packages and would delete
-  everything the others built. Each job therefore uses one anchor workspace
-  (`apps/warp-notes`, whose closure covers ~98% of the others').
+  action's default `<workspace>/target` does not exist. Without the
+  explicit path the action caches only the registry and every run compiles
+  from scratch.
+- The whole suite is one workspace now, so each job names it once
+  (`workspaces: . -> .build/target`) with its own `shared-key`
+  (`release-linux`/`release-windows` in the release workflow, `kits`/`apps`
+  in the gate). Earlier schemes that listed several workspaces hit a prune
+  war — the action prunes a target dir down to the owning workspace's
+  dependency closure, several workspaces meant several prune passes over
+  the same tree and the last one won, deleting everything the others had
+  built. One workspace retired the problem; the workflow comments keep the
+  history.
 
 The target dir is ~4.5 GB release / ~2.9 GB debug, so the caches are pruned
 rather than uploaded whole (the repo cache limit is 10 GB).
