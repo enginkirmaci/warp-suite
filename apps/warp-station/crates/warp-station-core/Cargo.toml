@@ -15,6 +15,9 @@ chrono = { version = "0.4", default-features = false, features = ["clock", "std"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "process", "time", "io-util", "sync", "net"] }
 git2 = { version = "0.21", default-features = false }
+# io/logging halves only — default-features keeps gpui out of this crate's
+# "testable without a display" graph
+warpui-kit-platform = { path = "../../../../kits/warpui-kit-platform", default-features = false }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

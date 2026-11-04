@@ -33,6 +33,7 @@ gpui-kit = { version = "0.7" }
 
 # the shared component family (local sibling repos; swap to version deps to publish)
 warpui-kit-core = { path = "../../../../kits/warpui-kit-core" }
+warpui-kit-platform = { path = "../../../../kits/warpui-kit-platform" }
 warpui-kit-diff = { path = "../../../../kits/warpui-kit-diff", features = [
     "tree-sitter-bash",
     "tree-sitter-c",

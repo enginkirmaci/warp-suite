@@ -1,7 +1,7 @@
 # kits
 
-The shared GPUI component family the suite's apps build on: one cargo workspace
-under `kits/` for the four `warpui-kit-*` crates, extracted from warp-agent and
+The shared component family the suite's apps build on: one cargo workspace
+under `kits/` for the five `warpui-kit-*` crates, extracted from warp-agent and
 Warp Station.
 
 | Crate | Provides |
@@ -10,6 +10,7 @@ Warp Station.
 | `warpui-kit-diff` | `render_diff`, `render_code`, `sniff_lang`, tree-sitter highlighting |
 | `warpui-kit-markdown` | the live markdown editor, span parser, highlighter and formatting ops |
 | `warpui-kit-picker` | `FilteredPicker`: trigger, filter input, virtualized rows, overlay popups |
+| `warpui-kit-platform` | the gpui-free plumbing every app had re-grown: atomic file replace, file logging; the rust-embed-over-gpui-kit asset source rides behind the `assets` feature |
 
 ## Where a shared shape goes
 
@@ -28,14 +29,15 @@ colours.
 ## Working here
 
 ```sh
-cargo test                  # all four crates, headless GPUI probes included
+cargo test                  # all five crates, headless GPUI probes included
 cargo fmt --check
 cargo clippy --all-targets
 ```
 
-`warpui-kit-core` is the base: every other crate depends on it. The other
-three are independent of each other except that `-markdown` uses `-diff` for
-code blocks.
+`warpui-kit-core` is the base: every other crate depends on it. The component
+crates are independent of each other except that `-markdown` uses `-diff` for
+code blocks. `-platform` is the odd one out — no gpui by default, and
+`warp-station-core` takes it with `default-features = false`.
 
 ## How the apps consume it
 

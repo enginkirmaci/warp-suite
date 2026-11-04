@@ -70,7 +70,7 @@ Both builds default the version to `git describe --tags --always
 | `apps.toml` | per-app build knobs (`linux_build`, `linux_skip`, `icon_prefix`, `scalable_svg`) and contract notes |
 | `scripts/manifest.py` | apps.toml reader shared by the scripts + CI |
 | `.cargo/config.toml` | one cargo target dir for the whole suite: `.build/target` for every app, `kits` and `scripts/build.sh` |
-| `kits/` | cargo workspace of the four `warpui-kit-*` crates the apps depend on (`../../kits`) |
+| `kits/` | cargo workspace of the five `warpui-kit-*` crates the apps depend on (`../../kits`) |
 | `scripts/build.sh` | Linux build: `cargo build --release` each app → `dist/linux/warp-suite-<v>-linux/` + tarball |
 | `scripts/build.ps1` | Windows build: `dist/windows/` portable zips + Inno Setup installers |
 | `scripts/deploy.sh` | Linux install/uninstall: local bundle or published release |
@@ -150,7 +150,7 @@ C#/.NET SnapIt repo would join the same way if ever wanted.
 - The apt dependency list in `suite-release.yml` covers GPUI's Linux needs
   (wayland, xkbcommon, vulkan, fontconfig); expect to touch it when GPUI's
   requirements grow.
-- **Kit crates:** the apps depend on `warpui-kit-core`/`-diff`/`-markdown`/`-picker`
+- **Kit crates:** the apps depend on `warpui-kit-core`/`-diff`/`-markdown`/`-picker`/`-platform`
   through `../../kits/*` path deps. They live in this repo as the
   `kits/` cargo workspace, so a release builds from this repo alone.
   The suite commit is the kits' provenance — no sync step, no second copy.

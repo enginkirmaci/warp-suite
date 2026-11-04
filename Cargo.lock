@@ -8381,6 +8381,7 @@ dependencies = [
  "warpui-kit-diff",
  "warpui-kit-markdown",
  "warpui-kit-picker",
+ "warpui-kit-platform",
  "winresource",
 ]
 
@@ -8400,6 +8401,7 @@ dependencies = [
  "tracing-subscriber",
  "warpui-kit-core",
  "warpui-kit-markdown",
+ "warpui-kit-platform",
  "winresource",
 ]
 
@@ -8427,6 +8429,7 @@ dependencies = [
  "warpui-kit-diff",
  "warpui-kit-markdown",
  "warpui-kit-picker",
+ "warpui-kit-platform",
  "winresource",
 ]
 
@@ -8446,6 +8449,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tracing",
+ "warpui-kit-platform",
 ]
 
 [[package]]
@@ -8492,6 +8496,20 @@ dependencies = [
  "gpui-kit",
  "gpui-pre",
  "warpui-kit-core",
+]
+
+[[package]]
+name = "warpui-kit-platform"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "gpui-kit",
+ "gpui-pre",
+ "rust-embed",
+ "serde",
+ "serde_json",
+ "tracing-appender",
+ "tracing-subscriber",
 ]
 
 [[package]]

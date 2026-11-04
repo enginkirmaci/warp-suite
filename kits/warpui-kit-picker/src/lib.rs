@@ -42,6 +42,13 @@ const OVERLAY_WIDTH: f32 = 280.;
 /// beside its provider group header.
 const FIELD_PANEL_MIN_WIDTH: f32 = 260.;
 
+/// The filter field's glyph, embedded as source: this crate ships no assets
+/// and cannot rely on the app embedding a `search` icon (warp-station names
+/// its icons `icon-*.svg`, so a path here used to render nothing, silently).
+/// Same strategy as kit-markdown's editor glyphs; the art is the family
+/// design source's `search` (Lucide, stroke 1.9).
+const SEARCH: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>"##;
+
 // ---- data model ------------------------------------------------------------
 
 /// The asset paths the shell paints. This crate ships no assets — callers
@@ -819,8 +826,8 @@ impl FilteredPicker {
                 // the prototype draws the picker's filter as the one
                 // `.field` with its search icon, not a bare kit input
                 let handle = self.filter.read(cx).focus_handle(cx);
-                let icon = warpui_kit_core::icon(
-                    "icons/search.svg",
+                let icon = warpui_kit_core::icon_data(
+                    SEARCH.as_bytes(),
                     px(warpui_kit_core::fonts::icon_small()),
                     palette::text_muted(),
                 );

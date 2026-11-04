@@ -13,7 +13,9 @@
 //! - [`motion`] — durations and the spinner
 //! - [`kit`] — maps the palette onto gpui-kit's shadcn-style theme tokens
 //! - [`a11y`] — the role/label trait every hand-rolled control passes through
-//! - [`mod@icon`] — tinted svg icon builder
+//! - [`mod@icon`] — tinted svg icon builders (asset path or inline source)
+//! - [`bootstrap`] — the one app startup: kit init, shared scale and palette,
+//!   follow hooks, first theme pass, reduced motion
 //! - [`controls`] — the one button look, menu row, popover card and fold body
 //! - [`field`] — the one text box: `.field`, `.area` and the `.kbd` chip
 //! - [`media`] — attachment mime guesses and inline images from bytes
@@ -24,6 +26,7 @@
 //! same family.
 
 pub mod a11y;
+pub mod bootstrap;
 pub mod controls;
 pub mod field;
 pub mod fonts;
@@ -46,7 +49,7 @@ pub use fonts::{
     font_factor, font_tokens, normalize_font_scale, resolve_fonts, set_font_scale,
     set_system_factor, system_factor, ui_font,
 };
-pub use icon::icon;
+pub use icon::{icon, icon_data};
 pub use kit::apply_kit_theme;
 #[cfg(feature = "media")]
 pub use media::{decode_png_render, mime_for_path};

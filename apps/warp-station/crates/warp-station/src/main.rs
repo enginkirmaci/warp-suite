@@ -37,25 +37,25 @@ fn main() {
     application()
         .with_assets(assets::EmbedAssets::new())
         .run(|cx: &mut App| {
-            // kit components (input decorations, popovers) + our palette mapped
-            // onto their theme tokens — must run before any kit component renders
-            gpui_kit::init(cx);
-
             let (_net_handle, net_sender, event_rx) = warp_station::net::spawn_net_thread();
             let store = cx.new(|cx| Store::new(cx, net_sender));
-            warpui_kit_core::adopt_text_size(
-                store.read(cx).settings().general.font_scale.as_deref(),
-            );
-            warpui_kit_core::adopt_palette(None);
-            warpui_kit_core::follow_palette(|cx: &mut gpui::App| {
-                theme::apply_kit_theme(cx);
-                cx.refresh_windows();
-            });
-            theme::apply_kit_theme(cx);
-            warpui_kit_core::follow_ui_scale(cx, theme::apply_kit_theme);
-            warpui_kit_core::motion::set_reduced(
-                store.read(cx).settings().general.reduce_motion
-                    || warpui_kit_core::motion::system_prefers_reduced(),
+            // the shared startup: kit init, the shared text size (seeded from
+            // this app's old setting) and palette, follow hooks, the first
+            // kit-theme pass and reduced motion
+            let (text_size, reduce_motion) = {
+                let s = store.read(cx);
+                (
+                    s.settings().general.font_scale.clone(),
+                    s.settings().general.reduce_motion,
+                )
+            };
+            warpui_kit_core::bootstrap::init(
+                cx,
+                text_size.as_deref(),
+                reduce_motion,
+                |cx: &mut gpui::App| {
+                    theme::apply_kit_theme(cx);
+                },
             );
 
             // the companion watches this process (--parent) and exits when Warp Station dies

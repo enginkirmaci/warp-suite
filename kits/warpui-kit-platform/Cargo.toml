@@ -1,0 +1,26 @@
+[package]
+name = "warpui-kit-platform"
+version = "0.1.0"
+edition = "2024"
+description = "The gpui-free platform plumbing every suite app re-grew by hand: atomic file writes, file logging; plus the embedded-asset source under the `assets` feature"
+license = "MIT"
+
+[dependencies]
+anyhow = "1"
+serde = "1"
+serde_json = "1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+tracing-appender = "0.2"
+
+# `assets`: the rust-embed-over-gpui-kit AssetSource. Feature-scoped so the
+# headless service crates (warp-station-core) can take the io/logging halves
+# without pulling gpui into their "testable without a display" graph.
+gpui = { package = "gpui-pre", version = "=0.3.7", optional = true }
+gpui-kit = { version = "0.7", optional = true }
+# trait only (no derive in this crate); apps derive with their own
+# `debug-embed` feature so dev builds embed assets too
+rust-embed = { version = "8", default-features = false, optional = true }
+
+[features]
+default = ["assets"]
+assets = ["dep:gpui", "dep:gpui-kit", "dep:rust-embed"]

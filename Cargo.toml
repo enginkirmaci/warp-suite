@@ -25,6 +25,7 @@ members = [
     "kits/warpui-kit-diff",
     "kits/warpui-kit-markdown",
     "kits/warpui-kit-picker",
+    "kits/warpui-kit-platform",
     "apps/warp-station/crates/warp-station",
     "apps/warp-station/crates/warp-station-core",
     "apps/warp-agent",

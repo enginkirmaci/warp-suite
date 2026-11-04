@@ -86,13 +86,15 @@ jobs:
           cargo clippy --locked --all-targets \
             -p warpui-kit-core -p warpui-kit-diff \
             -p warpui-kit-markdown -p warpui-kit-picker \
+            -p warpui-kit-platform \
             -- -D warnings
 
       - name: cargo test
         run: |
           cargo test --locked \
             -p warpui-kit-core -p warpui-kit-diff \
-            -p warpui-kit-markdown -p warpui-kit-picker
+            -p warpui-kit-markdown -p warpui-kit-picker \
+            -p warpui-kit-platform
 
   # One workspace now covers kits + apps, so this job typechecks the app
   # crates against the kit crates as built - a renamed kit export or a feature
