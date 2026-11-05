@@ -41,7 +41,23 @@ fn user_install_dirs() -> Vec<PathBuf> {
         .collect()
 }
 
-static CACHE: Mutex<Option<HashMap<String, Option<PathBuf>>>> = Mutex::new(None);
+/// How long a miss is remembered: a tool installed after the app started must
+/// become visible without a restart (audit C4).
+const MISS_TTL: std::time::Duration = std::time::Duration::from_secs(30);
+
+#[derive(Default)]
+struct Cache {
+    resolved: HashMap<String, PathBuf>,
+    misses: HashMap<String, std::time::Instant>,
+}
+
+static CACHE: Mutex<Option<Cache>> = Mutex::new(None);
+
+/// Forgets every resolution, positive and negative: call after a settings
+/// save so a newly installed or reconfigured executable resolves at once.
+pub fn invalidate() {
+    *CACHE.lock().unwrap() = None;
+}
 
 /// Resolves an executable name or path to something spawnable: absolute paths
 /// verify existence; bare names scan PATH, then the user dirs (exec bit on
@@ -55,10 +71,16 @@ pub fn locate(name: &str) -> Option<PathBuf> {
         let path = PathBuf::from(name);
         return path.is_file().then_some(path);
     }
-    let mut cache = CACHE.lock().unwrap();
-    let cache = cache.get_or_insert_with(HashMap::new);
-    if let Some(hit) = cache.get(name) {
-        return hit.clone();
+    let mut guard = CACHE.lock().unwrap();
+    let cache = guard.get_or_insert_with(Cache::default);
+    if let Some(path) = cache.resolved.get(name) {
+        return Some(path.clone());
+    }
+    if let Some(at) = cache.misses.get(name) {
+        if at.elapsed() < MISS_TTL {
+            return None;
+        }
+        cache.misses.remove(name);
     }
     let resolved = resolve_on_path(name)
         .or_else(|| {
@@ -69,10 +91,17 @@ pub fn locate(name: &str) -> Option<PathBuf> {
         .inspect(|p| {
             tracing::debug!("resolved {name} -> {}", p.display());
         });
-    if resolved.is_none() {
-        tracing::debug!("'{name}' not found on PATH or in the user install dirs");
+    match &resolved {
+        Some(path) => {
+            cache.resolved.insert(name.to_string(), path.clone());
+        }
+        None => {
+            tracing::debug!("'{name}' not found on PATH or in the user install dirs");
+            cache
+                .misses
+                .insert(name.to_string(), std::time::Instant::now());
+        }
     }
-    cache.insert(name.to_string(), resolved.clone());
     resolved
 }
 
@@ -126,6 +155,14 @@ mod tests {
         // /bin/echo or similar is everywhere these tests run
         let resolved = locate("sh").or_else(|| locate("bash"));
         assert!(resolved.is_some(), "sh/bash should resolve somewhere");
+    }
+
+    #[test]
+    fn invalidate_forgets_a_cached_miss() {
+        let missing = "warp-station-definitely-missing-binary";
+        assert!(locate(missing).is_none());
+        invalidate();
+        assert!(locate(missing).is_none());
     }
 
     #[test]

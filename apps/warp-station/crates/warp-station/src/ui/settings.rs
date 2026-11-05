@@ -559,6 +559,8 @@ impl SettingsPage {
             }
             cx.notify();
         });
+        // a tool installed or moved while the app runs resolves right away
+        warp_station_core::exe::invalidate();
         // the boot registration follows the saved flag, but only a change to
         // it rewrites the OS entry
         if autostart_changed {

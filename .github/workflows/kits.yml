@@ -121,6 +121,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: ${{ steps.toolchain.outputs.channel }}
+          components: clippy
 
       # ONE workspace and ONE lockfile, so a single cache entry covers every
       # app: the old "two anchor workspaces" split (listing apps/* separately
@@ -135,6 +136,15 @@ jobs:
       # warp-snapit is Windows-only (its engine is cfg(windows)-gated) but its
       # platform-neutral modules test on Linux; its package is `snapit`.
       # Every app is a member of the root workspace, so -p selects it.
+      # The kit job only lints kits/; app-code warnings (this audit found
+      # several by hand) used to reach main unchecked.
+      - name: Clippy apps
+        run: |
+          cargo clippy --locked --all-targets \
+            -p warp-station-core -p warp-station \
+            -p warp-agent -p warp-notes -p snapit \
+            -- -D warnings
+
       - name: Test apps
         run: |
           set -euo pipefail
