@@ -522,11 +522,6 @@ fn parse_cached_catalog(json: &str) -> ModelCatalog {
 mod tests {
     use super::*;
 
-    /// Serializes the two HOME-sensitive template tests against each other:
-    /// the builder test must never read a customized body the write/reset
-    /// test parked in a scratch HOME (and vice versa).
-    static TEMPLATE_HOME_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
     #[test]
     fn legacy_flat_cache_loads_as_opencode_without_variants() {
         let catalog = parse_cached_catalog(r#"["(server default)", "a/x", "b/y"]"#);
@@ -561,7 +556,9 @@ mod tests {
 
     #[test]
     fn templates_fill_placeholders() {
-        let _guard = TEMPLATE_HOME_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let _guard = crate::test_support::HOME_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         // the builders seed their template files on first load — keep that
         // off the real ~/.warp
         let home = tempfile::tempdir().expect("scratch home");
@@ -625,7 +622,9 @@ mod tests {
 
     #[test]
     fn write_then_reset_round_trips_customization() {
-        let _guard = TEMPLATE_HOME_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let _guard = crate::test_support::HOME_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         let home = tempfile::tempdir().expect("scratch home");
         // SAFETY: process-global env, held only for this test's body; the
         // lock keeps the sibling builder test from reading this HOME

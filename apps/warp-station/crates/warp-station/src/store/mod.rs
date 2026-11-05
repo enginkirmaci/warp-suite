@@ -92,7 +92,12 @@ pub struct Store {
         std::collections::HashMap<(String, bool), Arc<Vec<warp_station_core::github::GitHubItem>>>,
     /// The pull request taking over the detail pane.
     pub open_pull: Option<OpenPull>,
+    /// The closed list is already asked for (in flight or cached). One ask per
+    /// (folder, pull_requests); cleared by Refresh, a merge, or Retry.
     closed_requested: std::collections::HashSet<(String, bool)>,
+    /// Closed list requests that failed. The tab shows an error + Retry
+    /// instead of a "Loading…" that never ends (audit A2).
+    pub closed_failed: std::collections::HashSet<(String, bool)>,
 
     // ---- wand (warp-agent) state ----
     pub wand_busy: Option<WandKind>,
@@ -179,8 +184,16 @@ pub struct Store {
     window_focused: Option<bool>,
 
     /// Write-behind cache saves: bumped on every tag/favorite mutation; the
-    /// deferred flush only writes when its generation is still current.
-    save_generation: u64,
+    /// deferred flush only writes when its generation is still current. Kept
+    /// separate from [`Self::run_id_seq`]: a wand or summary run must not
+    /// invalidate a pending tag save (the bug this split fixes).
+    cache_generation: u64,
+    /// Monotonic id source for wand/summary runs, so two runs in one session
+    /// never share an id without touching the cache-save gate.
+    run_id_seq: u64,
+    /// Debounce sequence for persisting the selected row: arrow-key browsing
+    /// updates the in-memory selection at once but writes settings once.
+    selection_generation: u64,
     /// Latest NuGet watch service snapshot (watching, count, activity log).
     pub nuget: Arc<warp_station_core::nuget::NugetSnapshot>,
     /// Distinct tags across the list (filter chip row), recomputed on
@@ -263,6 +276,7 @@ impl Store {
             github_closed: std::collections::HashMap::new(),
             open_pull: None,
             closed_requested: std::collections::HashSet::new(),
+            closed_failed: std::collections::HashSet::new(),
             wand_busy: None,
             wand_id: None,
             wand_repo: None,
@@ -303,7 +317,9 @@ impl Store {
             next_auto_refresh: None,
             auto_refresh_armed_secs: None,
             window_focused: None,
-            save_generation: 0,
+            cache_generation: 0,
+            run_id_seq: 0,
+            selection_generation: 0,
             nuget: Arc::new(Default::default()),
             tags_cache: Vec::new(),
             search_generation: 0,
@@ -513,6 +529,12 @@ impl Store {
                 after_fetch,
             } => {
                 for probe in &probes {
+                    // a user git action owns the truth until its own probe
+                    // lands: now that passes run off the command loop, a
+                    // background probe can have read mid-mutation (audit B1)
+                    if self.git_jobs.contains_key(&probe.folder_path) {
+                        continue;
+                    }
                     if let Some(entry) = self
                         .repos
                         .iter_mut()
@@ -626,12 +648,18 @@ impl Store {
                 pull_requests,
                 items,
             } => {
+                let key = (folder, pull_requests);
                 match items {
                     Some(items) => {
-                        self.github_closed
-                            .insert((folder, pull_requests), Arc::new(items));
+                        self.closed_failed.remove(&key);
+                        self.github_closed.insert(key, Arc::new(items));
                     }
-                    None => self.notify_error("GitHub did not answer with the closed list"),
+                    None => {
+                        // keep the guard so the tab does not re-ask every
+                        // frame; the tab renders an error with Retry instead
+                        self.closed_failed.insert(key);
+                        self.notify_error("GitHub did not answer with the closed list");
+                    }
                 }
                 cx.notify();
             }
@@ -669,7 +697,10 @@ impl Store {
                         self.notify_success(format!("Merged #{number}"));
                         self.reload_open_pull();
                         self.kick_github_pass(&[std::path::PathBuf::from(&folder)]);
-                        self.github_closed.remove(&(folder, true));
+                        let key = (folder, true);
+                        self.github_closed.remove(&key);
+                        self.closed_requested.remove(&key);
+                        self.closed_failed.remove(&key);
                     }
                     Err(err) if err.is_empty() => {
                         self.notify_error(format!("Could not merge #{number}"));
@@ -961,8 +992,7 @@ impl Store {
                 .join("Summaries");
         let day = chrono::Local::now().date_naive() - chrono::Duration::days(1);
         self.summary_busy = true;
-        let id = format!("summary-{}", self.save_generation);
-        self.save_generation += 1;
+        let id = self.next_run_id("summary");
         let _ = self.net.send_blocking(NetCommand::WandSummary {
             id,
             folders,
@@ -1051,8 +1081,7 @@ impl Store {
         self.wand_busy = Some(kind);
         self.wand_repo = Some(folder.clone());
         self.wand_error = None;
-        let id = format!("wand-{}", self.save_generation);
-        self.save_generation += 1;
+        let id = self.next_run_id("wand");
         self.wand_id = Some(id.clone());
         let _ = self.net.send_blocking(NetCommand::Wand {
             id,
@@ -1653,7 +1682,7 @@ impl Store {
             return;
         }
         self.selected_repo = Some(folder.to_string());
-        self.update_settings(|s| s.repos.selected_repo = Some(folder.to_string()));
+        self.persist_selection_soon(Some(folder.to_string()), cx);
         self.reset_repo_workspace();
         self.load_repo_workspace(folder);
         cx.notify();
@@ -1715,24 +1744,43 @@ impl Store {
             .map(|gh| gh.to_string_lossy().to_string())
     }
 
-    /// Asks once for the selected repo's closed list; a tab calls this as it draws.
+    /// Asks once for the selected repo's closed list. The tab calls this as
+    /// it draws; the two guard sets make that a no-op after the first ask and
+    /// after a failure, so drawing cannot re-request (audit A2).
     pub fn load_closed(&mut self, pull_requests: bool) {
         let Some(folder) = self.selected_repo.clone() else {
             return;
         };
-        if !self
-            .closed_requested
-            .insert((folder.clone(), pull_requests))
-        {
+        let key = (folder.clone(), pull_requests);
+        // an in-flight/cached ask, or a failure waiting for the user's Retry:
+        // either way this call is a no-op, so the tab may ask as it draws
+        if self.closed_requested.contains(&key) || self.closed_failed.contains(&key) {
             return;
         }
-        if let Some(gh_exe) = self.gh_exe() {
-            let _ = self.net.send_blocking(NetCommand::GitHubClosed {
-                folder: std::path::PathBuf::from(folder),
-                gh_exe,
-                pull_requests,
-            });
-        }
+        // no gh: the same failure surface the tab shows for a failed request
+        let Some(gh_exe) = self.gh_exe() else {
+            self.closed_failed.insert(key);
+            return;
+        };
+        self.closed_failed.remove(&key);
+        self.closed_requested.insert(key);
+        let _ = self.net.send_blocking(NetCommand::GitHubClosed {
+            folder: std::path::PathBuf::from(folder),
+            gh_exe,
+            pull_requests,
+        });
+    }
+
+    /// The closed tab's Retry: forget both the ask guard and the failure, then
+    /// ask again for the selected repo.
+    pub fn retry_closed(&mut self, pull_requests: bool) {
+        let Some(folder) = self.selected_repo.clone() else {
+            return;
+        };
+        let key = (folder, pull_requests);
+        self.closed_requested.remove(&key);
+        self.closed_failed.remove(&key);
+        self.load_closed(pull_requests);
     }
 
     /// Appearance applies at once, without Save. The desktop's own wish stands
@@ -2081,7 +2129,7 @@ impl Store {
     /// how the selected repo leaves the rail.
     pub fn clear_selection(&mut self, cx: &mut Context<Self>) {
         self.selected_repo = None;
-        self.update_settings(|s| s.repos.selected_repo = None);
+        self.persist_selection_soon(None, cx);
         self.reset_repo_workspace();
         cx.notify();
     }
@@ -2301,6 +2349,7 @@ impl Store {
             folder: path.clone(),
         });
         self.closed_requested.retain(|(key, _)| key != &folder);
+        self.closed_failed.retain(|(key, _)| key != &folder);
         self.kick_github_pass(std::slice::from_ref(&path));
         self.reload_open_pull();
         if !self.history.is_empty() {
@@ -2355,22 +2404,49 @@ impl Store {
         self.persist_tags_soon(cx);
     }
 
+    /// Persists the selected row after a short idle: holding an arrow key
+    /// must not rewrite the whole settings file once per row. Only the newest
+    /// timer's value lands.
+    fn persist_selection_soon(&mut self, folder: Option<String>, cx: &mut Context<Self>) {
+        self.selection_generation += 1;
+        let generation = self.selection_generation;
+        cx.spawn(async move |this, cx| {
+            cx.background_executor()
+                .timer(std::time::Duration::from_millis(300))
+                .await;
+            let _ = this.update(cx, |store: &mut Store, _| {
+                if store.selection_generation == generation {
+                    store.update_settings(|s| s.repos.selected_repo = folder.clone());
+                }
+            });
+        })
+        .detach();
+    }
+
+    /// The next wand/summary id. Deliberately does not touch
+    /// [`Self::cache_generation`]: allocating a run id used to invalidate the
+    /// debounced tag/star cache write (audit A4).
+    fn next_run_id(&mut self, prefix: &str) -> String {
+        self.run_id_seq += 1;
+        format!("{prefix}-{}", self.run_id_seq)
+    }
+
     /// Write-behind cache save: a burst of star/tag/archive clicks collapses
     /// into one full-file write after a short debounce.
     fn persist_tags_soon(&mut self, cx: &mut Context<Self>) {
-        self.save_generation += 1;
-        let generation = self.save_generation;
+        self.cache_generation += 1;
+        let generation = self.cache_generation;
         let repos = self.repos.clone();
         cx.spawn(async move |this, cx| {
             cx.background_executor()
                 .timer(std::time::Duration::from_millis(400))
                 .await;
             let _ = this.update(cx, |store: &mut Store, _| {
-                if store.save_generation == generation {
+                if store.cache_generation == generation {
                     if let Err(err) = repo_store::save_cache(&repo_store::cache_path(), &repos) {
                         tracing::warn!("could not save repo cache: {err}");
                     }
-                    store.save_generation = 0;
+                    store.cache_generation = 0;
                 }
             });
         })
@@ -2743,6 +2819,26 @@ mod tests {
             !ai_enabled(&settings),
             "warp-agent off turns the AI surface off"
         );
+    }
+
+    /// Allocating a run id must not move the cache-save generation: both
+    /// shared one counter until the audit, so starting a wand within the
+    /// 400 ms tag-save window silently dropped the favorite/tag write.
+    #[test]
+    fn run_ids_do_not_touch_the_cache_save_gate() {
+        let (tx, _rx) = async_channel::unbounded();
+        let scratch =
+            std::env::temp_dir().join(format!("warp-station-run-id-{}.json", std::process::id()));
+        std::fs::write(&scratch, "{}").expect("scratch settings");
+        let mut store = Store::with_settings(tx, Arc::new(SettingsService::at(scratch.clone())));
+        let before = store.cache_generation;
+        assert_eq!(store.next_run_id("wand"), "wand-1");
+        assert_eq!(store.next_run_id("summary"), "summary-2");
+        assert_eq!(
+            store.cache_generation, before,
+            "a run id must not invalidate a pending cache save"
+        );
+        let _ = std::fs::remove_file(&scratch);
     }
 
     /// A launch keeps the fetch clock: the first pass is armed from the oldest

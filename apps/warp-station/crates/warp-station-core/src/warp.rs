@@ -71,6 +71,10 @@ impl ModelChoice {
 
 /// How long a launch-and-connect attempt keeps polling the door.
 const LAUNCH_DEADLINE: Duration = Duration::from_secs(15);
+/// How long a cancelled run waits for the door's final answer. The door
+/// answers a cancel with the run's error frame, but a wedged or half-closed
+/// connection may never deliver it; the client must not wait forever.
+const CANCEL_GRACE: Duration = Duration::from_secs(30);
 
 fn config_dir() -> PathBuf {
     // the door endpoint lives in warp-agent's own folder under the suite root
@@ -235,8 +239,36 @@ impl Client {
         prompt: &str,
         choice: &ModelChoice,
         background: bool,
+        on_log: impl FnMut(String),
+        cancel: async_channel::Receiver<()>,
+    ) -> Result<String> {
+        self.run_prompt_with_grace(
+            workspace,
+            prompt,
+            choice,
+            background,
+            on_log,
+            cancel,
+            CANCEL_GRACE,
+        )
+        .await
+    }
+
+    /// [`Client::run_prompt`] with the cancel grace exposed so probes can
+    /// exercise a silent door without waiting the production 30 s.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "one door request's fields plus the probe's grace; a struct would only rename them"
+    )]
+    async fn run_prompt_with_grace(
+        &mut self,
+        workspace: &str,
+        prompt: &str,
+        choice: &ModelChoice,
+        background: bool,
         mut on_log: impl FnMut(String),
         cancel: async_channel::Receiver<()>,
+        grace: Duration,
     ) -> Result<String> {
         let id = self.next_id;
         self.next_id += 1;
@@ -248,7 +280,12 @@ impl Client {
 
         let deadline = tokio::time::sleep(crate::opencode::RUN_CAP);
         tokio::pin!(deadline);
+        // Only armed once a cancel is sent: the cancel request is
+        // fire-and-forget, and a wedged door may never answer the run, so the
+        // client must stop waiting on its own instead of hanging forever.
+        let mut cancel_deadline = Box::pin(tokio::time::sleep(Duration::from_secs(3600)));
         let mut cancelled = false;
+        let mut cancel_open = true;
         loop {
             let answer = tokio::select! {
                 biased;
@@ -256,13 +293,27 @@ impl Client {
                     let _ = self.request(cmd::CANCEL, json!({"run": id})).await;
                     return Err(anyhow!("the wand run exceeded its time cap"));
                 }
-                stopped = cancel.recv(), if !cancelled => {
-                    if stopped.is_ok() {
-                        cancelled = true;
-                        let cancel_frame =
-                            door::request_frame(self.next_id, cmd::CANCEL, json!({"run": id}));
-                        self.next_id += 1;
-                        self.write(&cancel_frame).await?;
+                _ = cancel_deadline.as_mut(), if cancelled => {
+                    return Err(anyhow!(
+                        "the wand run did not answer the cancel within {}s",
+                        grace.as_secs_f32()
+                    ));
+                }
+                stopped = cancel.recv(), if !cancelled && cancel_open => {
+                    match stopped {
+                        Ok(()) => {
+                            cancelled = true;
+                            cancel_deadline
+                                .as_mut()
+                                .reset(tokio::time::Instant::now() + grace);
+                            let cancel_frame =
+                                door::request_frame(self.next_id, cmd::CANCEL, json!({"run": id}));
+                            self.next_id += 1;
+                            self.write(&cancel_frame).await?;
+                        }
+                        // the control channel closed: nothing can cancel the
+                        // run any more, and polling a closed channel would spin
+                        Err(_) => cancel_open = false,
                     }
                     continue;
                 }
@@ -462,6 +513,44 @@ mod tests {
         assert_eq!(catalog.harnesses.len(), 2);
         assert_eq!(catalog.models.len(), 2);
         assert_eq!(catalog.variants_for("opencode", "a/x"), ["low", "high"]);
+        let _ = client.reader.get_mut().shutdown().await;
+        let _ = door.await;
+    }
+
+    /// A cancelled run must settle even when the door never answers: the
+    /// cancel frame is fire-and-forget, so the client owns the deadline.
+    #[tokio::test]
+    async fn a_cancelled_run_settles_when_the_door_stays_silent() {
+        let (port, door) = mock_door(vec![]).await;
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("ipc.token"), "test-token\n").unwrap();
+        std::fs::write(dir.path().join("ipc.port"), format!("{port}\n")).unwrap();
+        let mut client = Client::connect_in(dir.path()).await.unwrap();
+        let (cancel_tx, cancel_rx) = async_channel::bounded(1);
+        let canceller = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(40)).await;
+            let _ = cancel_tx.send(()).await;
+        });
+
+        let started = std::time::Instant::now();
+        let error = client
+            .run_prompt_with_grace(
+                "general",
+                "hello",
+                &ModelChoice::default(),
+                true,
+                |_| {},
+                cancel_rx,
+                Duration::from_millis(120),
+            )
+            .await
+            .expect_err("a silent door must not hold the run open");
+        assert!(
+            format!("{error:#}").contains("answer the cancel"),
+            "{error:#}"
+        );
+        assert!(started.elapsed() < Duration::from_secs(2));
+        canceller.await.unwrap();
         let _ = client.reader.get_mut().shutdown().await;
         let _ = door.await;
     }

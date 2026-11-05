@@ -270,6 +270,10 @@ mod tests {
 
     #[test]
     fn the_suite_root_and_the_app_folder_sit_under_home() {
+        // a sibling test parks a scratch HOME while it seeds templates
+        let _guard = crate::test_support::HOME_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         let root = AppPaths::user_data_root();
         assert_eq!(root, home().join(".warp"));
         assert_eq!(AppPaths::app_dir(), root.join("station"));

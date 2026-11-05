@@ -339,25 +339,37 @@ impl Render for ItemListView {
         } else {
             &snapshot.issues
         };
-        let closed_items = folder.as_ref().and_then(|f| {
-            self.store
-                .read(cx)
-                .github_closed
-                .get(&(f.clone(), self.pull_requests))
-                .cloned()
-        });
-        // a closed view stays on its list across a redraw and a refresh
-        if self.closed {
-            let pull_requests = self.pull_requests;
-            self.store.update(cx, |s, _| s.load_closed(pull_requests));
-        }
+        let (closed_items, closed_failed) = {
+            let store = self.store.read(cx);
+            let failed = folder.as_ref().is_some_and(|f| {
+                store
+                    .closed_failed
+                    .contains(&(f.clone(), self.pull_requests))
+            });
+            let items = folder.as_ref().and_then(|f| {
+                store
+                    .github_closed
+                    .get(&(f.clone(), self.pull_requests))
+                    .cloned()
+            });
+            (items, failed)
+        };
         let mut items: Vec<GitHubItem> = if self.closed {
             closed_items.as_deref().cloned().unwrap_or_default()
         } else {
             open_items.clone()
         };
         let total = items.len();
-        let loading = self.closed && closed_items.is_none();
+        // The store dedupes (in-flight, cached, or failed-waiting-for-Retry),
+        // so asking here is safe: Refresh clears the guard and the next draw
+        // re-asks instead of leaving a stale or endless "Loading…".
+        if self.closed {
+            let pull_requests = self.pull_requests;
+            self.store.update(cx, |s, _| s.load_closed(pull_requests));
+        }
+        // A failed load is not "still loading": the tab must offer a retry
+        // instead of spinning (audit A2).
+        let loading = self.closed && closed_items.is_none() && !closed_failed;
         let controls = !self.pull_requests && total > 0;
         if !self.pull_requests {
             sort.sort(&mut items);
@@ -395,7 +407,48 @@ impl Render for ItemListView {
             .selected_entry()
             .map(|repo| repo.name.clone())
             .unwrap_or_default();
-        let body = if loading {
+        let body = if self.closed && closed_failed {
+            let retry_store = self.store.clone();
+            let pull_requests = self.pull_requests;
+            div()
+                .flex_1()
+                .flex()
+                .flex_col()
+                .items_center()
+                .justify_center()
+                .gap_3()
+                .child(
+                    div()
+                        .text_size(px(theme::font_body()))
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_color(theme::text_dim())
+                        .child(format!("Could not load closed {title}.")),
+                )
+                .child(
+                    div()
+                        .id("closed-retry")
+                        .debug_selector(|| "closed-retry".into())
+                        .a11y_button("Retry loading the closed list")
+                        .cursor_pointer()
+                        .h(px(shell::CONTROL_HEIGHT))
+                        .px_3()
+                        .rounded(px(6.))
+                        .flex()
+                        .items_center()
+                        .bg(theme::raised())
+                        .text_size(px(theme::font_control()))
+                        .text_color(theme::text())
+                        .hover(|s| s.bg(theme::accent_soft()))
+                        .on_click(move |_, _, cx| {
+                            retry_store.update(cx, |s, cx| {
+                                s.retry_closed(pull_requests);
+                                cx.notify();
+                            });
+                        })
+                        .child("Retry"),
+                )
+                .into_any_element()
+        } else if loading {
             empty_state(format!("Loading closed {title}…"))
         } else if total == 0 {
             empty_note(

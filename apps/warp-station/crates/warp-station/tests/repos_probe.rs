@@ -1937,3 +1937,48 @@ fn grouping_off_keeps_the_list_flat(cx: &mut TestAppContext) {
 
     let _ = std::fs::remove_file(&scratch);
 }
+
+/// Held arrow keys must not rewrite settings per row (audit B2): the
+/// in-memory selection moves at once, the file gets only the final row after
+/// the debounce.
+#[gpui::test]
+fn selection_persists_once_after_the_debounce(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+    cx.update(warp_station::theme::apply_kit_theme);
+    let scratch = std::env::temp_dir().join(format!(
+        "warp-station-selection-{}.json",
+        std::process::id()
+    ));
+    std::fs::write(&scratch, "{}").expect("scratch settings");
+    let (net_tx, _net_rx) = async_channel::unbounded();
+    let store = cx.new(|_cx| {
+        let mut store = Store::with_settings(
+            net_tx,
+            std::sync::Arc::new(warp_station_core::settings::SettingsService::at(scratch)),
+        );
+        store.replace_repos(vec![
+            entry("alpha", "/probe/alpha", &[]),
+            entry("beta", "/probe/beta", &[]),
+        ]);
+        store
+    });
+
+    cx.update_entity(&store, |s: &mut Store, cx| {
+        s.select_repo("/probe/alpha", cx);
+        s.select_repo("/probe/beta", cx);
+    });
+    assert_eq!(
+        store.read_with(cx, |s: &Store, _| s.settings().repos.selected_repo.clone()),
+        None,
+        "the burst has not written the settings file yet"
+    );
+
+    cx.executor()
+        .advance_clock(std::time::Duration::from_millis(400));
+    cx.run_until_parked();
+    assert_eq!(
+        store.read_with(cx, |s: &Store, _| s.settings().repos.selected_repo.clone()),
+        Some("/probe/beta".to_string()),
+        "only the row the burst landed on is persisted"
+    );
+}

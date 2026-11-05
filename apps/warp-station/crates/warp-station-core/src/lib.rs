@@ -27,3 +27,11 @@ pub mod snapit;
 pub mod terminal;
 pub mod warp;
 pub mod warp_notes;
+
+/// Unit tests that mutate the process-global HOME (or read it) share this
+/// lock: the harness runs them in parallel threads, so a scratch HOME left
+/// set by one test would otherwise read as another test's home.
+#[cfg(test)]
+pub(crate) mod test_support {
+    pub(crate) static HOME_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+}

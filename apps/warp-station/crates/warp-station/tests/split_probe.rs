@@ -1532,6 +1532,49 @@ fn sent_merges(net_rx: &async_channel::Receiver<NetCommand>) -> Vec<u64> {
     numbers
 }
 
+/// A failed closed load is not "still loading": the tab offers Retry, and
+/// Retry clears the ask guard so the request goes out again (audit A2).
+#[gpui::test]
+fn a_failed_closed_load_offers_retry(cx: &mut TestAppContext) {
+    let (store, net_rx) = scratch_store(cx, "closed-fail", vec![entry("alpha", "/probe/alpha")]);
+    seed_github(&store, "/probe/alpha", 1, 0, cx);
+    use_a_located_gh(&store, cx);
+    let cx = open_window(&store, cx);
+    draw(cx);
+    click(cx, "detail-tab-pulls");
+    while net_rx.try_recv().is_ok() {}
+
+    click(cx, "pr-state-closed");
+    draw(cx);
+    cx.update_entity(&store, |s: &mut Store, cx| {
+        s.on_net_event(
+            UiEvent::GitHubClosedLoaded {
+                folder: "/probe/alpha".into(),
+                pull_requests: true,
+                items: None,
+            },
+            cx,
+        );
+    });
+    draw(cx);
+    assert!(
+        cx.debug_bounds("closed-retry").is_some(),
+        "a failed load must offer Retry, not spin forever"
+    );
+
+    while net_rx.try_recv().is_ok() {}
+    click(cx, "closed-retry");
+    draw(cx);
+    let mut asked = 0;
+    while let Ok(command) = net_rx.try_recv() {
+        if let NetCommand::GitHubClosed { pull_requests, .. } = command {
+            assert!(pull_requests);
+            asked += 1;
+        }
+    }
+    assert_eq!(asked, 1, "Retry asks once");
+}
+
 /// A row turns the whole pane into the pull request, head included, and Back
 /// and Escape both return to the list on the tab it left.
 #[gpui::test]
@@ -2458,6 +2501,11 @@ fn the_last_arrangement_restores_on_a_restart(cx: &mut TestAppContext) {
         s.show_repo_tab(Some("/probe/beta".into()), cx);
         s.toggle_show_archived(cx);
     });
+    // The selected-row write is debounced (held arrow keys must not rewrite
+    // the settings file per row); let the 300 ms timer land before reading.
+    cx.executor()
+        .advance_clock(std::time::Duration::from_millis(400));
+    cx.run_until_parked();
     let saved = cx.read_entity(&store, |s, _| s.settings().repos.clone());
     assert_eq!(
         saved.open_tab.as_deref(),

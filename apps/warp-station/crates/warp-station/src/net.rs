@@ -590,6 +590,10 @@ async fn workspace_loaded(folder: PathBuf) -> UiEvent {
     }
 }
 
+/// Arrow-key browsing asks for one workspace per row; a short trailing wait
+/// lets only the row the burst lands on pay for a full git read.
+const SELECTION_DEBOUNCE: std::time::Duration = std::time::Duration::from_millis(100);
+
 /// Per repo, the newest workspace read asked for. Reads run side by side, so
 /// one that finishes behind a newer read, or behind a mutation of that repo,
 /// must not land: it would put an older snapshot back.
@@ -632,6 +636,14 @@ fn spawn_read_intake(
                     let reads = workspace_reads.clone();
                     let evt_tx = evt_tx.clone();
                     tokio::spawn(async move {
+                        // a burst of selections (held arrow keys, a fast click
+                        // through the list) must not start one full status +
+                        // diff read per row: wait it out, then check again so
+                        // only the newest read does any work
+                        tokio::time::sleep(SELECTION_DEBOUNCE).await;
+                        if !reads.is_newest(&folder, read) {
+                            return;
+                        }
                         let loaded = workspace_loaded(folder.clone()).await;
                         if reads.is_newest(&folder, read) {
                             let _ = evt_tx.send_blocking(loaded);
@@ -721,6 +733,101 @@ fn spawn_read_intake(
     queue_rx
 }
 
+/// The background lane: repo scans and the activity passes run one at a time,
+/// off the command loop, so a minutes-long `git fetch` or `gh` sweep never
+/// holds a user action (stage, history, a chat send) behind it (audit B1).
+async fn background_loop(rx: Receiver<NetCommand>, evt_tx: Sender<UiEvent>) {
+    while let Ok(cmd) = rx.recv().await {
+        match cmd {
+            NetCommand::Scan { settings, previous } => {
+                let scanned = tokio::task::spawn_blocking(move || scan::scan(&settings, None))
+                    .await
+                    .unwrap_or_default();
+                let (merged, removed) = repo_store::merge_scan(&previous, &scanned.repos);
+                if let Err(err) = repo_store::save_cache(&repo_store::cache_path(), &merged) {
+                    tracing::warn!("could not save repo cache: {err}");
+                }
+                let _ = evt_tx.send_blocking(UiEvent::ScanSettled {
+                    repos: merged,
+                    removed,
+                });
+            }
+            NetCommand::FetchAll { folders } => {
+                warp_station_core::refresh::throttled_pass(
+                    folders.clone(),
+                    3,
+                    |folder| async move {
+                        let outcome = warp_station_core::git::cli::fetch(&folder).await;
+                        if !outcome.ok {
+                            tracing::warn!(
+                                "auto fetch failed in {}: {}",
+                                folder.display(),
+                                outcome.error.as_deref().unwrap_or("git rejected it")
+                            );
+                        }
+                    },
+                )
+                .await;
+                // the settled probes refresh the ahead/behind badges through
+                // the same burst-apply the manual passes use
+                let probes = probe_pass(folders).await;
+                let _ = evt_tx.send_blocking(UiEvent::StatusSettled {
+                    probes,
+                    after_fetch: true,
+                });
+            }
+            NetCommand::GitHubPass { folders, gh_exe } => {
+                use std::sync::{Arc, Mutex};
+                let collected = Arc::new(Mutex::new(Vec::new()));
+                let sink = collected.clone();
+                let gh = gh_exe.clone();
+                warp_station_core::refresh::throttled_pass(folders, 2, move |folder| {
+                    let sink = sink.clone();
+                    let gh = gh.clone();
+                    async move {
+                        let snapshot = warp_station_core::github::refresh(&folder, &gh).await;
+                        sink.lock()
+                            .unwrap()
+                            .push((folder.to_string_lossy().to_string(), snapshot));
+                    }
+                })
+                .await;
+                let items = Arc::try_unwrap(collected)
+                    .map(|m| m.into_inner().unwrap())
+                    .unwrap_or_default();
+                let _ = evt_tx.send_blocking(UiEvent::GitHubSettled { items });
+            }
+            NetCommand::AzurePass {
+                folders,
+                pat,
+                custom_base,
+            } => {
+                use std::sync::{Arc, Mutex};
+                let collected = Arc::new(Mutex::new(Vec::new()));
+                let sink = collected.clone();
+                warp_station_core::refresh::throttled_pass(folders, 2, move |folder| {
+                    let sink = sink.clone();
+                    let pat = pat.clone();
+                    let custom_base = custom_base.clone();
+                    async move {
+                        let snapshot =
+                            warp_station_core::azure::refresh(&folder, &pat, &custom_base).await;
+                        sink.lock()
+                            .unwrap()
+                            .push((folder.to_string_lossy().to_string(), snapshot));
+                    }
+                })
+                .await;
+                let items = Arc::try_unwrap(collected)
+                    .map(|m| m.into_inner().unwrap())
+                    .unwrap_or_default();
+                let _ = evt_tx.send_blocking(UiEvent::AzureSettled { items });
+            }
+            _ => {}
+        }
+    }
+}
+
 async fn net_main(cmd_rx: Receiver<NetCommand>, evt_tx: Sender<UiEvent>) {
     let workspace_reads = WorkspaceReads::default();
     let cmd_rx = spawn_read_intake(cmd_rx, evt_tx.clone(), workspace_reads.clone());
@@ -762,21 +869,31 @@ async fn net_main(cmd_rx: Receiver<NetCommand>, evt_tx: Sender<UiEvent>) {
         });
     }
 
+    // Scans and activity passes run on their own lane: a long fetch or gh
+    // sweep must not hold a user action in this queue behind it (audit B1).
+    let (background_tx, background_rx) = async_channel::unbounded::<NetCommand>();
+    {
+        let evt_tx = evt_tx.clone();
+        tokio::spawn(background_loop(background_rx, evt_tx));
+    }
+
     while let Ok(cmd) = cmd_rx.recv().await {
+        if matches!(
+            &cmd,
+            NetCommand::Scan { .. }
+                | NetCommand::FetchAll { .. }
+                | NetCommand::GitHubPass { .. }
+                | NetCommand::AzurePass { .. }
+        ) {
+            let _ = background_tx.send(cmd).await;
+            continue;
+        }
         match cmd {
-            NetCommand::Scan { settings, previous } => {
-                let scanned = tokio::task::spawn_blocking(move || scan::scan(&settings, None))
-                    .await
-                    .unwrap_or_default();
-                let (merged, removed) = repo_store::merge_scan(&previous, &scanned.repos);
-                if let Err(err) = repo_store::save_cache(&repo_store::cache_path(), &merged) {
-                    tracing::warn!("could not save repo cache: {err}");
-                }
-                let _ = evt_tx.send_blocking(UiEvent::ScanSettled {
-                    repos: merged,
-                    removed,
-                });
-            }
+            // routed to the background lane before this match
+            NetCommand::Scan { .. }
+            | NetCommand::FetchAll { .. }
+            | NetCommand::GitHubPass { .. }
+            | NetCommand::AzurePass { .. } => {}
             NetCommand::ProbeAll { folders } => {
                 let probes = probe_pass(folders).await;
                 let _ = evt_tx.send_blocking(UiEvent::StatusSettled {
@@ -784,44 +901,25 @@ async fn net_main(cmd_rx: Receiver<NetCommand>, evt_tx: Sender<UiEvent>) {
                     after_fetch: false,
                 });
             }
-            NetCommand::FetchAll { folders } => {
-                warp_station_core::refresh::throttled_pass(
-                    folders.clone(),
-                    3,
-                    |folder| async move {
-                        let outcome = warp_station_core::git::cli::fetch(&folder).await;
-                        if !outcome.ok {
-                            tracing::warn!(
-                                "auto fetch failed in {}: {}",
-                                folder.display(),
-                                outcome.error.as_deref().unwrap_or("git rejected it")
-                            );
-                        }
-                    },
-                )
-                .await;
-                // the settled probes refresh the ahead/behind badges through
-                // the same burst-apply the manual passes use
-                let probes = probe_pass(folders).await;
-                let _ = evt_tx.send_blocking(UiEvent::StatusSettled {
-                    probes,
-                    after_fetch: true,
-                });
-            }
             NetCommand::DeepScan {
                 root,
                 depth,
                 settings,
             } => {
-                let scan_root = PathBuf::from(root.clone());
-                let found = tokio::task::spawn_blocking(move || {
-                    scan::scan_folder(&settings, &scan_root, Some(depth))
-                })
-                .await
-                .unwrap_or_default();
-                let _ = evt_tx.send_blocking(UiEvent::DeepScanSettled {
-                    root,
-                    found: found.repos,
+                // the dialog's scan is a user action: run it now rather than
+                // queueing it behind a background pass
+                let evt_tx = evt_tx.clone();
+                tokio::spawn(async move {
+                    let scan_root = PathBuf::from(root.clone());
+                    let found = tokio::task::spawn_blocking(move || {
+                        scan::scan_folder(&settings, &scan_root, Some(depth))
+                    })
+                    .await
+                    .unwrap_or_default();
+                    let _ = evt_tx.send_blocking(UiEvent::DeepScanSettled {
+                        root,
+                        found: found.repos,
+                    });
                 });
             }
             NetCommand::Clone {
@@ -829,13 +927,17 @@ async fn net_main(cmd_rx: Receiver<NetCommand>, evt_tx: Sender<UiEvent>) {
                 parent_dir,
                 name,
             } => {
-                let result =
-                    warp_station_core::git::cli::clone(&url, Path::new(&parent_dir), &name).await;
-                let _ = evt_tx.send_blocking(UiEvent::CloneSettled {
-                    url,
-                    parent_dir,
-                    name,
-                    result,
+                let evt_tx = evt_tx.clone();
+                tokio::spawn(async move {
+                    let result =
+                        warp_station_core::git::cli::clone(&url, Path::new(&parent_dir), &name)
+                            .await;
+                    let _ = evt_tx.send_blocking(UiEvent::CloneSettled {
+                        url,
+                        parent_dir,
+                        name,
+                        result,
+                    });
                 });
             }
             NetCommand::GetChangePatch {
@@ -858,27 +960,6 @@ async fn net_main(cmd_rx: Receiver<NetCommand>, evt_tx: Sender<UiEvent>) {
                     staged,
                     patch,
                 });
-            }
-            NetCommand::GitHubPass { folders, gh_exe } => {
-                use std::sync::{Arc, Mutex};
-                let collected = Arc::new(Mutex::new(Vec::new()));
-                let sink = collected.clone();
-                let gh = gh_exe.clone();
-                warp_station_core::refresh::throttled_pass(folders, 2, move |folder| {
-                    let sink = sink.clone();
-                    let gh = gh.clone();
-                    async move {
-                        let snapshot = warp_station_core::github::refresh(&folder, &gh).await;
-                        sink.lock()
-                            .unwrap()
-                            .push((folder.to_string_lossy().to_string(), snapshot));
-                    }
-                })
-                .await;
-                let items = Arc::try_unwrap(collected)
-                    .map(|m| m.into_inner().unwrap())
-                    .unwrap_or_default();
-                let _ = evt_tx.send_blocking(UiEvent::GitHubSettled { items });
             }
             NetCommand::WandSummary {
                 id,
@@ -975,18 +1056,25 @@ async fn net_main(cmd_rx: Receiver<NetCommand>, evt_tx: Sender<UiEvent>) {
             NetCommand::LoadModels { harness } => {
                 // passive on purpose: loading the catalog must never launch
                 // warp-agent; only runs launch it. A closed door serves the
-                // cache so the settings pickers keep working offline.
-                let catalog = match warp_station_core::warp::Client::connect().await {
-                    Ok(mut client) => match client.models(&harness).await {
-                        Ok(catalog) => {
-                            warp_station_core::opencode::store_harness_catalog(&harness, &catalog);
-                            catalog
-                        }
+                // cache so the settings pickers keep working offline. Spawned
+                // because the door round-trip can take the full command answer
+                // timeout, which must not stall other user actions.
+                let evt_tx = evt_tx.clone();
+                tokio::spawn(async move {
+                    let catalog = match warp_station_core::warp::Client::connect().await {
+                        Ok(mut client) => match client.models(&harness).await {
+                            Ok(catalog) => {
+                                warp_station_core::opencode::store_harness_catalog(
+                                    &harness, &catalog,
+                                );
+                                catalog
+                            }
+                            Err(_) => warp_station_core::opencode::cached_harness_catalog(&harness),
+                        },
                         Err(_) => warp_station_core::opencode::cached_harness_catalog(&harness),
-                    },
-                    Err(_) => warp_station_core::opencode::cached_harness_catalog(&harness),
-                };
-                let _ = evt_tx.send_blocking(UiEvent::ModelsLoaded { harness, catalog });
+                    };
+                    let _ = evt_tx.send_blocking(UiEvent::ModelsLoaded { harness, catalog });
+                });
             }
             NetCommand::NugetStart { config } => nuget.start(config),
             NetCommand::NugetStop => nuget.stop(),
@@ -1142,32 +1230,6 @@ async fn net_main(cmd_rx: Receiver<NetCommand>, evt_tx: Sender<UiEvent>) {
                         error: result.err(),
                     });
                 });
-            }
-            NetCommand::AzurePass {
-                folders,
-                pat,
-                custom_base,
-            } => {
-                use std::sync::{Arc, Mutex};
-                let collected = Arc::new(Mutex::new(Vec::new()));
-                let sink = collected.clone();
-                warp_station_core::refresh::throttled_pass(folders, 2, move |folder| {
-                    let sink = sink.clone();
-                    let pat = pat.clone();
-                    let custom_base = custom_base.clone();
-                    async move {
-                        let snapshot =
-                            warp_station_core::azure::refresh(&folder, &pat, &custom_base).await;
-                        sink.lock()
-                            .unwrap()
-                            .push((folder.to_string_lossy().to_string(), snapshot));
-                    }
-                })
-                .await;
-                let items = Arc::try_unwrap(collected)
-                    .map(|m| m.into_inner().unwrap())
-                    .unwrap_or_default();
-                let _ = evt_tx.send_blocking(UiEvent::AzureSettled { items });
             }
             // the intake answers these before they reach this queue
             NetCommand::GitHubDetails { .. }
