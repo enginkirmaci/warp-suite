@@ -66,6 +66,17 @@ pub fn adopt_legacy_dir(legacy: &Path, target: &Path) {
         return;
     }
     if !target.exists() {
+        // the suite root may not exist yet on a machine whose only data is
+        // the legacy app folder; rename needs the parent in place
+        if let Some(parent) = target.parent()
+            && let Err(err) = std::fs::create_dir_all(parent)
+        {
+            tracing::warn!(
+                "could not create {} for the migration: {err}",
+                parent.display()
+            );
+            return;
+        }
         match std::fs::rename(legacy, target) {
             Ok(()) => tracing::info!(
                 "migrated the app data {} → {}",
@@ -163,24 +174,55 @@ fn adopt_log_files(legacy: &Path, target: &Path) {
 /// flat `.md` notes at its root move over, and the app's own entries
 /// (`settings.json`, `ui.json`, `logs/`, anything dot-prefixed) stay where
 /// they are. A name collision keeps both sides and the legacy folder — user
-/// content is never overwritten or deleted. Idempotent, so it runs on every
-/// start.
-pub fn adopt_notes_store(legacy: &Path) {
-    adopt_notes_at(legacy, &notes_store_root());
+/// content is never overwritten or deleted. Returns whether the legacy folder
+/// is fully retired (false keeps it for the next pass).
+pub fn adopt_notes_store(legacy: &Path) -> bool {
+    adopt_notes_at(legacy, &notes_store_root())
+}
+
+/// One-shot marker for the notes-store migration. `~/.warp/notes` used to be
+/// the store and is now the notes app's own data folder, so once the legacy
+/// sources are gone it must not be scanned as a store on every start (a future
+/// app file there would otherwise be moved into the user's notes).
+fn notes_store_marker() -> PathBuf {
+    suite_root().join(".notes-store-v1")
+}
+
+/// Whether the one-shot notes-store migration already ran to completion.
+pub fn notes_store_adopted() -> bool {
+    notes_store_marker().is_file()
+}
+
+/// Records a completed notes-store migration. Callers only do this once every
+/// legacy source is gone (or had nothing left to move); a collision returns
+/// `false` from [`adopt_notes_store`] and must leave the marker unwritten so
+/// the next start retries.
+pub fn mark_notes_store_adopted() {
+    let marker = notes_store_marker();
+    if let Some(dir) = marker.parent()
+        && let Err(err) = std::fs::create_dir_all(dir)
+    {
+        tracing::warn!("could not create {}: {err}", dir.display());
+        return;
+    }
+    if let Err(err) = std::fs::write(&marker, "notes store layout v1\n") {
+        tracing::warn!("could not write {}: {err}", marker.display());
+    }
 }
 
 /// The entries a store folder may hold that belong to the app, not the store.
 const APP_LOCAL_NAMES: [&str; 3] = ["settings.json", "ui.json", "logs"];
 
-fn adopt_notes_at(legacy: &Path, target: &Path) {
+fn adopt_notes_at(legacy: &Path, target: &Path) -> bool {
+    // nothing to move: the source is already gone (or is the target)
     if !legacy.is_dir() || legacy == target {
-        return;
+        return true;
     }
     if std::fs::create_dir_all(target).is_err() {
-        return;
+        return false;
     }
     let Ok(entries) = std::fs::read_dir(legacy) else {
-        return;
+        return false;
     };
     let mut moved = 0usize;
     let mut failed = false;
@@ -222,6 +264,7 @@ fn adopt_notes_at(legacy: &Path, target: &Path) {
     if !failed {
         let _ = std::fs::remove_dir(legacy);
     }
+    !failed
 }
 
 #[cfg(test)]
@@ -339,7 +382,10 @@ mod tests {
         std::fs::write(legacy.join("settings.json"), "{}").unwrap();
         std::fs::create_dir_all(legacy.join("logs")).unwrap();
 
-        adopt_notes_at(&legacy, &target);
+        assert!(
+            adopt_notes_at(&legacy, &target),
+            "a clean pass reports done"
+        );
 
         assert!(target.join("alpha").join("note.md").is_file());
         assert!(target.join("flat.md").is_file());
@@ -358,7 +404,10 @@ mod tests {
         std::fs::write(legacy.join("alpha").join("old.md"), "old").unwrap();
         std::fs::write(target.join("alpha").join("new.md"), "new").unwrap();
 
-        adopt_notes_at(&legacy, &target);
+        assert!(
+            !adopt_notes_at(&legacy, &target),
+            "a collision keeps the marker unwritten"
+        );
 
         assert!(legacy.join("alpha").join("old.md").is_file());
         assert!(target.join("alpha").join("new.md").is_file());

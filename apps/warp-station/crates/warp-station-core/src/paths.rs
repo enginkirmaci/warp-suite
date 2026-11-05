@@ -74,7 +74,20 @@ pub fn migrate_legacy_data() {
 /// `~/notes`. Both steps are idempotent, so they run before every launch.
 pub fn migrate_suite_layout() {
     migrate_app_entries_at(&AppPaths::user_data_root(), &AppPaths::app_dir());
-    suite::adopt_notes_store(&AppPaths::legacy_notes_dir());
+    if suite::notes_store_adopted() {
+        return;
+    }
+    // ~/.warp/notes is the notes app's data folder now, not a store: scan it
+    // only until the one-shot migration marker exists (audit C2). The marker
+    // is the notes app's to write, because ~/.warp-notes may still hold its
+    // pre-suite store; claiming the migration done here would strand those
+    // notes in the app folder.
+    let adopted = suite::adopt_notes_store(&AppPaths::legacy_notes_dir());
+    let legacy_app = home().join(".warp-notes");
+    let legacy_devtools = home().join(".devtools").join("notes");
+    if adopted && !legacy_app.exists() && !legacy_devtools.exists() {
+        suite::mark_notes_store_adopted();
+    }
 }
 
 /// The entries the root used to carry for this app; only they move into
