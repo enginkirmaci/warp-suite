@@ -251,6 +251,7 @@ Denetimden sonra öncelikli bulgular düzeltildi; her düzeltme kendi testini ta
 | A3 | düzeltildi | İptalden sonra `CANCEL_GRACE` (30 s) deadline'ı; door susarsa koşu hata ile kapanır | `warp::tests::a_cancelled_run_settles_when_the_door_stays_silent` |
 | A4 | düzeltildi |
 | B14 | düzeltildi | İlk örnek `~/.warp/station/ipc.port|ipc.token` üzerinde token’lı bir loopback kapısı açıyor; ikinci açılış `focus` gönderip çıkıyor, ilk pencere `cx.activate(true)` ile öne gelmeyi deniyor. Ayar/önbellek yazıcıları artık tek örnekte | `ipc::tests::{a_second_launch_forwards_focus_and_clears_its_endpoint, a_wrong_token_is_refused}`, `store::tests::a_focus_request_is_taken_once` |
+| C3 | düzeltildi | Silinen sohbet `ForgetDshSession` ile net thread’e bildiriliyor; dsh `sessions`/`recent_errors` kaydı düşüyor, sunucuya `cancel` gidiyor ve geç gelen snapshot/event bilinmeyen oturumu yeniden yaratmıyor | `dsh::tests::forgetting_a_session_drops_its_folded_state` |
 | C4 | düzeltildi | `exe::locate` olumsuz sonuçları 30 s TTL ile tutuyor; Ayarlar kaydı `exe::invalidate()` çağırıyor, böylece uygulama açıkken kurulan araç anında bulunuyor | `exe::tests::invalidate_forgets_a_cached_miss` |
 | C7 | kısmen | CI’daki `apps` işi artık uygulama paketlerine `clippy -D warnings` koşuyor; Windows derlemesi hâlâ yalnız release dispatch’inde | `kits.yml` (YAML doğrulandı) |
 | C8 | düzeltildi | Kullanılmayan `RefreshCoalescer` ve testi silindi; `track_session_info`’daki erişilemez kol `clear_subagent` yardımcısına indirildi; dsh’nin aynı gövdeli `assistant-stream` kolu kaldırıldı | derleme + mevcut testler |
@@ -280,7 +281,7 @@ $ cargo test --workspace --locked
 $ cargo clippy ... -W clippy::pedantic            # 1.720 uyarı; stil ağırlıklı
 ```
 
-Düzeltmelerden sonra aynı kapılar yeniden koşuldu: `cargo fmt --all --check` temiz, `cargo clippy --workspace --all-targets --locked -- -D warnings` temiz, `cargo test --workspace --locked` **669 test geçti, 0 başarısız**. İkinci turda B9, B10 (kısmi), B11, B12, B13; üçüncü turda C1 ve B8 (kısmi), dördüncü turda B14 düzeltildi; aynı kapılar yeniden geçti. Koşu, düzeltme testlerinin yanı sıra `warp-station-core` içinde HOME'u geçici olarak değiştiren testlerle ev/yol testi arasındaki paralel çalışma yarışını da ortaya çıkardı; ikisi artık `test_support::HOME_LOCK` üzerinden sırayla koşuyor.
+Düzeltmelerden sonra aynı kapılar yeniden koşuldu: `cargo fmt --all --check` temiz, `cargo clippy --workspace --all-targets --locked -- -D warnings` temiz, `cargo test --workspace --locked` **670 test geçti, 0 başarısız**. İkinci turda B9, B10 (kısmi), B11, B12, B13; üçüncü turda C1 ve B8 (kısmi), dördüncü turda B14, beşinci turda B3–B5 ve C3/C4/C7/C8 düzeltildi; aynı kapılar yeniden geçti. Koşu, düzeltme testlerinin yanı sıra `warp-station-core` içinde HOME'u geçici olarak değiştiren testlerle ev/yol testi arasındaki paralel çalışma yarışını da ortaya çıkardı; ikisi artık `test_support::HOME_LOCK` üzerinden sırayla koşuyor.
 
 Pedantic çıktısında incelenen üretim kodu `Duration` çıkarma uyarıları korumalı çıktı (`elapsed >= interval` ve `since_last >= STREAM_REPAINT_INTERVAL` erken çıkışları); gerçek bir taşma yolu bulunmadı. `unsafe` blokları ağırlıklı olarak `// SAFETY:` yorumlu (birkaç test restore satırı hariç); `transmute`, `unsafe impl Send/Sync` veya `static mut` yok.
 
