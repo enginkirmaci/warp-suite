@@ -101,7 +101,7 @@ together. When one changes, update the other side in the **same** commit.
   and Warp Station read the same `~/.warp/snapit` settings/layouts
   (string-typed numbers, `"x,y"` points, the misspelled `DeactivedScreens`
   field). Warp Station's `SnapIt.Executable` setting points at the Rust
-  `snapit.exe`, which is a portable-zip deliverable (no installer) and
+  `warp-snapit.exe`, which is a portable-zip deliverable (no installer) and
   skipped in the Linux bundle (`linux_skip = true` in `apps.toml`).
 - **Shared notes store** (`~/.warp/notes`, one folder per repo): Warp
   Station's notes surfaces (titlebar toggle, tools menu, repo-row icons,

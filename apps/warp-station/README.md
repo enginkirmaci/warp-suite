@@ -54,6 +54,6 @@ This directory only carries the assets: `packaging/linux/{*.desktop,icons}`,
 
 The Windows zone snapper lives in its own repo,
 [enginkirmaci/warp-snapit](https://github.com/enginkirmaci/warp-snapit), and
-reads the same `~/.warp/snapit` settings/layouts. `snapit.exe` is
+reads the same `~/.warp/snapit` settings/layouts. `warp-snapit.exe` is
 distributed through [warp-suite](https://github.com/enginkirmaci/warp-suite)
 releases (`SnapIt.Executable` in the settings points Warp Station at the exe).

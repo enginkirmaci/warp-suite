@@ -20,10 +20,10 @@ pub enum Action {
 }
 
 pub const USAGE: &str = "\
-snapit — Windows zone snapper (Rust port of the .NET SnapIt companion)
+warp-snapit — Windows zone snapper (Rust port of the .NET SnapIt companion)
 
 USAGE:
-    snapit [OPTIONS]
+    warp-snapit [OPTIONS]
 
 OPTIONS:
     --parent <PID>   Exit when the given process exits (used by Warp Station)

@@ -4,7 +4,7 @@ Standalone Rust port of the Windows zone-snapper companion. The .NET original
 (`Tools.SnapIt`) lives in the [SnapIt](https://github.com/enginkirmaci/SnapIt)
 repo and was vendored into
 [Warp Station](https://github.com/enginkirmaci/warp-station) (`src/Tools.SnapIt`)
-before the C# companion was removed; `snapit.exe` is the distributed
+before the C# companion was removed; `warp-snapit.exe` is the distributed
 binary.
 
 Distributed through [warp-suite](https://github.com/enginkirmaci/warp-suite)
@@ -47,13 +47,13 @@ cargo test
 
 # Windows
 cargo build --release
-target\release\snapit.exe --parent <warp-station pid>
+target\release\warp-snapit.exe --parent <warp-station pid>
 
 # Print the monitor/layout/zone math without starting the engine
-target\release\snapit.exe --dump-zones
+target\release\warp-snapit.exe --dump-zones
 ```
 
-`snapit.exe` uses the mutex `Local\DevTools.SnapIt.Rust`, while the .NET
+`warp-snapit.exe` uses the mutex `Local\DevTools.SnapIt.Rust`, while the .NET
 companion uses `Local\DevTools.Tools.SnapIt.Companion`. Both can therefore be
 started for comparison, but running both at once installs two global hooks and
 is not recommended.

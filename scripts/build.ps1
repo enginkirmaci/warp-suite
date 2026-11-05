@@ -84,7 +84,7 @@ foreach ($name in $appNames) {
     if (-not $pkg) { throw "$name (package $package) is not a workspace member" }
     $bins = @($pkg.targets | Where-Object { $_.kind -contains 'bin' } | ForEach-Object { $_.name })
     if ($bins.Count -eq 0) { throw "$name has no bin target" }
-    # The bin target is not always the package name (warp-snapit -> snapit).
+    # The bin target is not always the package name (snapit -> warp-snapit).
     $bin = if ($bins -contains $package) { $package } else { $bins[0] }
 
     $stage = Join-Path $dist $name

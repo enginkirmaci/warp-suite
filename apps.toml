@@ -55,8 +55,8 @@ cfg(windows)-gated, platform-neutral modules tested on Linux). Reads the
 same ~/.warp/snapit settings/layouts Warp Station reads - the two share
 the settings contract, the misspelled DeactivedScreens field included.
 Warp Station's SnapIt.Executable default still names the retired
-Tools.SnapIt.exe; point it at snapit.exe to run the Rust port. Suite
-deliverable: a portable zip with snapit.exe + the default settings seed
+Tools.SnapIt.exe; point it at warp-snapit.exe to run the Rust port. Suite
+deliverable: a portable zip with warp-snapit.exe + the default settings seed
 (no packaging/windows/<app>.iss), no installer.
 """
 

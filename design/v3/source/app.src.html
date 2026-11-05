@@ -784,7 +784,7 @@ const PANES = {
       + setting('groupByRoot', 'Group repos by folder') + choice('Group depth', 'How many folder levels make a group', opts('depth', ['1', '2', '3'])),
     git: () => text('prefix', 'Branch name prefix', 'feat/') + choice('Auto fetch', '', opts('fetch', ['Off', '15m', '30m', '60m'])) + setting('fetchActive', 'Only fetch while active'),
     tools: () => setting('vscode', 'Enable VS Code') + text('vscodeExe', 'VS Code executable', 'code') + text('vscodeProf', 'VS Code profile', '', { ph: 'Default' })
-      + setting('terminal', 'Enable Terminal') + text('term', 'Terminal executable', 'alacritty') + text('ide', 'IDE executable', 'devenv') + text('snapitExe', 'SnapIt executable', 'snapit.exe')
+      + setting('terminal', 'Enable Terminal') + text('term', 'Terminal executable', 'alacritty') + text('ide', 'IDE executable', 'devenv') + text('snapitExe', 'SnapIt executable', 'warp-snapit.exe')
       + subhead('OpenCode') + setting('opencode', 'Enable OpenCode') + text('ocExe', 'OpenCode executable', 'opencode')
       + subhead('DeepSeek') + setting('deepseek', 'Enable DeepSeek') + text('dsExe', 'DeepSeek executable', 'dsh'),
     ai: () => choice('Harness', 'Runs the commit, README and summary wands', opts('harness', ['OpenCode', 'DeepSeek'])) + text('model', 'Model', '', { ph: 'Default' }) + text('variant', 'Variant', '', { ph: 'Default' }) + subhead('Prompt templates') + templates(),

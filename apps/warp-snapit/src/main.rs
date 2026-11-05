@@ -6,7 +6,7 @@ fn main() -> ExitCode {
     let action = match snapit::cli::parse(std::env::args_os().skip(1)) {
         Ok(action) => action,
         Err(error) => {
-            eprintln!("snapit: {error}\n\n{USAGE}");
+            eprintln!("warp-snapit: {error}\n\n{USAGE}");
             return ExitCode::from(2);
         }
     };
@@ -17,7 +17,7 @@ fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         Action::Version => {
-            println!("snapit {}", env!("CARGO_PKG_VERSION"));
+            println!("warp-snapit {}", env!("CARGO_PKG_VERSION"));
             ExitCode::SUCCESS
         }
         Action::Run(cli) => run(cli),
@@ -29,7 +29,7 @@ fn run(cli: snapit::cli::Cli) -> ExitCode {
     match snapit::run(cli) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
-            eprintln!("snapit: {error:#}");
+            eprintln!("warp-snapit: {error:#}");
             ExitCode::FAILURE
         }
     }
@@ -37,6 +37,6 @@ fn run(cli: snapit::cli::Cli) -> ExitCode {
 
 #[cfg(not(windows))]
 fn run(_cli: snapit::cli::Cli) -> ExitCode {
-    eprintln!("snapit: the SnapIt engine is Windows-only.");
+    eprintln!("warp-snapit: the SnapIt engine is Windows-only.");
     ExitCode::FAILURE
 }

@@ -6,7 +6,7 @@ description = "SnapIt — Windows zone snapper (Rust port of Warp Station's Tool
 license = "GPL-3.0"
 
 [[bin]]
-name = "snapit"
+name = "warp-snapit"
 path = "src/main.rs"
 
 [dependencies]

@@ -101,7 +101,7 @@ while read -r app; do
 
     meta="$(cd "$root" && cargo metadata --no-deps --format-version 1)"
     target_dir="$(jq -r '.target_directory' <<<"$meta")"
-    # The bin target is not always the package name (warp-snapit -> snapit).
+    # The bin target is not always the package name (snapit -> warp-snapit).
     bin_name="$(jq -r --arg pkg "$package" \
         '[.packages[] | select(.name == $pkg) | .targets[]
           | select(.kind | index("bin")) | .name] | .[0]' <<<"$meta")"

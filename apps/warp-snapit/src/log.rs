@@ -13,7 +13,7 @@ static LOG_LOCK: Mutex<()> = Mutex::new(());
 
 pub fn line(message: &str) {
     #[cfg(debug_assertions)]
-    eprintln!("snapit: {message}");
+    eprintln!("warp-snapit: {message}");
 
     let path = crate::settings::snapit_root().join("snapit.log");
     if let Some(parent) = path.parent() {
