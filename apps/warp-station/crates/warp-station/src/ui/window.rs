@@ -63,10 +63,14 @@ pub struct MainWindow {
     /// of text fields, so without this root handle Escape/Ctrl+K only fire
     /// after an input has been clicked.
     focus_handle: gpui::FocusHandle,
+    /// This window, for the single-instance door's activation request:
+    /// `App::activate` is a no-op on Linux, `Window::activate_window` is not.
+    window_handle: gpui::AnyWindowHandle,
 }
 
 impl MainWindow {
     pub fn new(store: Entity<Store>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let window_handle = window.window_handle();
         let repos_page = cx.new(|cx| crate::ui::repos::ReposPage::new(store.clone(), window, cx));
         let settings_page =
             cx.new(|cx| crate::ui::settings::SettingsPage::new(store.clone(), window, cx));
@@ -83,9 +87,20 @@ impl MainWindow {
         .detach();
         cx.observe(&store, |this, _, cx| {
             // a second launch asked the single-instance door to bring this
-            // window forward; the compositor decides whether it may activate
+            // window forward; App::activate is a Linux no-op, so reach the
+            // window itself (the compositor still decides whether to grant it)
             if this.store.update(cx, |s, _| s.take_focus_request()) {
-                cx.activate(true);
+                // defer: this observer already holds MainWindow's lease, and
+                // update_window re-enters the same root view. The effect runs
+                // after the current update, where activating is safe.
+                let handle = this.window_handle;
+                cx.defer(move |cx| {
+                    if let Err(err) = cx.update_window(handle, |_, window, _| {
+                        window.activate_window();
+                    }) {
+                        tracing::warn!("focus request could not activate the window: {err}");
+                    }
+                });
             }
             cx.notify();
         })
@@ -121,6 +136,7 @@ impl MainWindow {
             keep_awake_page: None,
             titlebar_should_move: false,
             focus_handle,
+            window_handle,
         };
         // keep the root focus handle live so Escape / Ctrl+K work before the
         // first input click; inputs take focus back when the user clicks them

@@ -250,7 +250,7 @@ Denetimden sonra öncelikli bulgular düzeltildi; her düzeltme kendi testini ta
 | A2 | düzeltildi | `closed_failed` + Retry düğmesi; başarısız yükleme "Loading…" yerine hata gösterir; merge anahtarı ve önbelleği temizler | `split_probe::a_failed_closed_load_offers_retry`, `the_closed_list_loads_when_it_is_asked_for` |
 | A3 | düzeltildi | İptalden sonra `CANCEL_GRACE` (30 s) deadline'ı; door susarsa koşu hata ile kapanır | `warp::tests::a_cancelled_run_settles_when_the_door_stays_silent` |
 | A4 | düzeltildi |
-| B14 | düzeltildi | İlk örnek `~/.warp/station/ipc.port|ipc.token` üzerinde token’lı bir loopback kapısı açıyor; ikinci açılış `focus` gönderip çıkıyor, ilk pencere `cx.activate(true)` ile öne gelmeyi deniyor. Ayar/önbellek yazıcıları artık tek örnekte | `ipc::tests::{a_second_launch_forwards_focus_and_clears_its_endpoint, a_wrong_token_is_refused}`, `store::tests::a_focus_request_is_taken_once` |
+| B14 | düzeltildi | İlk örnek `~/.warp/station/ipc.port|ipc.token` üzerinde token’lı bir loopback kapısı açıyor; ikinci açılış `focus` gönderip çıkıyor. İlk pencere isteği store gözlemcisinde `cx.defer` + `Window::activate_window` ile yapıyor (`App::activate` Linux’ta no-op; gözlemci içinde doğrudan `update_window` yeniden giriş olurdu). Ayar/önbellek yazıcıları tek örnekte | `ipc::tests::{a_second_launch_forwards_focus_and_clears_its_endpoint, a_wrong_token_is_refused}`, `store::tests::a_focus_request_is_taken_once` |
 | C2 | düzeltildi | Not deposu göçü artık tek seferlik `~/.warp/.notes-store-v1` işaretiyle korunuyor; notlar uygulaması eski `~/.warp-notes` klasörünü mağaza göçünden **önce** emiyor, böylece eski mağaza notları aynı açılışta `~/notes`’a ulaşıyor. Çakışma işareti yazmıyor (sonraki açılış yeniden dener). Göç sırasında hedef ebeveyni yoksa `adopt_legacy_dir` artık oluşturuyor | `layout_migration::{notes_inside_the_old_app_folder_reach_the_store, the_store_migration_is_one_shot}` + platform `paths` testleri |
 | C3 | düzeltildi | Silinen sohbet `ForgetDshSession` ile net thread’e bildiriliyor; dsh `sessions`/`recent_errors` kaydı düşüyor, sunucuya `cancel` gidiyor ve geç gelen snapshot/event bilinmeyen oturumu yeniden yaratmıyor | `dsh::tests::forgetting_a_session_drops_its_folded_state` |
 | C5 | düzeltildi | `ReposPage` gözlemcisi `ensure_row_selected`’i yalnız store’un `list_version`’ı değiştiğinde çalıştırıyor; toast/status bildirimleri artık O(n) tarama yapmıyor. `StatusSettled`/`GitHubSettled` klasör→indeks haritası kullanıyor, n² `to_string_lossy` tahsisi kalktı | mevcut `warp-station` seçim probe’ları |
@@ -273,6 +273,18 @@ Denetimden sonra öncelikli bulgular düzeltildi; her düzeltme kendi testini ta
 | B12 | düzeltildi | stderr de stdout gibi sınırlandı (süreci öldürmeden), çocuk süreç 25 ms yoklama yerine `child.wait()` ile bekleniyor | `process::tests::caps_stderr_without_killing_the_child` + mevcut süreç testleri |
 | B13 | düzeltildi | Terminal/dosya yöneticisi/kardeş uygulama başlatmaları `spawn_detached` ile bir toplayıcı thread'de `wait()` ediliyor | derleme + mevcut testler |
 
+# Runtime smoke test (6 Kasım 2026)
+
+Üç Linux uygulaması ayrı bir scratch HOME ve kullanıcının masaüstünü boşaltmayan workspace-96 kuralıyla başlatıldı; her adımda etkin pencere/workspace doğrulandı (tam ekran oyun odakta kaldı).
+
+| Uygulama | Sonuç | Kanıt |
+|---|---|---|
+| warp-notes | PASS (bir hata bulundu, düzeltildi) | Pencere/shell/editer çizildi, loglarda panic/ERROR yok. `--repo demo --note hello.md` notu **açmıyordu**: göreli `--note` store köküne çözülüyordu. Not artık pinli repo klasörüne göre çözülüyor; yeni probe + yeniden derlenmiş ikiliyle ekranda `# Hello` görüldü |
+| warp-agent | PASS | Pencere çizildi; door ping yanıtı `{"id":1,"ok":true,"version":2,"app":"warp-agent"}`; loglar temiz |
+| warp-station | PASS | Settings sayfası çizildi (`WARP_STATION_PAGE` çalışıyor); ikinci örnek pencere açmadan çıktı, ws-96'da tek pencere kaldı; kapanışta `ipc.port`/`ipc.token` silindi; loglarda panic yok. Smoke test, B14'ün Linux'ta `App::activate` no-op'una dayandığını gösterdi; `Window::activate_window` (defer içinde) ile düzeltildi |
+
+İlk subagent denemesi sonuç üretmeden düştü; ikinci deneme tamamlandı. Ekranda görülen tek eksik, yukarıdaki `--note` davranışıydı; `WARP_STATION_PAGE` uyarısının test komutundan kaynaklandığı ayrıca doğrulandı.
+
 # Doğrulama eki
 
 ```
@@ -284,7 +296,7 @@ $ cargo test --workspace --locked
 $ cargo clippy ... -W clippy::pedantic            # 1.720 uyarı; stil ağırlıklı
 ```
 
-Düzeltmelerden sonra aynı kapılar yeniden koşuldu: `cargo fmt --all --check` temiz, `cargo clippy --workspace --all-targets --locked -- -D warnings` temiz, `cargo test --workspace --locked` **672 test geçti, 0 başarısız**. İkinci turda B9, B10 (kısmi), B11, B12, B13; üçüncü turda C1 ve B8 (kısmi), dördüncü turda B14, beşinci turda B3–B5 ve C3/C4/C7/C8, altıncı turda C1/C5/C9 ve C2 düzeltildi; aynı kapılar yeniden geçti. Koşu, düzeltme testlerinin yanı sıra `warp-station-core` içinde HOME'u geçici olarak değiştiren testlerle ev/yol testi arasındaki paralel çalışma yarışını da ortaya çıkardı; ikisi artık `test_support::HOME_LOCK` üzerinden sırayla koşuyor.
+Düzeltmelerden sonra aynı kapılar yeniden koşuldu: `cargo fmt --all --check` temiz, `cargo clippy --workspace --all-targets --locked -- -D warnings` temiz, `cargo test --workspace --locked` **673 test geçti, 0 başarısız**. İkinci turda B9, B10 (kısmi), B11, B12, B13; üçüncü turda C1 ve B8 (kısmi), dördüncü turda B14, beşinci turda B3–B5 ve C3/C4/C7/C8, altıncı turda C1/C5/C9 ve C2 düzeltildi; smoke testte bulunan iki davranış da aynı turda giderildi. Koşu, düzeltme testlerinin yanı sıra `warp-station-core` içinde HOME'u geçici olarak değiştiren testlerle ev/yol testi arasındaki paralel çalışma yarışını da ortaya çıkardı; ikisi artık `test_support::HOME_LOCK` üzerinden sırayla koşuyor.
 
 Pedantic çıktısında incelenen üretim kodu `Duration` çıkarma uyarıları korumalı çıktı (`elapsed >= interval` ve `since_last >= STREAM_REPAINT_INTERVAL` erken çıkışları); gerçek bir taşma yolu bulunmadı. `unsafe` blokları ağırlıklı olarak `// SAFETY:` yorumlu (birkaç test restore satırı hariç); `transmute`, `unsafe impl Send/Sync` veya `static mut` yok.
 
