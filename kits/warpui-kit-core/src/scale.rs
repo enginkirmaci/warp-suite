@@ -47,11 +47,15 @@ impl Global for ScaleHost {}
 
 /// The settings file every app shares, at the root of the `~/.warp` tree.
 fn shared_file() -> Option<PathBuf> {
+    // the platform kit owns the suite layout (and Windows' USERPROFILE-first
+    // home resolution); a machine with neither variable keeps the old
+    // "no shared file" behaviour instead of writing ./warp/ui.json
     let home = std::env::var_os("HOME")
         .filter(|h| !h.is_empty())
         .or_else(|| std::env::var_os("USERPROFILE"))
         .filter(|h| !h.is_empty())?;
-    Some(PathBuf::from(home).join(".warp").join("ui.json"))
+    let _ = home;
+    Some(warpui_kit_platform::paths::suite_root().join("ui.json"))
 }
 
 fn read_text_size(file: &Path) -> Option<&'static str> {
@@ -105,9 +109,11 @@ fn write_setting(file: &Path, key: &str, value: &str) -> std::io::Result<()> {
         if let Some(dir) = file.parent() {
             fs::create_dir_all(dir)?;
         }
-        let scratch = file.with_extension(format!("json.{}", std::process::id()));
-        fs::write(&scratch, serde_json::to_string_pretty(&doc)?)?;
-        fs::rename(&scratch, file)
+        let json = serde_json::to_string_pretty(&doc)?;
+        // the platform kit's unique temp + rename (the copy this file used to
+        // carry was pid-named and could collide between two writes)
+        warpui_kit_platform::io::write_atomically(file, &json)
+            .map_err(|err| std::io::Error::other(err.to_string()))
     })
 }
 

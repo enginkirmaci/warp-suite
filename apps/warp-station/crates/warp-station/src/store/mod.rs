@@ -202,6 +202,10 @@ pub struct Store {
     /// Distinct tags across the list (filter chip row), recomputed on
     /// reproject so the toolbar does not rescan every render.
     tags_cache: Vec<String>,
+    /// Bumped whenever the repo list (or the selection contract) changes in a
+    /// way `ensure_row_selected` must react to. The repos page observes this
+    /// instead of running an O(n) pass on every store notification (audit C5).
+    pub list_version: u64,
     /// Debounce sequence for the global search; a keystroke invalidates any
     /// in-flight background search.
     search_generation: u32,
@@ -326,6 +330,7 @@ impl Store {
             selection_generation: 0,
             nuget: Arc::new(Default::default()),
             tags_cache: Vec::new(),
+            list_version: 0,
             search_generation: 0,
             global_search_pending: false,
             code_search_hits: Vec::new(),
@@ -512,6 +517,7 @@ impl Store {
         match event {
             UiEvent::ScanSettled { repos, removed: _ } => {
                 self.repos = repos;
+                self.list_version += 1;
                 self.scanning = false;
                 self.reproject();
                 // statuses re-check after every rescan without coordination
@@ -532,6 +538,7 @@ impl Store {
                 probes,
                 after_fetch,
             } => {
+                let by_folder = self.repo_index_by_folder();
                 for probe in &probes {
                     // a user git action owns the truth until its own probe
                     // lands: now that passes run off the command loop, a
@@ -539,12 +546,8 @@ impl Store {
                     if self.git_jobs.contains_key(&probe.folder_path) {
                         continue;
                     }
-                    if let Some(entry) = self
-                        .repos
-                        .iter_mut()
-                        .find(|r| r.folder_path.to_string_lossy() == probe.folder_path)
-                    {
-                        repo_store::apply_status_probe(entry, probe);
+                    if let Some(&ix) = by_folder.get(&probe.folder_path) {
+                        repo_store::apply_status_probe(&mut self.repos[ix], probe);
                     }
                 }
                 // a fetch pass ends here: the selected repo's open workspace
@@ -627,12 +630,10 @@ impl Store {
                 cx.notify();
             }
             UiEvent::GitHubSettled { items } => {
+                let by_folder = self.repo_index_by_folder();
                 for (folder, snapshot) in items {
-                    if let Some(entry) = self
-                        .repos
-                        .iter_mut()
-                        .find(|r| r.folder_path.to_string_lossy() == folder)
-                    {
+                    if let Some(&ix) = by_folder.get(&folder) {
+                        let entry = &mut self.repos[ix];
                         entry.github_pr_count = snapshot.pulls.len() as u32;
                         entry.github_issue_count = snapshot.issues.len() as u32;
                     }
@@ -1204,6 +1205,7 @@ impl Store {
             .map(|m| m.folder_path.clone())
             .collect();
         self.repos = merged;
+        self.list_version += 1;
         self.reproject();
         // the listing scan rebuilds this list from the persisted scan roots
         // and drops everything else, so the new folders must join the roots
@@ -2143,6 +2145,8 @@ impl Store {
     /// how the selected repo leaves the rail.
     pub fn clear_selection(&mut self, cx: &mut Context<Self>) {
         self.selected_repo = None;
+        // the page's next pass picks a row again; count it as a list change
+        self.list_version += 1;
         self.persist_selection_soon(None, cx);
         self.reset_repo_workspace();
         cx.notify();
@@ -2166,6 +2170,16 @@ impl Store {
         self.wand_repo = None;
     }
 
+    /// Folder text → index, so one status/GitHub pass does not scan the whole
+    /// list per entry (n² `to_string_lossy` allocations).
+    fn repo_index_by_folder(&self) -> std::collections::HashMap<String, usize> {
+        self.repos
+            .iter()
+            .enumerate()
+            .map(|(ix, repo)| (repo.folder_path.to_string_lossy().to_string(), ix))
+            .collect()
+    }
+
     pub fn selected_entry(&self) -> Option<&RepoEntry> {
         self.selected_repo.as_ref().and_then(|folder| {
             self.repos
@@ -2178,6 +2192,7 @@ impl Store {
     /// dialog's adoption path).
     pub fn replace_repos(&mut self, repos: Vec<RepoEntry>) {
         self.repos = repos;
+        self.list_version += 1;
         self.reproject();
     }
 

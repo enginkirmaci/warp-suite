@@ -1906,12 +1906,8 @@ fn model_data(
                 && (filter.is_empty() || model.to_lowercase().contains(&filter))
         })
         .collect();
-    models.sort_by(|a, b| {
-        model_provider(a)
-            .to_lowercase()
-            .cmp(&model_provider(b).to_lowercase())
-            .then_with(|| a.to_lowercase().cmp(&b.to_lowercase()))
-    });
+    // one lowercase allocation per model, not per comparison
+    models.sort_by_cached_key(|model| (model_provider(model).to_lowercase(), model.to_lowercase()));
     models.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
 
     let mut rows = Vec::with_capacity(models.len() + 4);

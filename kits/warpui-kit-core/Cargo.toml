@@ -10,6 +10,10 @@ license = "MIT"
 # gpui-kit 0.9 is built against these exact 0.3.11 snapshots. Bump together with gpui-kit.
 gpui = { package = "gpui-pre", version = "=0.3.11" }
 gpui-kit = { version = "0.9" }
+# headless platform halves (paths, atomic writes) with the gpui asset source
+# off: the shared ~/.warp/ui.json and the suite layout live there
+warpui-kit-platform = { path = "../warpui-kit-platform", default-features = false }
+
 # the net-event pump (pump.rs): both store-driven apps fed it the same
 # copy-pasted drain loop
 async-channel = "2"

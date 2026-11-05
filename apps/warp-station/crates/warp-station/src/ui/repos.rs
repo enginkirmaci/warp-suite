@@ -57,13 +57,22 @@ pub struct ReposPage {
     /// Keeps the active tab in view when the strip overflows.
     strip_scroll: ScrollHandle,
     strip_active: Option<usize>,
+    /// The store's list version the page last ran `ensure_row_selected` for.
+    list_version: u64,
 }
 
 impl ReposPage {
     pub fn new(store: Entity<Store>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let views = DetailViews::new(&store, window, cx);
+        let list_version = store.read(cx).list_version;
         cx.observe(&store, |this, store, cx| {
-            store.update(cx, |s, cx| s.ensure_row_selected(cx));
+            // only a list change needs the O(n) ensure pass; a toast or a
+            // status probe must not rescan every repo's tabs and paths (C5)
+            let version = store.read(cx).list_version;
+            if this.list_version != version {
+                this.list_version = version;
+                store.update(cx, |s, cx| s.ensure_row_selected(cx));
+            }
             // the menu belongs to the repo it opened on
             let selected = store.read(cx).selected_repo.clone();
             if this
@@ -92,6 +101,7 @@ impl ReposPage {
             strip_scroll: ScrollHandle::new(),
             strip_active: None,
             list_in_tab: false,
+            list_version,
         }
     }
 }
