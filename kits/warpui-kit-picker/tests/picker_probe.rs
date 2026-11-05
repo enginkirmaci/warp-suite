@@ -323,3 +323,171 @@ fn field_anchor_floats_the_panel_over_the_form(cx: &mut TestAppContext) {
         "an open floating panel must not push the form down"
     );
 }
+
+/// The composer card opens against its own pill when the host reports the
+/// trigger: left-aligned with it and just above its top, never at the
+/// host's bottom-right corner (the bug the chat tile showed).
+#[gpui_kit::gpui::test]
+fn composer_anchor_sits_above_its_trigger(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+    let mut picker_slot: Option<Entity<FilteredPicker>> = None;
+    let (_handle, cx) = cx.add_window_view(|window, cx| {
+        let picker = cx.new(|cx| {
+            FilteredPicker::new(
+                spec(true, OverlayAnchor::Composer),
+                PickerTarget::Callback(Box::new(|_, _, _| {})),
+                Box::new(data),
+                window,
+                cx,
+            )
+        });
+        picker_slot = Some(picker.clone());
+        Host {
+            field: cx.new(|cx| InputState::new(window, cx).placeholder("unused")),
+            picker,
+        }
+    });
+    cx.run_until_parked();
+    cx.update(|window, cx| drop(window.draw(cx)));
+
+    let trigger = gpui::Bounds {
+        origin: point(px(120.), px(420.)),
+        size: gpui::size(px(140.), px(28.)),
+    };
+    let host = gpui::Bounds {
+        origin: point(px(0.), px(0.)),
+        size: gpui::size(px(800.), px(600.)),
+    };
+    let picker = picker_slot.expect("the host built the picker");
+    picker.update(cx, |p, cx| p.set_composer_anchor(trigger, host, cx));
+    cx.run_until_parked();
+    cx.update(|window, cx| drop(window.draw(cx)));
+
+    let panel = cx
+        .debug_bounds("model-panel-test")
+        .expect("the card renders over the catcher");
+    assert!(
+        (panel.origin.x - trigger.origin.x).abs() <= px(2.),
+        "the card is left-aligned with its pill (panel {panel:?}, trigger {trigger:?})"
+    );
+    let panel_bottom = panel.origin.y + panel.size.height;
+    let wanted_bottom = trigger.origin.y - px(8.);
+    assert!(
+        (panel_bottom - wanted_bottom).abs() <= px(2.),
+        "the card sits 8px above the pill's top (panel bottom {panel_bottom:?}, wanted {wanted_bottom:?})"
+    );
+}
+
+/// A host mounts the composer picker only while its pill is open, so the
+/// entity outlives a dismissal. Re-opening must re-arm click-elsewhere:
+/// without `set_open(true)` the stale closed flag made the catcher a no-op.
+#[gpui_kit::gpui::test]
+fn composer_dismissal_rearms_after_reopen(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+    let dismissals: Arc<std::sync::Mutex<usize>> = Arc::default();
+    let mut picker_slot: Option<Entity<FilteredPicker>> = None;
+    let (_handle, cx) = cx.add_window_view(|window, cx| {
+        let close: DismissFn = {
+            let dismissals = dismissals.clone();
+            Box::new(move |_cx: &mut App| {
+                *dismissals.lock().unwrap() += 1;
+            })
+        };
+        let picker = cx.new(|cx| {
+            let mut picker = FilteredPicker::new(
+                spec(true, OverlayAnchor::Composer),
+                PickerTarget::Callback(Box::new(|_, _, _| {})),
+                Box::new(data),
+                window,
+                cx,
+            );
+            picker.set_on_dismiss(close);
+            picker
+        });
+        picker_slot = Some(picker.clone());
+        Host {
+            field: cx.new(|cx| InputState::new(window, cx).placeholder("unused")),
+            picker,
+        }
+    });
+    cx.run_until_parked();
+    cx.update(|window, cx| drop(window.draw(cx)));
+
+    click(cx, "picker-catcher");
+    cx.run_until_parked();
+    assert_eq!(
+        *dismissals.lock().unwrap(),
+        1,
+        "the first click-elsewhere dismisses"
+    );
+
+    // the host unmounted the entity and mounts it again on the next open
+    let picker = picker_slot.expect("the host built the picker");
+    cx.update(|window, cx| {
+        picker.update(cx, |p, cx| {
+            p.set_open(true, window, cx);
+        });
+    });
+    cx.run_until_parked();
+    cx.update(|window, cx| drop(window.draw(cx)));
+
+    click(cx, "picker-catcher");
+    cx.run_until_parked();
+    assert_eq!(
+        *dismissals.lock().unwrap(),
+        2,
+        "a reopened picker dismisses again on click-elsewhere"
+    );
+}
+
+/// Escape closes the composer popup from the focused filter: the key event
+/// bubbles through the catcher, so the owner's dismissal runs even though the
+/// card itself never takes focus.
+#[gpui_kit::gpui::test]
+fn composer_escape_dismisses(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+    let dismissals: Arc<std::sync::Mutex<usize>> = Arc::default();
+    let mut picker_slot: Option<Entity<FilteredPicker>> = None;
+    let (_handle, cx) = cx.add_window_view(|window, cx| {
+        let close: DismissFn = {
+            let dismissals = dismissals.clone();
+            Box::new(move |_cx: &mut App| {
+                *dismissals.lock().unwrap() += 1;
+            })
+        };
+        let picker = cx.new(|cx| {
+            let mut picker = FilteredPicker::new(
+                spec(true, OverlayAnchor::Composer),
+                PickerTarget::Callback(Box::new(|_, _, _| {})),
+                Box::new(data),
+                window,
+                cx,
+            );
+            picker.set_on_dismiss(close);
+            picker
+        });
+        picker_slot = Some(picker.clone());
+        Host {
+            field: cx.new(|cx| InputState::new(window, cx).placeholder("unused")),
+            picker,
+        }
+    });
+    cx.run_until_parked();
+    cx.update(|window, cx| drop(window.draw(cx)));
+
+    // the host focuses the filter on open (FilteredPicker::reset_filter)
+    let picker = picker_slot.expect("the host built the picker");
+    cx.update(|window, cx| {
+        picker.update(cx, |p, cx| p.reset_filter(window, cx));
+    });
+    cx.run_until_parked();
+    cx.update(|window, cx| drop(window.draw(cx)));
+
+    cx.simulate_keystrokes("escape");
+    cx.run_until_parked();
+    assert_eq!(
+        *dismissals.lock().unwrap(),
+        1,
+        "Escape dismisses the composer popup through the owner"
+    );
+}

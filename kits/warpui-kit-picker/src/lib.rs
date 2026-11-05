@@ -25,8 +25,8 @@
 
 use gpui::prelude::*;
 use gpui::{
-    App, Bounds, Context, Entity, Focusable as _, FontWeight, MouseButton, Pixels, SharedString,
-    Window, anchored, deferred, div, px, uniform_list,
+    App, Bounds, Context, Entity, Focusable as _, FontWeight, KeyDownEvent, MouseButton, Pixels,
+    SharedString, Window, anchored, deferred, div, px, uniform_list,
 };
 use gpui_kit::base::ElementExt as _;
 use gpui_kit::component::input::InputState;
@@ -41,6 +41,21 @@ const OVERLAY_WIDTH: f32 = 280.;
 /// The floating field panel's narrowest width: enough for a long model name
 /// beside its provider group header.
 const FIELD_PANEL_MIN_WIDTH: f32 = 260.;
+
+/// A composer-overlay card's placement for one trigger, in the catcher's
+/// coordinates: left-aligned with the trigger and just above its top, never
+/// past the host's right edge. Both rects are window bounds (prepaint's);
+/// the pair is `(left, distance from the host's bottom to the card's
+/// bottom)`. Apps that draw their own composer catcher (a flat list, not a
+/// [`FilteredPicker`]) use this to sit on the same geometry.
+pub fn composer_placement(trigger: Bounds<Pixels>, host: Bounds<Pixels>) -> (Pixels, Pixels) {
+    const GAP: f32 = 8.;
+    const EDGE: f32 = 8.;
+    let left = (trigger.origin.x - host.origin.x).max(px(EDGE));
+    let widest = (host.size.width - px(OVERLAY_WIDTH + EDGE)).max(px(EDGE));
+    let bottom = host.origin.y + host.size.height - trigger.origin.y + px(GAP);
+    (left.min(widest), bottom)
+}
 
 /// The filter field's glyph, embedded as source: this crate ships no assets
 /// and cannot rely on the app embedding a `search` icon (warp-station names
@@ -252,6 +267,10 @@ pub struct FilteredPicker {
     /// the floating panel opens. It lives on the entity because a fresh
     /// `Cell` per render would always be empty.
     trigger_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
+    /// The composer overlay's card placement, in the catcher's coordinates:
+    /// the card's left edge and the distance from the host's bottom to the
+    /// card's bottom edge. `None` keeps the corner default.
+    composer_placement: Rc<Cell<Option<(Pixels, Pixels)>>>,
     _subscriptions: Vec<gpui::Subscription>,
 }
 
@@ -276,6 +295,7 @@ impl FilteredPicker {
             filter,
             open,
             trigger_bounds: Rc::new(Cell::new(None)),
+            composer_placement: Rc::new(Cell::new(None)),
             _subscriptions: vec![sub_filter],
         }
     }
@@ -317,6 +337,22 @@ impl FilteredPicker {
     /// switches so the next open lists everything.
     pub fn clear_filter(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.filter.update(cx, |f, cx| f.set_value("", window, cx));
+        cx.notify();
+    }
+
+    /// Places the composer overlay's card against its trigger instead of the
+    /// host's bottom-right corner: left-aligned with the trigger, its bottom
+    /// edge just above the trigger's top. `trigger` and `host` are window
+    /// bounds (the pill's and the tile's), as prepaint reports them; the host
+    /// rect is what the catcher covers, so the card never leaves it.
+    pub fn set_composer_anchor(
+        &mut self,
+        trigger: Bounds<Pixels>,
+        host: Bounds<Pixels>,
+        cx: &mut Context<Self>,
+    ) {
+        self.composer_placement
+            .set(Some(composer_placement(trigger, host)));
         cx.notify();
     }
 
@@ -892,6 +928,13 @@ impl Render for FilteredPicker {
         if self.spec.overlay && self.spec.anchor == OverlayAnchor::Composer {
             let data = self.read_data(window, cx);
             let panel = self.build_panel(data, window, cx);
+            // the host places the card against its pill when it can (see
+            // set_composer_anchor); the corner default is the fallback
+            let card = div().absolute();
+            let card = match self.composer_placement.get() {
+                Some((left, bottom)) => card.left(left).bottom(bottom),
+                None => card.bottom_10().right_8(),
+            };
             return div()
                 .id("picker-catcher")
                 .debug_selector(|| "picker-catcher".into())
@@ -905,13 +948,16 @@ impl Render for FilteredPicker {
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.dismiss(cx);
                 }))
-                .child(
-                    div()
-                        .absolute()
-                        .bottom_10()
-                        .right_8()
-                        .child(panel.w(px(OVERLAY_WIDTH))),
-                )
+                // Escape closes from anywhere inside the card: the filter
+                // holds focus while the popup is open, and key events bubble
+                // up this catcher's subtree
+                .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                    if event.keystroke.key == "escape" {
+                        this.dismiss(cx);
+                        cx.stop_propagation();
+                    }
+                }))
+                .child(card.child(panel.w(px(OVERLAY_WIDTH))))
                 .into_any_element();
         }
 
