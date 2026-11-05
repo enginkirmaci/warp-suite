@@ -1827,6 +1827,14 @@ fn split_size(inner: &str) -> (&str, Option<u32>, Option<u32>) {
     }
 }
 
+/// Whether a link destination is an absolute URL the platform can follow —
+/// `https://…` and the other `scheme://…` targets — rather than a path into
+/// the host's notes, which only the host can resolve. The editor hands these
+/// to the platform opener and marks them with the external-link arrow.
+pub(crate) fn is_external_url(url: &str) -> bool {
+    url.contains("://")
+}
+
 /// A `[label](url)` / `![alt](url)` starting at `i`, as its five relative
 /// ranges: (marker, label, "](", url, ")").
 struct LinkParts {

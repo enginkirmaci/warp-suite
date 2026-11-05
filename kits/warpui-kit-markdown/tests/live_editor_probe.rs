@@ -41,6 +41,23 @@ impl Render for ReadOnlyProbe {
     }
 }
 
+/// A read-only surface whose host owns the web-link hand-off.
+struct HostLinkProbe {
+    editor: Entity<LiveEditorState>,
+    opened: Rc<RefCell<Vec<String>>>,
+}
+
+impl Render for HostLinkProbe {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        let opened = self.opened.clone();
+        div().size_full().child(
+            LiveEditor::new(&self.editor)
+                .read_only(true)
+                .on_open_url(move |url, _window, _cx| opened.borrow_mut().push(url.to_string())),
+        )
+    }
+}
+
 /// A fit-content host, the shape a chat message takes: the element is as
 /// tall as its whole document and the host scrolls around it.
 struct FitProbe {
@@ -140,6 +157,38 @@ impl Harness {
         };
         this.settle();
         this
+    }
+
+    /// A read-only surface whose host takes web-link clicks over; returns the
+    /// URLs the host was handed.
+    fn open_with_host_links(
+        tcx: &mut TestAppContext,
+        text: &str,
+    ) -> (Self, Rc<RefCell<Vec<String>>>) {
+        tcx.update(gpui_kit::init);
+        let mut editor = None;
+        let opened = Rc::new(RefCell::new(Vec::new()));
+        let seen = opened.clone();
+        let handle = tcx.open_window(gpui::size(px(900.), px(700.)), |window, cx| {
+            let state = cx.new(|cx| {
+                let mut state = LiveEditorState::new(window, cx);
+                state.set_read_only(true, cx);
+                state.set_value(text.to_string(), window, cx);
+                state
+            });
+            editor = Some(state.clone());
+            HostLinkProbe {
+                editor: state,
+                opened: seen,
+            }
+        });
+        let cx = VisualTestContext::from_window(handle.into(), tcx).into_mut();
+        let mut this = Self {
+            cx,
+            editor: editor.expect("the window was built"),
+        };
+        this.settle();
+        (this, opened)
     }
 
     /// A read-only surface sized to its document by a host that scrolls
@@ -412,16 +461,20 @@ fn clicking_a_rendered_link_opens_it_without_moving_the_caret(tcx: &mut TestAppC
     let link = h.point_of(5);
     h.cx.simulate_click(link, Modifiers::default());
     h.settle();
+    assert_eq!(
+        h.cx.opened_url().as_deref(),
+        Some("https://e.co"),
+        "a web link goes to the platform opener"
+    );
     let wiki = h.point_of(31);
     h.cx.simulate_click(wiki, Modifiers::default());
     h.settle();
     assert_eq!(
         *events.borrow(),
-        [
-            LiveEditorEvent::OpenUrl("https://e.co".into()),
-            LiveEditorEvent::OpenNote("note".into())
-        ]
+        [LiveEditorEvent::OpenNote("note".into())],
+        "the note target is the host's to resolve; the browser never opens"
     );
+    assert_eq!(h.cx.opened_url().as_deref(), Some("https://e.co"));
     assert!(h.state().ends_with("end¦"), "{:?}", h.state());
 }
 
@@ -1004,7 +1057,7 @@ fn read_only_task_boxes_do_not_toggle(tcx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn read_only_links_still_open(tcx: &mut TestAppContext) {
+fn read_only_links_open_in_the_browser_without_a_host(tcx: &mut TestAppContext) {
     let mut h = Harness::open_read_only(tcx, "see [docs](https://e.co) end");
     let events = Rc::new(RefCell::new(Vec::new()));
     {
@@ -1020,8 +1073,61 @@ fn read_only_links_still_open(tcx: &mut TestAppContext) {
     let link = h.point_of(h.offset_of("docs"));
     h.click(link);
     assert_eq!(
+        h.cx.opened_url().as_deref(),
+        Some("https://e.co"),
+        "a viewer surface follows the link itself"
+    );
+    assert!(
+        events.borrow().is_empty(),
+        "the host is not asked to open what the surface already opened"
+    );
+}
+
+#[gpui::test]
+fn read_only_bare_urls_open_too(tcx: &mut TestAppContext) {
+    let mut h = Harness::open_read_only(tcx, "see https://e.co/docs now");
+    let url = h.point_of(h.offset_of("e.co"));
+    h.click(url);
+    assert_eq!(h.cx.opened_url().as_deref(), Some("https://e.co/docs"));
+}
+
+#[gpui::test]
+fn read_only_note_links_go_to_the_host(tcx: &mut TestAppContext) {
+    let mut h = Harness::open_read_only(tcx, "see [notes](list.md) end");
+    let events = Rc::new(RefCell::new(Vec::new()));
+    {
+        let events = events.clone();
+        let editor = h.editor.clone();
+        h.cx.update(|_, cx| {
+            cx.subscribe(&editor, move |_, event: &LiveEditorEvent, _| {
+                events.borrow_mut().push(event.clone());
+            })
+            .detach();
+        });
+    }
+    let link = h.point_of(h.offset_of("notes"));
+    h.click(link);
+    assert_eq!(
         *events.borrow(),
-        [LiveEditorEvent::OpenUrl("https://e.co".into())]
+        [LiveEditorEvent::OpenNote("list.md".into())]
+    );
+    assert_eq!(
+        h.cx.opened_url(),
+        None,
+        "a note path is not a web page; the host resolves it"
+    );
+}
+
+#[gpui::test]
+fn a_host_can_take_over_opening_links(tcx: &mut TestAppContext) {
+    let (mut h, opened) = Harness::open_with_host_links(tcx, "see [docs](https://e.co) end");
+    let link = h.point_of(h.offset_of("docs"));
+    h.click(link);
+    assert_eq!(*opened.borrow(), ["https://e.co"]);
+    assert_eq!(
+        h.cx.opened_url(),
+        None,
+        "the host's handler replaces the platform hand-off"
     );
 }
 

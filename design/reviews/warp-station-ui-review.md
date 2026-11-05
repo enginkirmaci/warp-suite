@@ -2,7 +2,7 @@
 
 **Date:** 5 November 2026  
 **Reviewed:** the v3 design contract, the GPUI implementation, and the committed working prototype  
-**Checkout:** `warp-suite` at `128a2f8` (working tree already dirty from other work)
+**Checkout:** `warp-suite` at `128a2f8`, re-checked after `e58b0e2` (working tree already dirty from other work)
 
 ## Verdict
 
@@ -30,7 +30,8 @@ treated as exceptions. Those are the next design pass, not a repaint.
 | Type and colour | **Strong** — 12 px floor, real ladder, measured contrast; archived rows are the exception |
 | Interaction clarity | **Mixed** — excellent busy states; too many hover-only, icon-only actions |
 | Keyboard and accessibility | **Weak** — there is no focus model for the main surfaces |
-| Responsive behaviour | **Weak** — header and detail tabs break below ~1200 px; PR detail is not covered |
+| Responsive behaviour | **Weak** — header, detail tabs and Settings fields break below ~1200 px; PR detail is not covered |
+| Settings page | **Structurally right, behaviourally unfinished** — one shell and clean row grammar; responsive and form states lag |
 | Contract adherence | **Mixed** — Settings, dialog metrics, and the sort menu have drifted |
 
 ## What works — keep this
@@ -304,19 +305,165 @@ rule ("say what is true and offer the next step").
 state, with **Clone from URL** as the secondary. Make "No repositories found under the
 scan folders" offer **Open Settings**.
 
-### Settings autosave has drifted from the contract
+## Settings page — focused review
 
-The app autosaves every Settings text edit after a 600 ms debounce (toggles and pickers
-commit at once) and shows a transient "saved ✓"; `DESIGN.md` still says edits wait for
-**Save**. Autosave is a defensible choice
-— fewer steps, no lost dirty state — but it needs the trust furniture the contract
-implied: a persistent save/error state, an undo affordance, and validation. Today an
-invalid max scan depth silently becomes `3`, and closing the app within the debounce
-window can lose the last keystroke.
+The Settings page is the most contract-shaped screen in the app: a list of
+sections, one detail pane, 60 px rows, label left and control right, and the
+same head as every other page. Visually it is calm and consistent. It is also
+the least finished surface behaviourally: it exposes the shell's missing form
+discipline — dependency states, validation, responsive fields, undo and
+keyboard access.
 
-**Recommendation.** Decide which model is canonical and update both sides. If autosave
-stays, add per-section validation and a short undo for scan folders/executable paths; if
-Save returns, restore the footer and the dirty state.
+### Settings inventory
+
+| Section | Roughly | What it contains | Read |
+|---|---|---|---|
+| General | 4 rows | Start at boot, start minimized, tooltips, notes store path | Notes path belongs under Integrations |
+| Appearance | 4 rows | Palette, text size, typeface, reduce motion | Strong; the typeface row is not a setting |
+| Repository scanning | 8 rows | Scan/excluded folders, patterns, platform folder, max depth, grouping | Needs path validation and browse affordances |
+| Git | 5 rows | Branch prefix, auto fetch/refresh, focus sync | The clearest section |
+| External tools | ~14 rows | Visual Studio, VS Code, terminal, IDE, ripgrep, SnapIt, OpenCode, DeepSeek | A wall of rows; needs sub-groups and dependency states |
+| AI | ~7 rows plus templates | warp-agent, harness, model, variant, prompt editor | Good scope; no availability status |
+| Integrations | 7 rows | warp-notes, GitHub, Azure DevOps | PAT is exposed; no connection test |
+
+### What works
+
+- **The shape is right.** The section list is a real list/detail relationship, not
+  a modal or a settings drawer. The head, row grammar and measure match the rest
+  of the app.
+- **The row grammar is good.** Labels are 15/500, descriptions 13, controls align
+  right, and the 60 px rhythm is consistent. At 1500 px the page reads quickly.
+- **Appearance is the model section.** Palette and text size apply immediately and
+  are shared across the suite; reduce motion is a single switch. It is the one
+  section where immediate application is clearly the right behaviour.
+- **Small trust details are present.** The `Data folder` action, the resettable
+  prompt templates, and the transient `saved ✓` show the page was considered.
+
+### P0 — The 340 px control does not shrink with the pane
+
+`field_row` sets the control to `340 px` with `max_w(46% of READING_WIDTH)`. But
+`READING_WIDTH` is 760, so the cap is ~350 px regardless of the actual pane. At
+960 px the Settings detail pane has roughly 400 px of content; a 340 px field
+plus the 24 px row gap leaves only **about 40–55 px for the label**. Labels like
+"Azure DevOps server URL" wrap into a narrow vertical stack, and the field
+dominates the row.
+
+The prototype got this right with `max-width: 46%` of the row. The Rust version
+lost the "of the row" part. This is the settings page's clearest responsive bug,
+and it is reachable at the app's own 960 px minimum.
+
+**Recommendation.** Measure against the row/pane, not the 760 px constant:
+`max_w(relative(0.46))` or a layout pass that knows the available width. Below
+about 620 px, stack the label above the field (`kit_settings::stack_row` already
+exists). Add a 960 px settings probe.
+
+Evidence: `ui/settings.rs` `field_row`, `kits/warpui-kit-core/src/settings.rs`
+(`row` gap), `shell::READING_WIDTH`.
+
+### P1 — Autosave applies half-typed input, with no validation and no undo
+
+The page writes through after a 600 ms debounce; the contract still says edits
+wait for Save. That choice is defensible, but the surrounding form states were not
+built for it:
+
+- **Scan folders auto-apply.** A pause after a partial path kicks a rescan; the
+  user sees "No repositories found" while still typing. The same applies to
+  excluded folders and the patterns.
+- **Invalid numbers silently become valid ones.** `Max scan depth` parses with
+  `unwrap_or(3)`; typing `abc` leaves the field showing `abc` while the stored
+  value is 3. There is no inline error, and the page still says `saved ✓`.
+- **No saving/error state.** The user gets a green check for two seconds; there
+  is no persistent "Saving…" or "Could not save", and no undo after a scan folder
+  or executable path is written.
+- **Closing loses the debounce.** Quitting within the 600 ms window can lose the
+  last keystroke.
+
+**Recommendation.** For scan folders, patterns and integration credentials, use an
+explicit **Apply** (or a much longer, validated debounce that never scans an
+invalid path). Validate inline: max depth must be an integer in range, a folder
+must exist, an Azure URL must parse. Keep a persistent `Saving… / Saved` status
+and offer a short undo for applied folder changes. If the contract's Save model
+is restored, add the footer and dirty state instead.
+
+Evidence: `ui/settings.rs` (`schedule_commit`, `save`, `max_scan_depth`
+`unwrap_or(3)`), `DESIGN.md` line 229.
+
+### P1 — A disabled feature still looks editable
+
+Toggling off VS Code, Terminal, OpenCode, DeepSeek, warp-agent, warp-notes,
+GitHub or Azure leaves its executable or credential fields fully active. A user
+can edit an Azure PAT while Azure is off, or change the VS Code path while VS
+Code is disabled, with no indication that nothing will use it. The page needs a
+dependency state: disable and dim the dependent rows, or show a one-line "Turn on
+GitHub to edit" hint.
+
+The same problem reaches platform-specific rows: **Enable Visual Studio
+(Windows)** and the `IDE executable` field are shown on Linux, while the
+launcher is `cfg!(windows)`-only. SnapIt is correctly hidden there; Visual Studio
+is not.
+
+### P1 — External tools is a dumping ground
+
+Fourteen-plus rows share one heading. There are sub-heads for OpenCode and
+DeepSeek, but none for Editors, Terminal or Search. "IDE executable" is opaque;
+"VS Code profile" has no description. The terminal field can show `wt` on Linux, where it usually does not exist; the
+launcher falls back to a Linux terminal, so the visible value no longer describes
+what will run. Nothing shows whether a configured command was
+found on PATH.
+
+**Recommendation.** Group with `subhead`: Editors (VS Code, profile), Terminal,
+Search, AI CLIs (OpenCode, DeepSeek), Windows-only (SnapIt/Visual Studio).
+Hide Windows-only rows on Linux. For executables, offer `Auto (detected)` plus a
+"Found at /usr/bin/code" status line or a test button. Rename "IDE executable" to
+"Visual Studio executable" and move it under the Windows-only group.
+
+### P2 — Missing settings-level navigation
+
+There are seven sections and dozens of controls, but no search, no "Reset
+section", no "Reset all", and no keyboard focus path. A settings search is cheap
+and high-value for a developer tool; it also makes the single-detail-pane rule
+scale as the page grows. The section list has no resize handle and no hide
+toggle, so at 960 px it permanently takes roughly 420–432 px from a 450 px
+detail pane.
+
+**Recommendation.** Add a settings search (filter rows by label), a per-section
+Reset, and make the section list narrower or collapsible in Settings. At 960 px
+the detail pane should own the width.
+
+### P2 — Information architecture and copy
+
+- **General's hint says "Startup and tooltips"** but the section also owns the
+  notes store path. Move `Notes store path` to Integrations, next to warp-notes,
+  with a Browse button.
+- **Appearance's hint says "Text size and motion"** but the section also owns
+  Palette and Typeface. Either update the hint or move typeface to a small
+  "Typography" info line.
+- **The typeface row is static.** "Inter + JetBrains Mono" looks like a value
+  control but cannot be changed. Label it "(fixed)" or remove the row.
+- **Switch labels are inconsistent:** "Enable VS Code", "Cross-repo code search",
+  "GitHub", "Azure DevOps", "Enable warp-agent". Pick one convention.
+- **Several labels have no description:** VS Code profile, IDE executable,
+  platform folder name, max scan depth, branch name prefix. Use
+  `row_with_desc`; this is a power-user page, but a one-line explanation is not
+  clutter.
+- **No connection state.** GitHub, Azure and warp-agent can be enabled without
+  any authenticated/available status; the first failure is a toast on action.
+
+### What I would change first on Settings
+
+1. **Fix the field width at 960** and make the section list collapsible or
+   narrower there. This is the one that currently looks broken.
+2. **Add dependency states** to every toggle; hide Windows-only rows on Linux.
+3. **Add validation and a persistent save/error state**; use Apply for scan
+   folders and credentials; add undo.
+4. **Group External tools** and show detected command status.
+5. **Move the notes path, fix hints, standardize switch labels, and mask the
+   PAT.**
+6. **Add settings search and reset** once the page settles.
+
+The settings page does not need a new visual language. It needs the form
+behaviours the rest of the design system already promises — the same second-click
+care, the same state language, and the same "tell me what is true" tone.
 
 ## Contract drift (small, but worth reconciling)
 
@@ -336,18 +483,20 @@ owned than the palette and type work.
 ## Recommended sequence
 
 1. **Make 960 px honest (1–2 days).** Compact detail head, scrollable/clipped tab strip,
-   PR detail in compact mode, a 960/1180/1500 probe matrix. This is the highest visible
-   return.
+   PR detail in compact mode, the Settings field trap and a collapsible section list, a
+   960/1180/1500 probe matrix. This is the highest visible return.
 2. **Give the app a keyboard (2–3 days).** Focus tokens and tab order, row focus-visible
    actions, scroll-to-selection, search as a combobox with active results. Test with a
    keyboard only, not a mouse.
 3. **Close the trust gaps (1 day).** Mask the PAT; make Generate & Commit a review step;
    add the first-run CTA; clarify Archive.
-4. **Fix the review surface (1 day).** Horizontal diff scrolling or wrap, same in History
+4. **Finish the Settings form (1–2 days).** Dependency states, validation, explicit
+   Apply for scan folders and credentials, a persistent save/error state, and undo.
+5. **Fix the review surface (1 day).** Horizontal diff scrolling or wrap, same in History
    and PR.
-5. **Do the visual cleanup (1–2 days).** Primary action hierarchy, Open in duplication,
+6. **Do the visual cleanup (1–2 days).** Primary action hierarchy, Open in duplication,
    row colour discipline, wording, dialog metrics.
-6. **Reconcile the contract and add regressions.** Update `DESIGN.md` for autosave and
+7. **Reconcile the contract and add regressions.** Update `DESIGN.md` for autosave and
    the compact shell; add screenshot/bounds probes at 960, 1180 and 1500.
 
 ## Evidence and method
@@ -368,8 +517,9 @@ owned than the palette and type work.
 ### Screens reviewed
 
 Overview, Changes, History, Pull requests, PR detail, Issues, README, Summary,
-Tools/Formatters, Settings/Appearance/General, the repository list at 960 and 1500,
-and the Add/Clone dialogs from source.
+Tools/Formatters, every Settings section (General, Appearance, Repository scanning,
+Git, External tools, AI, Integrations), the repository list at 960 and 1500, and the
+Add/Clone dialogs from source.
 
 ![Prototype at 1500 px](assets/prototype-overview-1500.png)
 

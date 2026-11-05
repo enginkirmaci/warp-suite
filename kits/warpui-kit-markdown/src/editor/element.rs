@@ -11,7 +11,7 @@ use super::display::{Band, Decor};
 use super::frame::{Frame, LaidBox, LaidLine, Rect, TableStrip};
 use super::icons::{self, Icon};
 use super::layout::{Piece, link_icon_width, remove_gap};
-use super::state::{self, CodeBlock, KEY_CONTEXT, LiveEditorState, PasteHandler};
+use super::state::{self, CodeBlock, KEY_CONTEXT, LiveEditorState, OpenUrlHandler, PasteHandler};
 use super::theme::LiveColors;
 use gpui::prelude::*;
 use gpui::{
@@ -70,6 +70,7 @@ pub struct LiveEditor {
     text_size: Option<Pixels>,
     surface: Option<Hsla>,
     paste_handler: Option<PasteHandler>,
+    open_url: Option<OpenUrlHandler>,
     read_only: Option<bool>,
     fit_content: Option<bool>,
     code_overlay: Option<CodeOverlay>,
@@ -87,6 +88,7 @@ impl LiveEditor {
             text_size: None,
             surface: None,
             paste_handler: None,
+            open_url: None,
             read_only: None,
             fit_content: None,
             code_overlay: None,
@@ -121,11 +123,23 @@ impl LiveEditor {
         self
     }
 
+    /// Take over what a click on a rendered web link does. Without it the
+    /// editor hands `https://…` and every other `scheme://…` target to the
+    /// platform opener, which shows the system browser — a read-only surface
+    /// needs no host wiring for a link to work either way. Note targets still
+    /// arrive as [`LiveEditorEvent::OpenNote`](super::LiveEditorEvent::OpenNote).
+    pub fn on_open_url(mut self, handler: impl Fn(&str, &mut Window, &mut App) + 'static) -> Self {
+        self.open_url = Some(Rc::new(handler));
+        self
+    }
+
     /// Rendered-surface mode: no caret, no text input, no formatting, task
-    /// boxes inert — but selection and copy, clickable links, highlighted
-    /// code and the full live rendering stay. The surface takes no focus, so
-    /// clicking it never steals the keyboard from a field; copy goes through
-    /// the context menu and through [`read_only_selection_text`] on the
+    /// boxes inert — but selection and copy, highlighted code, the full live
+    /// rendering and links whose click follows them stay (a web page opens in
+    /// the browser, a note target reaches the host). The surface takes no
+    /// focus, so clicking it never steals the keyboard from a field; copy
+    /// goes through the context menu and through
+    /// [`read_only_selection_text`](super::read_only_selection_text) on the
     /// host's Ctrl+C fallback.
     pub fn read_only(mut self, read_only: bool) -> Self {
         self.read_only = Some(read_only);
@@ -161,12 +175,14 @@ impl RenderOnce for LiveEditor {
             text_size,
             surface,
             paste_handler,
+            open_url,
             read_only,
             fit_content,
             code_overlay,
         } = self;
         state.update(cx, |editor, cx| {
             editor.set_paste_handler(paste_handler);
+            editor.set_open_url_handler(open_url);
             editor.set_surface(surface, cx);
             if let Some(text_size) = text_size {
                 editor.set_text_size(text_size, cx);

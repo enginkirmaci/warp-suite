@@ -13,7 +13,7 @@ use super::ops::{self, Change, Selection};
 use super::theme::LiveColors;
 use crate::live::{
     InlineObjectKind, LiveBlock, LiveBlockKind, LiveDocument, LiveLineKind, Property,
-    parse_document,
+    is_external_url, parse_document,
 };
 use gpui::prelude::*;
 use gpui::{
@@ -79,8 +79,16 @@ pub enum LiveEditorEvent {
     /// The text changed.
     Change,
     /// A rendered external link was clicked.
+    ///
+    /// The editor follows a `scheme://` target itself now — the platform
+    /// opener shows the system browser — so this is no longer emitted and a
+    /// host needs no wiring for a web link to work. It stays in the enum so
+    /// hosts written against the earlier contract keep building; a host that
+    /// wants the click first replaces the hand-off with
+    /// [`LiveEditor::on_open_url`](super::LiveEditor::on_open_url).
     OpenUrl(String),
-    /// A rendered `[[wikilink]]` or relative link was clicked.
+    /// A rendered `[[wikilink]]` or relative link was clicked: a target only
+    /// the host can resolve (a note file, a heading, a path in its store).
     OpenNote(String),
 }
 
@@ -129,6 +137,11 @@ pub fn read_only_selection_text(cx: &App) -> Option<String> {
 }
 
 pub(super) type PasteHandler = Rc<dyn Fn(&ClipboardItem, &mut Window, &mut App) -> bool>;
+
+/// What a host makes of a rendered web link click, instead of the editor's
+/// own hand-off to the platform opener. Installed through
+/// [`LiveEditor::on_open_url`](super::LiveEditor::on_open_url).
+pub(super) type OpenUrlHandler = Rc<dyn Fn(&str, &mut Window, &mut App)>;
 
 /// One undoable edit: `removed` at `at` became `inserted`.
 #[derive(Clone, Debug)]
@@ -344,6 +357,9 @@ pub struct LiveEditorState {
     placeholder: SharedString,
     base_dir: Option<PathBuf>,
     paste_handler: Option<PasteHandler>,
+    /// The host's replacement for the default browser hand-off on a web
+    /// link click; `None` opens the URL through the platform.
+    open_url: Option<OpenUrlHandler>,
     /// The notes wikilinks resolve to; `None` treats every link as resolved.
     notes: Option<HashSet<String>>,
     /// What the host paints behind the text, when not the theme's background.
@@ -439,6 +455,7 @@ impl LiveEditorState {
             placeholder: SharedString::default(),
             base_dir: None,
             paste_handler: None,
+            open_url: None,
             notes: None,
             surface: None,
             read_only: false,
@@ -516,9 +533,14 @@ impl LiveEditorState {
         self.paste_handler = handler;
     }
 
+    pub(super) fn set_open_url_handler(&mut self, handler: Option<OpenUrlHandler>) {
+        self.open_url = handler;
+    }
+
     /// Rendered-surface mode: no caret, no text input, no formatting, task
     /// boxes inert; selection, copy (the host wires the keys — the surface
-    /// takes no focus), links, scroll and the full rendering stay.
+    /// takes no focus), links (a web one opens in the browser, a note target
+    /// reaches the host), scroll and the full rendering stay.
     pub fn set_read_only(&mut self, read_only: bool, cx: &mut Context<Self>) {
         if self.read_only == read_only {
             return;
@@ -2682,20 +2704,34 @@ impl LiveEditorState {
         cx.notify();
     }
 
-    pub(super) fn mouse_up(&mut self, _: &MouseUpEvent, _: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn mouse_up(
+        &mut self,
+        _: &MouseUpEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         match self.press.take() {
             Some(Press::Link { kind, .. }) => {
-                cx.emit(match kind {
-                    InlineObjectKind::Link { url } if url.contains("://") => {
-                        LiveEditorEvent::OpenUrl(url)
-                    }
-                    InlineObjectKind::Link { url } => LiveEditorEvent::OpenNote(url),
-                    InlineObjectKind::WikiLink { target } => LiveEditorEvent::OpenNote(target),
-                    InlineObjectKind::Image { src, .. } => LiveEditorEvent::OpenNote(src),
-                });
+                self.follow(kind, window, cx);
                 cx.notify();
             }
             Some(Press::Selecting) | None => {}
+        }
+    }
+
+    /// Follows a rendered link: a web URL opens (the host's handler, or the
+    /// platform's browser), a note target goes to the host, which alone knows
+    /// its store. Read-only surfaces take this same path, so a viewer opens
+    /// links without any host wiring.
+    fn follow(&self, kind: InlineObjectKind, window: &mut Window, cx: &mut Context<Self>) {
+        match kind {
+            InlineObjectKind::Link { url } if is_external_url(&url) => match &self.open_url {
+                Some(open) => open(&url, window, cx),
+                None => cx.open_url(&url),
+            },
+            InlineObjectKind::Link { url } => cx.emit(LiveEditorEvent::OpenNote(url)),
+            InlineObjectKind::WikiLink { target } => cx.emit(LiveEditorEvent::OpenNote(target)),
+            InlineObjectKind::Image { src, .. } => cx.emit(LiveEditorEvent::OpenNote(src)),
         }
     }
 

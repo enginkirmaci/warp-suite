@@ -10,7 +10,7 @@ use super::diagram::{DiagramStatus, MERMAID};
 use super::images::{ImageStatus, requested_size};
 use crate::live::{
     InlineObject, InlineObjectKind, LiveBlock, LiveBlockKind, LiveDocument, LiveLine, LiveLineKind,
-    MarkdownLiveKind, MarkdownLiveSpan, Property, PropertyType, TableAlign,
+    MarkdownLiveKind, MarkdownLiveSpan, Property, PropertyType, TableAlign, is_external_url,
 };
 use std::hash::{Hash, Hasher};
 use std::ops::Range;
@@ -717,7 +717,7 @@ fn is_external(line: &LiveLine, url: &MarkdownLiveSpan) -> bool {
     line.objects.iter().any(|object| {
         object.range.start <= url.range.start
             && url.range.end <= object.range.end
-            && matches!(&object.kind, InlineObjectKind::Link { url } if url.contains("://"))
+            && matches!(&object.kind, InlineObjectKind::Link { url } if is_external_url(url))
     })
 }
 

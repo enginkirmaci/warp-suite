@@ -23,10 +23,11 @@ use warpui_kit_markdown::{LiveEditor, LiveEditorEvent, LiveEditorState};
 
 // in the view's constructor
 let editor = cx.new(|cx| LiveEditorState::new(window, cx).placeholder("# Title"));
-cx.subscribe_in(&editor, window, |_, _, event: &LiveEditorEvent, _, cx| match event {
-    LiveEditorEvent::OpenUrl(url) => cx.open_url(url),
-    LiveEditorEvent::OpenNote(target) => { /* resolve a [[wikilink]] */ }
-    LiveEditorEvent::Change => {}
+cx.subscribe_in(&editor, window, |_, _, event: &LiveEditorEvent, window, cx| {
+    if let LiveEditorEvent::OpenNote(target) = event {
+        // resolve a [[wikilink]] or relative link in the host's store
+        open_or_create_note(target, window, cx);
+    }
 })
 .detach();
 
@@ -44,6 +45,14 @@ LiveEditor::new(&editor)
     .surface(palette::CARD) // what you paint behind it, if not the theme's background
     .on_paste(|item, window, cx| handled_as_image(item, window, cx))
 ```
+
+**Links.** A rendered link follows its target on click, in live and read-only
+mode alike. `https://…` and every other `scheme://…` target open through the
+platform's own opener — the system browser — so a read-only surface (a chat
+answer, a README) needs no host wiring at all. `LiveEditor::on_open_url` takes
+that hand-off over when a host wants the click first (its own browser, a log,
+an in-app view). `[[wikilinks]]` and relative targets arrive as
+`LiveEditorEvent::OpenNote`, since only the host knows where its notes live.
 
 **Colors.** Nothing is hardcoded to Obsidian. Text, accent, link, selection and caret come from the kit theme, which `warpui_kit_core::apply_kit_theme` fills from the app's accent preset, so a preset swap recolors the editor on the next frame. The fixed roles are palette tokens: `TEXT_FAINT` syntax, `DIFF_BG` code wells, `CHIP` inline code, the semantic hues for callouts.
 
