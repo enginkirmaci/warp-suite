@@ -22,6 +22,12 @@ fn main() {
         return;
     }
 
+    // a live instance owns the single-instance door: hand it this launch and
+    // exit before migrations or logging touch the same files
+    if warp_station::ipc::try_forward() {
+        return;
+    }
+
     // migrations run before logging so the fresh ~/.warp/logs never collides
     // with the legacy one being absorbed
     // the data root moved to the shared ~/.warp suite root: absorb the

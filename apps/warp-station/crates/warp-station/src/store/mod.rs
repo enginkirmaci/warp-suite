@@ -182,6 +182,9 @@ pub struct Store {
     /// Last focus state the tick observed; None before the first observation,
     /// so a launch that starts focused does not look like a focus regain.
     window_focused: Option<bool>,
+    /// A second launch asked this instance to come forward; the window clears
+    /// it from its store observer (the single-instance door).
+    focus_requested: bool,
 
     /// Write-behind cache saves: bumped on every tag/favorite mutation; the
     /// deferred flush only writes when its generation is still current. Kept
@@ -317,6 +320,7 @@ impl Store {
             next_auto_refresh: None,
             auto_refresh_armed_secs: None,
             window_focused: None,
+            focus_requested: false,
             cache_generation: 0,
             run_id_seq: 0,
             selection_generation: 0,
@@ -731,6 +735,10 @@ impl Store {
             }
             UiEvent::Nuget(snapshot) => {
                 self.nuget = Arc::new(snapshot);
+                cx.notify();
+            }
+            UiEvent::FocusRequested => {
+                self.focus_requested = true;
                 cx.notify();
             }
             UiEvent::ClipboardHotkey { message } => {
@@ -2125,6 +2133,12 @@ impl Store {
         self.scanning.then(|| "Refreshing".to_string())
     }
 
+    /// Takes a pending "bring the window forward" request from the
+    /// single-instance door; the window activates itself and clears it.
+    pub fn take_focus_request(&mut self) -> bool {
+        std::mem::take(&mut self.focus_requested)
+    }
+
     /// Drops the selection. The page's next pass picks a row again, so this is
     /// how the selected repo leaves the rail.
     pub fn clear_selection(&mut self, cx: &mut Context<Self>) {
@@ -2838,6 +2852,22 @@ mod tests {
             store.cache_generation, before,
             "a run id must not invalidate a pending cache save"
         );
+        let _ = std::fs::remove_file(&scratch);
+    }
+
+    /// The single-instance door's focus request is a one-shot latch: the
+    /// window takes it once and a later notification does not re-activate.
+    #[test]
+    fn a_focus_request_is_taken_once() {
+        let (tx, _rx) = async_channel::unbounded();
+        let scratch =
+            std::env::temp_dir().join(format!("warp-station-focus-{}.json", std::process::id()));
+        std::fs::write(&scratch, "{}").expect("scratch settings");
+        let mut store = Store::with_settings(tx, Arc::new(SettingsService::at(scratch.clone())));
+        assert!(!store.take_focus_request());
+        store.focus_requested = true;
+        assert!(store.take_focus_request());
+        assert!(!store.take_focus_request(), "the request is one-shot");
         let _ = std::fs::remove_file(&scratch);
     }
 

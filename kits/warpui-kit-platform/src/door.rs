@@ -55,6 +55,15 @@ pub fn read_endpoint_in(dir: &Path) -> Option<(u16, String)> {
     Some((port, token))
 }
 
+/// A fresh 32-byte hex token for a door instance. Every launch regenerates
+/// it, so a token file left behind by a crashed run grants nothing.
+pub fn random_token() -> String {
+    use rand::Rng as _;
+    let mut bytes = [0u8; 32];
+    rand::rng().fill_bytes(&mut bytes);
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
 /// Length-checked, byte-folded compare: no early exit on content, so the
 /// auth response's timing carries no prefix information about the token.
 pub fn token_matches(provided: &str, token: &str) -> bool {

@@ -81,7 +81,15 @@ impl MainWindow {
             }
         })
         .detach();
-        cx.observe(&store, |_, _, cx| cx.notify()).detach();
+        cx.observe(&store, |this, _, cx| {
+            // a second launch asked the single-instance door to bring this
+            // window forward; the compositor decides whether it may activate
+            if this.store.update(cx, |s, _| s.take_focus_request()) {
+                cx.activate(true);
+            }
+            cx.notify();
+        })
+        .detach();
         let focus_handle = cx.focus_handle();
         // E2E hook: WARP_STATION_TOOLS_OPEN=formatters|nuget|clipboard opens
         // that tool on launch

@@ -470,6 +470,9 @@ pub enum UiEvent {
         generation: u64,
         hits: Vec<warp_station_core::code_search::CodeHit>,
     },
+    /// A second launch asked the running instance to come forward (the
+    /// single-instance door); the window takes it as an activation request.
+    FocusRequested,
 }
 
 pub fn spawn_net_thread() -> (
@@ -858,6 +861,16 @@ async fn net_main(cmd_rx: Receiver<NetCommand>, evt_tx: Sender<UiEvent>) {
             listen_clipboard_ping(evt_tx).await;
         });
     }
+
+    // the single-instance door: a second launch forwards focus here and
+    // exits, so two instances never share the settings/cache writers
+    let single_instance = match crate::ipc::start(evt_tx.clone()).await {
+        Ok(door) => Some(door),
+        Err(err) => {
+            tracing::warn!("single-instance door unavailable: {err:#}");
+            None
+        }
+    };
 
     // the warp-agent door watcher: availability for the status chip and
     // status pushes for the repo rows. Passive — it never launches; runs
@@ -1319,6 +1332,9 @@ async fn net_main(cmd_rx: Receiver<NetCommand>, evt_tx: Sender<UiEvent>) {
                 });
             }
         }
+    }
+    if let Some(door) = &single_instance {
+        crate::ipc::unpublish(door);
     }
 }
 

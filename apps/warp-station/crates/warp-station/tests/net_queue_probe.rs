@@ -9,6 +9,20 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 use warp_station::net::{NetCommand, UiEvent, spawn_net_thread};
 
+/// Keep the net thread's single-instance door out of the developer's real
+/// `~/.warp/station`: every test in this binary shares the first scratch dir.
+fn scratch_ipc_dir() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        let dir =
+            std::env::temp_dir().join(format!("warp-station-probe-ipc-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        // SAFETY: this test binary's tests all call this before spawning the
+        // net thread; no other thread reads the variable before it is set.
+        unsafe { std::env::set_var("WARP_STATION_IPC_DIR", &dir) };
+    });
+}
+
 fn scratch_dir(name: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!(
         "warp-station-probe-net-{name}-{}",
@@ -43,6 +57,7 @@ fn gh_runs(dir: &Path) -> usize {
 
 #[test]
 fn a_changes_read_does_not_wait_out_a_pass_ahead_of_it() {
+    scratch_ipc_dir();
     let dir = scratch_dir("pass");
     let gh_exe = fake_gh(&dir, 3);
     let (handle, cmd_tx, evt_rx) = spawn_net_thread();
@@ -87,6 +102,7 @@ fn a_changes_read_does_not_wait_out_a_pass_ahead_of_it() {
 /// call: only the row the burst lands on may reach it.
 #[test]
 fn a_burst_of_detail_requests_runs_gh_once() {
+    scratch_ipc_dir();
     let dir = scratch_dir("burst");
     let gh_exe = fake_gh(&dir, 0);
     let folders: Vec<PathBuf> = ["one", "two", "three"]
