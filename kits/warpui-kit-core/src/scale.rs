@@ -61,20 +61,54 @@ fn read_text_size(file: &Path) -> Option<&'static str> {
     Some(fonts::normalize_font_scale(Some(size)))
 }
 
-/// Keeps whatever else the file holds. Goes through a rename: another app
-/// starting right now must never read it half-written.
-fn write_setting(file: &Path, key: &str, value: &str) -> std::io::Result<()> {
-    let mut doc: serde_json::Map<String, serde_json::Value> = fs::read_to_string(file)
-        .ok()
-        .and_then(|text| serde_json::from_str(&text).ok())
-        .unwrap_or_default();
-    doc.insert(key.to_string(), value.into());
-    if let Some(dir) = file.parent() {
+/// Serialize the read-modify-write across processes: the text size and the
+/// palette are separate keys of one shared file, and each app writes only its
+/// own key, so without the lock the later writer's read drops the earlier
+/// key. The lock lives beside the file (a sidecar, because Windows cannot
+/// rename over a file it holds open) and is best effort: a filesystem that
+/// refuses it still gets the old unlocked write.
+fn with_settings_lock<T>(
+    file: &Path,
+    write: impl FnOnce() -> std::io::Result<T>,
+) -> std::io::Result<T> {
+    let lock_path = file.with_extension("json.lock");
+    if let Some(dir) = lock_path.parent() {
         fs::create_dir_all(dir)?;
     }
-    let scratch = file.with_extension(format!("json.{}", std::process::id()));
-    fs::write(&scratch, serde_json::to_string_pretty(&doc)?)?;
-    fs::rename(&scratch, file)
+    let lock = match fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(&lock_path)
+    {
+        Ok(lock) => lock,
+        Err(_) => return write(),
+    };
+    // blocking is fine: the critical section is one small JSON read + write
+    let _ = lock.lock();
+    let out = write();
+    let _ = lock.unlock();
+    out
+}
+
+/// Keeps whatever else the file holds. Goes through a rename: another app
+/// reading it concurrently must never see it half-written, and the lock keeps
+/// two apps' read-modify-write from dropping each other's key (audit C1).
+fn write_setting(file: &Path, key: &str, value: &str) -> std::io::Result<()> {
+    with_settings_lock(file, || {
+        let mut doc: serde_json::Map<String, serde_json::Value> = fs::read_to_string(file)
+            .ok()
+            .and_then(|text| serde_json::from_str(&text).ok())
+            .unwrap_or_default();
+        doc.insert(key.to_string(), value.into());
+        if let Some(dir) = file.parent() {
+            fs::create_dir_all(dir)?;
+        }
+        let scratch = file.with_extension(format!("json.{}", std::process::id()));
+        fs::write(&scratch, serde_json::to_string_pretty(&doc)?)?;
+        fs::rename(&scratch, file)
+    })
 }
 
 fn write_text_size(file: &Path, size: &str) -> std::io::Result<()> {
@@ -368,6 +402,36 @@ mod tests {
     fn step(cx: &mut gpui::TestAppContext) {
         cx.executor().advance_clock(POLL);
         cx.run_until_parked();
+    }
+
+    /// Two apps writing different keys at once must both survive: the lock
+    /// serializes the read-modify-write (audit C1).
+    #[test]
+    fn concurrent_writers_keep_both_keys() {
+        let file = scratch_file("concurrent");
+        fs::create_dir_all(file.parent().unwrap()).unwrap();
+        fs::write(&file, "{}").unwrap();
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+        let writer = |key: &'static str,
+                      value: &'static str,
+                      barrier: std::sync::Arc<std::sync::Barrier>| {
+            let file = file.clone();
+            std::thread::spawn(move || {
+                barrier.wait();
+                for _ in 0..50 {
+                    write_setting(&file, key, value).unwrap();
+                }
+            })
+        };
+        let text = writer(TEXT_SIZE_KEY, fonts::FONT_LARGE, barrier.clone());
+        let palette = writer(PALETTE_KEY, "blue", barrier);
+        text.join().unwrap();
+        palette.join().unwrap();
+
+        let doc: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&file).unwrap()).unwrap();
+        assert_eq!(doc[TEXT_SIZE_KEY], fonts::FONT_LARGE);
+        assert_eq!(doc[PALETTE_KEY], "blue");
     }
 
     #[test]

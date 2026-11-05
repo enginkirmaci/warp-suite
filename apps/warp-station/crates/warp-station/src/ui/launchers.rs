@@ -89,110 +89,130 @@ pub struct Launcher {
 }
 
 /// The repo's launchers for these settings, primary first. Never empty: the
-/// folder has no enable flag.
+/// folder has no enable flag. Built lazily so the list pane, which only shows
+/// the primary, does not allocate the whole vec per row and frame (audit B8).
+fn launcher_iter<'a>(
+    settings: &'a AppSettings,
+    repo: &'a RepoEntry,
+) -> impl Iterator<Item = Launcher> + 'a {
+    let mut stage = 0u8;
+    std::iter::from_fn(move || {
+        loop {
+            let current = stage;
+            stage += 1;
+            let next = match current {
+                0 => settings.repos.enable_vscode.then(|| Launcher {
+                    label: "Open in VS Code",
+                    short: "VS Code",
+                    icon: "icons/icon-code.svg",
+                    key: None,
+                    launch: Launch::VsCode {
+                        exe: settings.repos.vscode_executable.clone(),
+                        profile: settings.repos.vscode_profile.clone(),
+                    },
+                }),
+                1 => {
+                    // Visual Studio exists only on Windows
+                    if cfg!(windows) && settings.repos.enable_visual_studio {
+                        repo.solution_path.as_ref().map(|solution| Launcher {
+                            label: "Open solution in Visual Studio",
+                            short: "Visual Studio",
+                            icon: "icons/icon-sln-box.svg",
+                            key: Some("V"),
+                            launch: Launch::Solution {
+                                solution: solution.clone(),
+                                ide: settings.repos.ide_executable.clone(),
+                            },
+                        })
+                    } else {
+                        None
+                    }
+                }
+                2 => settings.warp_agent.enable_warp_agent.then_some(Launcher {
+                    label: "Open in warp-agent",
+                    short: "Warp Agent",
+                    icon: "icons/icon-app-window.svg",
+                    key: Some("A"),
+                    launch: Launch::WarpAgent,
+                }),
+                3 => settings.opencode.enable_opencode.then(|| Launcher {
+                    label: "Launch OpenCode CLI",
+                    short: "OpenCode",
+                    icon: "icons/icon-command.svg",
+                    key: Some("O"),
+                    launch: cli_launch(
+                        settings,
+                        &settings.repos.opencode_executable,
+                        "opencode",
+                        "OpenCode",
+                        true,
+                    ),
+                }),
+                4 => settings.deepseek.enable_deepseek.then(|| Launcher {
+                    label: "Launch DeepSeek CLI",
+                    short: "DeepSeek",
+                    icon: "icons/icon-deepseek.svg",
+                    key: Some("D"),
+                    launch: cli_launch(
+                        settings,
+                        &settings.repos.deepseek_executable,
+                        "dsh",
+                        "DeepSeek",
+                        false,
+                    ),
+                }),
+                5 => Some(Launcher {
+                    label: "Open folder",
+                    short: "Folder",
+                    icon: "icons/icon-folder.svg",
+                    key: Some("F"),
+                    launch: Launch::Folder,
+                }),
+                6 => settings.repos.enable_terminal.then(|| Launcher {
+                    label: "Open terminal",
+                    short: "Terminal",
+                    icon: "icons/icon-terminal.svg",
+                    key: Some("T"),
+                    launch: Launch::Terminal {
+                        terminal_exe: settings.repos.terminal_executable.clone(),
+                    },
+                }),
+                7 => settings.warp_notes.enable_warp_notes.then(|| Launcher {
+                    label: "Notes for this repo",
+                    short: "Notes",
+                    icon: "icons/icon-note.svg",
+                    key: Some("N"),
+                    launch: Launch::Notes {
+                        exe: settings.warp_notes.executable.clone(),
+                        store_root: warp_station_core::notes::resolve_store_root(
+                            &settings.general.notes_store_path,
+                        ),
+                        repo: repo.name.clone(),
+                    },
+                }),
+                _ => return None,
+            };
+            if next.is_some() {
+                return next;
+            }
+            if stage > 7 {
+                return None;
+            }
+        }
+    })
+}
+
+/// The repo's launchers for these settings, primary first.
 pub fn launchers(settings: &AppSettings, repo: &RepoEntry) -> Vec<Launcher> {
-    let mut list = Vec::new();
-    if settings.repos.enable_vscode {
-        list.push(Launcher {
-            label: "Open in VS Code",
-            short: "VS Code",
-            icon: "icons/icon-code.svg",
-            key: None,
-            launch: Launch::VsCode {
-                exe: settings.repos.vscode_executable.clone(),
-                profile: settings.repos.vscode_profile.clone(),
-            },
-        });
-    }
-    // Visual Studio exists only on Windows
-    if cfg!(windows)
-        && settings.repos.enable_visual_studio
-        && let Some(solution) = &repo.solution_path
-    {
-        list.push(Launcher {
-            label: "Open solution in Visual Studio",
-            short: "Visual Studio",
-            icon: "icons/icon-sln-box.svg",
-            key: Some("V"),
-            launch: Launch::Solution {
-                solution: solution.clone(),
-                ide: settings.repos.ide_executable.clone(),
-            },
-        });
-    }
-    if settings.warp_agent.enable_warp_agent {
-        list.push(Launcher {
-            label: "Open in warp-agent",
-            short: "Warp Agent",
-            icon: "icons/icon-app-window.svg",
-            key: Some("A"),
-            launch: Launch::WarpAgent,
-        });
-    }
-    if settings.opencode.enable_opencode {
-        list.push(Launcher {
-            label: "Launch OpenCode CLI",
-            short: "OpenCode",
-            icon: "icons/icon-command.svg",
-            key: Some("O"),
-            launch: cli_launch(
-                settings,
-                &settings.repos.opencode_executable,
-                "opencode",
-                "OpenCode",
-                true,
-            ),
-        });
-    }
-    if settings.deepseek.enable_deepseek {
-        list.push(Launcher {
-            label: "Launch DeepSeek CLI",
-            short: "DeepSeek",
-            icon: "icons/icon-deepseek.svg",
-            key: Some("D"),
-            launch: cli_launch(
-                settings,
-                &settings.repos.deepseek_executable,
-                "dsh",
-                "DeepSeek",
-                false,
-            ),
-        });
-    }
-    list.push(Launcher {
-        label: "Open folder",
-        short: "Folder",
-        icon: "icons/icon-folder.svg",
-        key: Some("F"),
-        launch: Launch::Folder,
-    });
-    if settings.repos.enable_terminal {
-        list.push(Launcher {
-            label: "Open terminal",
-            short: "Terminal",
-            icon: "icons/icon-terminal.svg",
-            key: Some("T"),
-            launch: Launch::Terminal {
-                terminal_exe: settings.repos.terminal_executable.clone(),
-            },
-        });
-    }
-    if settings.warp_notes.enable_warp_notes {
-        list.push(Launcher {
-            label: "Notes for this repo",
-            short: "Notes",
-            icon: "icons/icon-note.svg",
-            key: Some("N"),
-            launch: Launch::Notes {
-                exe: settings.warp_notes.executable.clone(),
-                store_root: warp_station_core::notes::resolve_store_root(
-                    &settings.general.notes_store_path,
-                ),
-                repo: repo.name.clone(),
-            },
-        });
-    }
-    list
+    launcher_iter(settings, repo).collect()
+}
+
+/// The launcher the list row shows. The folder launcher is unconditional, so
+/// this is never `None`; the iterator stops before allocating the rest.
+pub fn primary(settings: &AppSettings, repo: &RepoEntry) -> Launcher {
+    launcher_iter(settings, repo)
+        .next()
+        .expect("the folder launcher is unconditional")
 }
 
 /// One CLI launch. The selected model belongs to the AI harness, so opencode
@@ -360,6 +380,26 @@ mod tests {
             .expect("listed while enabled");
 
         assert_eq!(opencode.launch, Launch::MissingModel { name: "OpenCode" });
+    }
+
+    /// The list row asks for the primary launcher only; it must be exactly
+    /// the first entry the full list would produce, and the folder launcher
+    /// is the unconditional floor (audit B8).
+    #[test]
+    fn primary_is_the_first_listed_launcher() {
+        let settings = all_enabled();
+        assert_eq!(
+            primary(&settings, &repo()),
+            launchers(&settings, &repo())[0]
+        );
+
+        let mut bare = AppSettings::default();
+        bare.repos.enable_vscode = false;
+        bare.repos.enable_terminal = false;
+        bare.warp_agent.enable_warp_agent = false;
+        bare.opencode.enable_opencode = false;
+        bare.deepseek.enable_deepseek = false;
+        assert_eq!(primary(&bare, &repo()).label, "Open folder");
     }
 
     #[test]

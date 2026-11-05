@@ -93,6 +93,12 @@ pub fn render(store: &Store, store_entity: &Entity<Store>) -> gpui::AnyElement {
 
     let settings = store.settings();
     let soloed = store.group_filter.as_deref();
+    // one set for the whole list: a per-row `repo_tabs` scan is O(tabs) each
+    let tabbed: std::collections::HashSet<&str> = store
+        .repo_tabs
+        .iter()
+        .map(|tab| tab.folder.as_str())
+        .collect();
 
     for (row_ix, row) in store.projected.iter().enumerate() {
         match row {
@@ -131,17 +137,14 @@ pub fn render(store: &Store, store_entity: &Entity<Store>) -> gpui::AnyElement {
                         azure,
                         warp_titles,
                         show_tooltips: settings.general.show_tooltips,
-                        tabbed: store
-                            .repo_tabs
-                            .iter()
-                            .any(|tab| tab.folder == folder.as_ref()),
+                        tabbed: tabbed.contains(folder.as_ref()),
                         job: store.git_jobs.get(folder.as_ref()).copied(),
                         star_press: store
                             .star_pressed
                             .as_ref()
                             .filter(|(pressed, _)| pressed == folder.as_ref())
                             .map(|(_, presses)| *presses),
-                        primary: launchers::launchers(&settings, repo).into_iter().next(),
+                        primary: Some(launchers::primary(&settings, repo)),
                     };
                     list = list.child(repo_row(repo, row_ix, selected, &facts, store_entity));
                 }
