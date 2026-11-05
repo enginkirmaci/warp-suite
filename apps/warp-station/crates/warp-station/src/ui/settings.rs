@@ -15,6 +15,7 @@ use gpui::{App, Context, Entity, FontWeight, SharedString, Window, div, px, rela
 use gpui_kit::component::input::{Editor, EditorState, InputEvent, InputState, TextareaState};
 use std::cell::RefCell;
 use std::rc::Rc;
+use warp_station_core::settings::AppSettings;
 use warpui_kit_core::settings as kit_settings;
 use warpui_kit_markdown::{LIVE_LANGUAGE, live_highlighter_factory};
 use warpui_kit_picker::{
@@ -161,6 +162,45 @@ pub struct SettingsPage {
     commit_seq: u64,
     /// set by the header back button; MainWindow drains it and swaps pages
     section: Section,
+}
+
+/// Which background work a settings save must kick. Extracted so the policy is
+/// testable without a window (audit B9): an unrelated edit (tooltips, a
+/// palette, the branch prefix) must not start a full `gh`/Azure sweep, a model
+/// reload or an autostart rewrite.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct SaveEffects {
+    scan: bool,
+    github: bool,
+    azure: bool,
+    models: bool,
+    autostart: bool,
+}
+
+fn save_effects(before: &AppSettings, after: &AppSettings) -> SaveEffects {
+    let scan = before.repos.repo_scan_folders != after.repos.repo_scan_folders
+        || before.repos.excluded_folders != after.repos.excluded_folders
+        || before.repos.git_folder_pattern != after.repos.git_folder_pattern
+        || before.repos.solution_file_pattern != after.repos.solution_file_pattern
+        || before.repos.platform_folder_name != after.repos.platform_folder_name
+        || before.repos.max_scan_depth != after.repos.max_scan_depth;
+    let github = before.repos.enable_git_hub != after.repos.enable_git_hub
+        || before.repos.git_hub_executable != after.repos.git_hub_executable;
+    let azure = before.repos.enable_azure_dev_ops != after.repos.enable_azure_dev_ops
+        || before.repos.azure_dev_ops_pat != after.repos.azure_dev_ops_pat
+        || before.repos.azure_dev_ops_url != after.repos.azure_dev_ops_url;
+    let models = before.warp_agent.enable_warp_agent != after.warp_agent.enable_warp_agent
+        || before.warp_agent.executable != after.warp_agent.executable
+        || before.warp_agent.harness != after.warp_agent.harness
+        || before.opencode.enable_opencode != after.opencode.enable_opencode
+        || before.deepseek.enable_deepseek != after.deepseek.enable_deepseek;
+    SaveEffects {
+        scan,
+        github,
+        azure,
+        models,
+        autostart: before.general.start_at_boot != after.general.start_at_boot,
+    }
 }
 
 impl SettingsPage {
@@ -408,7 +448,6 @@ impl SettingsPage {
         let warp_enabled = self.warp_enabled;
         let warp_exe = Self::value(&self.warp_executable, cx);
         let variant = Self::value(&self.variant, cx);
-        let harness_for_load = harness.clone();
         let warp_notes_enabled = self.warp_notes_enabled;
         let warp_notes_exe = Self::value(&self.warp_notes_executable, cx);
         let branch_prefix = Self::value(&self.branch_name_prefix, cx);
@@ -423,13 +462,10 @@ impl SettingsPage {
         let code_search_enabled = self.enable_code_search;
         let code_search_exe = Self::value(&self.code_search_executable, cx);
 
-        let old_scan_folders = self
-            .store
-            .read(cx)
-            .settings()
-            .repos
-            .repo_scan_folders
-            .clone();
+        // one snapshot for the whole save: the effects below compare it with
+        // the settled settings after the write
+        let before = self.store.read(cx).settings();
+        let autostart_changed = before.general.start_at_boot != self.start_at_boot;
 
         self.store.update(cx, |store, cx| {
             store.update_settings(|s| {
@@ -496,27 +532,38 @@ impl SettingsPage {
             // the repos and their folders did not change
             store.set_group_by_root(group_by_root);
             store.set_group_depth(group_depth);
-            // a scan-input change live-applies with a rescan; a text-size
-            // change re-runs the kit theme (which refreshes every window, so
-            // tokens and the kit rem base resize together); every save
-            // re-probes activity so the integration switches take effect immediately
-            if store.settings().repos.repo_scan_folders != old_scan_folders {
-                let settings = store.settings();
-                store.kick_scan(&settings);
+            // A save only kicks the work its fields actually affect: a
+            // tooltip or branch-prefix edit must not sweep every repo with gh
+            // or reload the model catalog (audit B9).
+            let after = store.settings();
+            let effects = save_effects(&before, &after);
+            if effects.scan {
+                store.kick_scan(&after);
             }
-            let folders: Vec<std::path::PathBuf> = store
-                .repos
-                .iter()
-                .filter(|repo| !repo.is_archived())
-                .map(|r| r.folder_path.clone())
-                .collect();
-            store.kick_github_pass(&folders);
-            store.kick_azure_pass(&folders);
-            store.load_models_for(harness_for_load, cx);
+            if effects.github || effects.azure {
+                let folders: Vec<std::path::PathBuf> = store
+                    .repos
+                    .iter()
+                    .filter(|repo| !repo.is_archived())
+                    .map(|r| r.folder_path.clone())
+                    .collect();
+                if effects.github {
+                    store.kick_github_pass(&folders);
+                }
+                if effects.azure {
+                    store.kick_azure_pass(&folders);
+                }
+            }
+            if effects.models {
+                store.load_models_for(after.warp_agent.harness.clone(), cx);
+            }
             cx.notify();
         });
-        // the boot registration follows the saved flag
-        warp_station_core::autostart::reconcile(self.start_at_boot);
+        // the boot registration follows the saved flag, but only a change to
+        // it rewrites the OS entry
+        if autostart_changed {
+            warp_station_core::autostart::reconcile(self.start_at_boot);
+        }
         // so does the execution state; a failure leaves the chip as the truth
         self.saved_note = Some(std::time::Instant::now());
         cx.notify();
@@ -1996,5 +2043,89 @@ fn variant_data(
         fonts: theme::active_tokens(),
         accent: theme::blue_bright(),
         show_tooltips: store.read(cx).settings().general.show_tooltips,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// An unrelated save (the branch prefix, tooltips, text size) must not
+    /// kick a scan, an activity sweep, a model reload or an autostart rewrite.
+    #[test]
+    fn unrelated_saves_kick_nothing() {
+        let before = AppSettings::default();
+        let mut after = before.clone();
+        after.repos.branch_name_prefix = "feat/".into();
+        after.general.show_tooltips = false;
+        assert_eq!(save_effects(&before, &after), SaveEffects::default());
+    }
+
+    #[test]
+    fn each_setting_kicks_only_its_own_work() {
+        let before = AppSettings::default();
+
+        let mut scan = before.clone();
+        scan.repos.repo_scan_folders = Some(vec!["/work".into()]);
+        assert_eq!(
+            save_effects(&before, &scan),
+            SaveEffects {
+                scan: true,
+                ..SaveEffects::default()
+            }
+        );
+
+        let mut github = before.clone();
+        github.repos.git_hub_executable = "gh-custom".into();
+        assert_eq!(
+            save_effects(&before, &github),
+            SaveEffects {
+                github: true,
+                ..SaveEffects::default()
+            }
+        );
+
+        let mut azure = before.clone();
+        azure.repos.azure_dev_ops_pat = "token".into();
+        assert_eq!(
+            save_effects(&before, &azure),
+            SaveEffects {
+                azure: true,
+                ..SaveEffects::default()
+            }
+        );
+
+        let mut models = before.clone();
+        models.warp_agent.harness = "dsh".into();
+        assert_eq!(
+            save_effects(&before, &models),
+            SaveEffects {
+                models: true,
+                ..SaveEffects::default()
+            }
+        );
+
+        let mut boot = before.clone();
+        boot.general.start_at_boot = true;
+        assert_eq!(
+            save_effects(&before, &boot),
+            SaveEffects {
+                autostart: true,
+                ..SaveEffects::default()
+            }
+        );
+    }
+
+    /// The scan pattern and exclusion inputs are scan effects too; the old
+    /// save path only watched the folder list.
+    #[test]
+    fn scan_inputs_rescan() {
+        let before = AppSettings::default();
+        let mut after = before.clone();
+        after.repos.git_folder_pattern = "*.repo".into();
+        after.repos.excluded_folders = Some(vec!["vendor".into()]);
+        let effects = save_effects(&before, &after);
+        assert!(effects.scan);
+        assert!(!effects.github && !effects.azure && !effects.models && !effects.autostart);
     }
 }

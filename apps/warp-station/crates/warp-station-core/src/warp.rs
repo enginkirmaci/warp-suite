@@ -14,6 +14,7 @@ use tokio::net::TcpStream;
 use warpui_kit_platform::door::{self, ANSWER_TIMEOUT, MAX_LINE, cmd};
 
 use crate::opencode::{CatalogHarness, CatalogModel, ModelCatalog, default_harnesses};
+use crate::process::DetachedSpawn;
 use crate::settings::AppSettings;
 
 /// Names warp-agent's built-in General workspace on the wire.
@@ -408,7 +409,7 @@ pub async fn connect_or_launch(exe: &Path, folder: Option<&Path>) -> Result<Clie
         .stderr(std::process::Stdio::null());
     hide_console(&mut command);
     command
-        .spawn()
+        .spawn_detached()
         .with_context(|| format!("'{}' failed to start", exe.display()))?;
 
     let deadline = std::time::Instant::now() + LAUNCH_DEADLINE;

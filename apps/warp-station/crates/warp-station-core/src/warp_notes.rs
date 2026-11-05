@@ -3,6 +3,7 @@
 //! shared ~/notes store. A missing binary only fails that one launch.
 
 use crate::exe;
+use crate::process::DetachedSpawn;
 use std::path::Path;
 
 /// One warp-notes launch. The store root is always passed so a customized
@@ -37,8 +38,7 @@ pub fn launch(
         command.creation_flags(CREATE_NO_WINDOW);
     }
     command
-        .spawn()
-        .map(|_| ())
+        .spawn_detached()
         .map_err(|err| format!("could not start warp-notes: {err}"))
 }
 

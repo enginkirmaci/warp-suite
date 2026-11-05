@@ -6,9 +6,28 @@
 //! `Err` so callers can keep their per-service "CLI unavailable" handling.
 
 use std::process::Stdio;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tokio::io::AsyncReadExt;
 use tokio::process::Command;
+
+/// Launchers (a terminal, the file manager, a sibling app) hand off a process
+/// this one does not own; nobody waits for it, so on Unix it stays a zombie
+/// until this process exits. `spawn_detached` reaps it on a detached thread.
+pub trait DetachedSpawn {
+    /// Spawn with the configured stdio/env and reap the child in the
+    /// background; only the spawn failure is reported.
+    fn spawn_detached(&mut self) -> std::io::Result<()>;
+}
+
+impl DetachedSpawn for std::process::Command {
+    fn spawn_detached(&mut self) -> std::io::Result<()> {
+        let mut child = self.spawn()?;
+        std::thread::spawn(move || {
+            let _ = child.wait();
+        });
+        Ok(())
+    }
+}
 
 /// Set by Electron hosts (VS Code & forks) that the app may have been launched
 /// from; it leaks into every child and turns Electron-packaged CLIs into bare
@@ -120,25 +139,38 @@ pub async fn run(options: ProcessRunOptions<'_>) -> anyhow::Result<ProcessRunRes
     let stderr_task = tokio::spawn(async move {
         let mut err = Vec::new();
         if let Some(pipe) = stderr_pipe.as_mut() {
-            let _ = pipe.read_to_end(&mut err).await;
+            let mut buf = [0u8; 8192];
+            loop {
+                match pipe.read(&mut buf).await {
+                    Ok(0) | Err(_) => break,
+                    Ok(n) => {
+                        // capped like stdout, but never killed for it: stderr
+                        // is diagnostic, and the process may still exit 0.
+                        // Draining the rest keeps the child from blocking on a
+                        // full pipe.
+                        let keep = cap.map_or(n, |cap| cap.saturating_sub(err.len()).min(n));
+                        err.extend_from_slice(&buf[..keep]);
+                    }
+                }
+            }
         }
         err
     });
 
-    let deadline = options.timeout.map(|t| Instant::now() + t);
     let mut timed_out = false;
-    let exit = loop {
-        match child.try_wait() {
-            Ok(Some(status)) => break Some(status),
-            Ok(None) => {}
-            Err(err) => return Err(err.into()),
-        }
-        if deadline.is_some_and(|d| Instant::now() >= d) {
-            kill_tree(pid);
-            timed_out = true;
-            break None;
-        }
-        tokio::time::sleep(Duration::from_millis(25)).await;
+    let exit = match options.timeout {
+        Some(limit) => match tokio::time::timeout(limit, child.wait()).await {
+            Ok(Ok(status)) => Some(status),
+            Ok(Err(err)) => return Err(err.into()),
+            Err(_) => {
+                kill_tree(pid);
+                timed_out = true;
+                // reap the killed child so it does not linger as a zombie
+                let _ = tokio::time::timeout(Duration::from_secs(3), child.wait()).await;
+                None
+            }
+        },
+        None => Some(child.wait().await?),
     };
 
     if timed_out {
@@ -229,6 +261,26 @@ mod tests {
         .unwrap();
         assert!(result.timed_out);
         assert!(!result.succeeded());
+    }
+
+    /// stderr is capped too, but a chatty stderr must not kill a process that
+    /// is otherwise succeeding (audit B12).
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn caps_stderr_without_killing_the_child() {
+        let script = "i=0; while [ $i -lt 3000 ]; do printf 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\\n' >&2; i=$((i+1)); done";
+        let args = ["-c".to_string(), script.to_string()];
+        let result = run(ProcessRunOptions {
+            file_name: "sh",
+            args: &args,
+            max_output_bytes: Some(4096),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+        assert!(result.succeeded(), "stderr chatter is not a failure");
+        assert_eq!(result.stderr.len(), 4096, "stderr honors the cap");
+        assert!(result.stdout.is_empty());
     }
 
     #[tokio::test]

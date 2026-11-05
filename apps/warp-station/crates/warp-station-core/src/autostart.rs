@@ -12,13 +12,18 @@ pub fn reconcile(enable: bool) {
             let exe = std::env::current_exe()
                 .map(|p| p.to_string_lossy().to_string())
                 .unwrap_or_else(|_| "warp-station".into());
-            let _ = std::fs::create_dir_all(&dir);
-            let _ = std::fs::write(
-                &entry,
-                format!(
-                    "[Desktop Entry]\nType=Application\nName=Warp Station\nExec={exe}\nTerminal=false\nX-GNOME-Autostart-enabled=true\n"
-                ),
+            let contents = format!(
+                "[Desktop Entry]\nType=Application\nName=Warp Station\nExec={exe}\nTerminal=false\nX-GNOME-Autostart-enabled=true\n"
             );
+            // a save that did not touch StartAtBoot must not rewrite the file;
+            // reconcile is called after every commit and the write is a no-op
+            // only when the entry already says exactly this
+            let unchanged =
+                std::fs::read_to_string(&entry).is_ok_and(|current| current == contents);
+            if !unchanged {
+                let _ = std::fs::create_dir_all(&dir);
+                let _ = std::fs::write(&entry, contents);
+            }
         } else if entry.exists() {
             let _ = std::fs::remove_file(&entry);
         }

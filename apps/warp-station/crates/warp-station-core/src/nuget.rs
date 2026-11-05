@@ -194,7 +194,15 @@ impl NugetService {
         while running {
             tokio::select! {
                 _ = interval.tick() => {
-                    let current = scan_packages(&watch_path, &config.filter);
+                    // the walk is blocking filesystem I/O; keep it off the
+                    // runtime workers (the net runtime has only two)
+                    let scan_path = watch_path.clone();
+                    let filter = config.filter.clone();
+                    let current = tokio::task::spawn_blocking(move || {
+                        scan_packages(&scan_path, &filter)
+                    })
+                    .await
+                    .unwrap_or_default();
                     let new_packages: Vec<PathBuf> = current.difference(&known).cloned().collect();
                     known = current;
                     for package in new_packages {
@@ -235,8 +243,16 @@ impl NugetService {
                 if let Some(global) = global {
                     let entry = global.join(id.to_lowercase()).join(version.to_lowercase());
                     if entry.is_dir() {
-                        std::fs::remove_dir_all(&entry).map_err(|err| err.to_string())?;
-                        self.push_log(format!("✓ Cleared cache for {id} {version}"));
+                        let target = entry.clone();
+                        match tokio::task::spawn_blocking(move || std::fs::remove_dir_all(&target))
+                            .await
+                        {
+                            Ok(Ok(())) => {
+                                self.push_log(format!("✓ Cleared cache for {id} {version}"));
+                            }
+                            Ok(Err(err)) => return Err(err.to_string()),
+                            Err(err) => return Err(err.to_string()),
+                        }
                     } else {
                         self.push_log(format!("ℹ No cache found for {id} {version}"));
                     }
@@ -265,13 +281,24 @@ impl NugetService {
                 self.push_log("⚠ Copy skipped: target folder not available");
                 return Ok(Flow::Done);
             };
-            std::fs::create_dir_all(&target_dir).map_err(|err| err.to_string())?;
+            tokio::task::spawn_blocking({
+                let target = target_dir.clone();
+                move || std::fs::create_dir_all(&target)
+            })
+            .await
+            .map_err(|err| err.to_string())?
+            .map_err(|err| err.to_string())?;
             let dest = Path::new(&target_dir).join(&name);
             for attempt in 0..COPY_ATTEMPTS {
                 if !sleep_interruptible(stop_rx, config.copy_delay).await {
                     return Ok(Flow::Cancelled);
                 }
-                match std::fs::copy(path, &dest) {
+                let source = path.to_path_buf();
+                let target = dest.clone();
+                let copied = tokio::task::spawn_blocking(move || std::fs::copy(&source, &target))
+                    .await
+                    .map_err(|err| err.to_string())?;
+                match copied {
                     Ok(_) => {
                         self.push_log(format!("✓ Copied to {}", dest.display()));
                         return Ok(Flow::Done);

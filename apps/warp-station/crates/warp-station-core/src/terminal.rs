@@ -4,6 +4,7 @@
 //! working-directory and -e argument shapes.
 
 use crate::exe;
+use crate::process::DetachedSpawn;
 use std::path::{Path, PathBuf};
 
 /// Suppresses the console window a console-subsystem helper would flash when
@@ -69,8 +70,7 @@ pub fn open_folder(folder: &str) -> Result<(), String> {
     let command = "explorer";
     std::process::Command::new(command)
         .arg(folder)
-        .spawn()
-        .map(|_| ())
+        .spawn_detached()
         .map_err(|err| format!("{command}: {err}"))
 }
 
@@ -82,8 +82,7 @@ pub fn open_url(url: &str) -> Result<(), String> {
         std::process::Command::new("cmd")
             .args(["/C", "start", ""])
             .arg(url)
-            .spawn()
-            .map(|_| ())
+            .spawn_detached()
             .map_err(|err| format!("start: {err}"))
     }
     #[cfg(not(windows))]
@@ -94,8 +93,7 @@ pub fn open_url(url: &str) -> Result<(), String> {
         let command = "xdg-open";
         std::process::Command::new(command)
             .arg(url)
-            .spawn()
-            .map(|_| ())
+            .spawn_detached()
             .map_err(|err| format!("{command}: {err}"))
     }
 }
@@ -112,8 +110,7 @@ pub fn open_solution(solution: &str, ide_executable: &str) -> Result<(), String>
         };
         return std::process::Command::new(&path)
             .arg(solution)
-            .spawn()
-            .map(|_| ())
+            .spawn_detached()
             .map_err(|err| format!("{}: {err}", path.display()));
     }
     #[cfg(windows)]
@@ -122,8 +119,7 @@ pub fn open_solution(solution: &str, ide_executable: &str) -> Result<(), String>
         command.args(["/C", "start", "", solution]);
         hide_console(&mut command);
         return command
-            .spawn()
-            .map(|_| ())
+            .spawn_detached()
             .map_err(|err| format!("shell association: {err}"));
     }
     #[cfg(not(windows))]
@@ -136,8 +132,7 @@ pub fn open_solution(solution: &str, ide_executable: &str) -> Result<(), String>
         };
         std::process::Command::new(&path)
             .arg(solution)
-            .spawn()
-            .map(|_| ())
+            .spawn_detached()
             .map_err(|err| format!("{}: {err}", path.display()))
     }
 }
@@ -161,8 +156,7 @@ pub fn open_in_vscode(folder: &str, vscode_executable: &str, profile: &str) -> R
         hide_console(&mut command);
     }
     command
-        .spawn()
-        .map(|_| ())
+        .spawn_detached()
         .map_err(|err| format!("{}: {err}", path.display()))
 }
 
@@ -230,8 +224,7 @@ pub fn open_code_plan(plan: &CodeOpenPlan) -> Result<(), String> {
                 hide_console(&mut command);
             }
             command
-                .spawn()
-                .map(|_| ())
+                .spawn_detached()
                 .map_err(|err| format!("{}: {err}", executable.display()))
         }
         CodeOpenPlan::SystemDefault { file } => open_folder(file),
@@ -278,8 +271,7 @@ pub fn open_terminal(folder: &str, terminal_executable: &str) -> Result<(), Stri
                     command.current_dir(folder);
                 }
                 return command
-                    .spawn()
-                    .map(|_| ())
+                    .spawn_detached()
                     .map_err(|err| format!("{}: {err}", path.display()));
             }
         }
@@ -293,8 +285,7 @@ pub fn open_terminal(folder: &str, terminal_executable: &str) -> Result<(), Stri
                 command.current_dir(folder);
             }
             return command
-                .spawn()
-                .map(|_| ())
+                .spawn_detached()
                 .map_err(|err| format!("{}: {err}", path.display()));
         }
     }
@@ -425,7 +416,7 @@ pub fn launch_argv_in_terminal(
             if Path::new(folder).exists() {
                 command_builder.current_dir(folder);
             }
-            match command_builder.spawn() {
+            match command_builder.spawn_detached() {
                 Ok(_) => {
                     tracing::info!("launched {name} running {:?} in {folder}", argv);
                     return Ok(());

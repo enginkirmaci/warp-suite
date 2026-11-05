@@ -108,8 +108,8 @@ Aşağıda bulgular önem sırasına göre; her biri dosya:satır kanıtı ve k�
 
 ## B6. Markdown editörü her tuş vuruşunda belgeyi iki kez baştan ayrıştırıyor
 **Yer:** `kits/warpui-kit-markdown/src/editor/state.rs:1112-1115` (`reparse`), `:1054-1108` (revizyon değişince **tüm** satır görünümleri yeniden), `kits/warpui-kit-markdown/src/highlighter.rs:173-189` (`text.to_string()` + `live::parse`), `:191-240` (`styles` her çağrıda span listesini baştan tarıyor); `kits/warpui-kit-markdown/src/editor/ops.rs` içinde Enter/soft-break vb. her biri ayrıca `parse_document`
-**Sorun:** Her düzenlemede (a) editör durumu tüm belgeyi ayrıştırıyor, (b) gpui-base `drive_highlighter` her düzenlemede `InputHighlighter::update` çağırıyor ve o da tüm belgeyi ikinci kez ayrıştırıyor, (c) `refresh_views` tüm satır görünümlerini yeniden kuruyor, (d) kod blokları için tree-sitter tokenizasyonu yenileniyor. Artımlı yol yok.
-**Etki:** 100–500 KB'lık bir notta her tuş vuruşu doğrusal (ve sabit çarpanlı) iş; büyük notlarda yazma gecikmesi ve CPU artışı. Notlar genelde küçük olduğu için bugün çoğu kullanıcıda hissedilmez; ölçek sınırı düşük.
+**Sorun:** warp-notes'un `LiveEditorState`'inde her düzenlemede (a) `reparse` tüm belgeyi ayrıştırıyor, (b) `refresh_views` tüm satır görünümlerini yeniden kuruyor, (c) kod blokları için tree-sitter tokenizasyonu yenileniyor. İkinci tam ayrıştırma, warp-station Ayarlar'daki prompt-template düzenleyicisinde (gpui-base `EditorState` + `live_highlighter_factory`) oluyor: `InputHighlighter::update` her düzenlemede metni kopyalayıp yeniden ayrıştırıyor. O yüzey küçük olduğu için bugün kullanıcıya yansımıyor, ama aynı motor uzun bir belgeye uygulanırsa maliyet iki katına çıkar. Not editöründe artımlı yol yok.
+**Etki:** 100–500 KB'lık bir notta her tuş vuruşu doğrusal iş; büyük notlarda yazma gecikmesi ve CPU artışı. Notlar genelde küçük olduğu için bugün çoğu kullanıcıda hissedilmez; ölçek sınırı düşük.
 **Düzeltme:** Ayrıştırılmış `LiveDocument`'ı yüksekleyiciye paylaş (ikinci `parse` yerine aynı span'ler); yalnız değişen satır aralığını yeniden ayrıştır (satır bazlı önbellek + blok sınırı); `refresh_views`'u etkilenen satırlarla sınırla; `styles` içinde `partition_point` ile span aramasını logaritmik yap.
 
 ## B7. warp-agent transkripti sanallaştırılmamış; her karede tüm öğeler için anahtar üretiliyor
@@ -252,6 +252,12 @@ Denetimden sonra öncelikli bulgular düzeltildi; her düzeltme kendi testini ta
 | A4 | düzeltildi | `cache_generation` ile `run_id_seq` ayrıldı; wand/summary kimliği etiket kaydını iptal etmiyor | `store::tests::run_ids_do_not_touch_the_cache_save_gate` |
 | B2 | düzeltildi | `LoadChanges` 100 ms debounce + okumadan önce `is_newest`; seçili satır 300 ms debounce ile yazılıyor | `repos_probe::selection_persists_once_after_the_debounce` + net/queue ve split probe'ları |
 | B1 | kısmen | `Scan`, `FetchAll`, `GitHubPass`, `AzurePass` ayrı arka plan şeridine alındı; `Clone`, `DeepScan`, `LoadModels` kendi görevlerinde. `ProbeAll` bilinçli olarak ana şeritte kaldı: durum okumalarının bir Git mutasyonuyla yarışıp eski durumu yazmasını engelliyor; ayrıca arka plan geçişinin durum okuması bir Git işi sürerken uygulanmıyor (`StatusSettled` koruması) | `net_queue_probe` + tüm `warp-station` probe'ları |
+| B6 | açık (rapor netleştirildi) | İkinci tam ayrıştırma not editöründe değil, Ayarlar'daki prompt-template düzenleyicisinde; not editöründe kalan iş tam `reparse` + tüm görünümlerin yeniden kurulması. Artımlı ayrıştırma ayrı bir iş olarak duruyor | — |
+| B9 | düzeltildi | Ayar kaydı yalnız ilgili alan değiştiğinde tarama/GitHub/Azure/model işini başlatıyor; `autostart::reconcile` yalnız bayrak değişince çağrılıyor ve Linux'ta dosya aynıysa hiç yazmıyor | `ui::settings::tests::{unrelated_saves_kick_nothing, each_setting_kicks_only_its_own_work, scan_inputs_rescan}` |
+| B10 | kısmen | NuGet taraması ve `remove_dir_all`/`fs::copy` artık `spawn_blocking`'de; 1,5 s'lik tam ağaç taraması ve hedefli izleme (inotify) açık | `nuget::tests` |
+| B11 | düzeltildi | warp-agent'ta SSE dışı REST çağrıları 10 s connect + 60 s toplam zaman aşımına bağlandı; dsh RPC'leri 8 s connect + 120 s; sağlık probu 5 s | derleme + mevcut testler |
+| B12 | düzeltildi | stderr de stdout gibi sınırlandı (süreci öldürmeden), çocuk süreç 25 ms yoklama yerine `child.wait()` ile bekleniyor | `process::tests::caps_stderr_without_killing_the_child` + mevcut süreç testleri |
+| B13 | düzeltildi | Terminal/dosya yöneticisi/kardeş uygulama başlatmaları `spawn_detached` ile bir toplayıcı thread'de `wait()` ediliyor | derleme + mevcut testler |
 
 # Doğrulama eki
 
@@ -264,7 +270,7 @@ $ cargo test --workspace --locked
 $ cargo clippy ... -W clippy::pedantic            # 1.720 uyarı; stil ağırlıklı
 ```
 
-Düzeltmelerden sonra aynı kapılar yeniden koşuldu: `cargo fmt --all --check` temiz, `cargo clippy --workspace --all-targets --locked -- -D warnings` temiz, `cargo test --workspace --locked` **660 test geçti, 0 başarısız**. Bu koşu, düzeltme testlerinin yanı sıra `warp-station-core` içinde HOME'u geçici olarak değiştiren testlerle ev/yol testi arasındaki paralel çalışma yarışını da ortaya çıkardı; ikisi artık `test_support::HOME_LOCK` üzerinden sırayla koşuyor.
+Düzeltmelerden sonra aynı kapılar yeniden koşuldu: `cargo fmt --all --check` temiz, `cargo clippy --workspace --all-targets --locked -- -D warnings` temiz, `cargo test --workspace --locked` **664 test geçti, 0 başarısız**. İkinci turda B9, B10 (kısmi), B11, B12 ve B13 de düzeltildi; aynı kapılar yeniden geçti. Koşu, düzeltme testlerinin yanı sıra `warp-station-core` içinde HOME'u geçici olarak değiştiren testlerle ev/yol testi arasındaki paralel çalışma yarışını da ortaya çıkardı; ikisi artık `test_support::HOME_LOCK` üzerinden sırayla koşuyor.
 
 Pedantic çıktısında incelenen üretim kodu `Duration` çıkarma uyarıları korumalı çıktı (`elapsed >= interval` ve `since_last >= STREAM_REPAINT_INTERVAL` erken çıkışları); gerçek bir taşma yolu bulunmadı. `unsafe` blokları ağırlıklı olarak `// SAFETY:` yorumlu (birkaç test restore satırı hariç); `transmute`, `unsafe impl Send/Sync` veya `static mut` yok.
 
