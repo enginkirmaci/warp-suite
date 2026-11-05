@@ -811,14 +811,22 @@ impl<'a> Parser<'a> {
             };
             let header = &self.lines[ix];
             let delimiter = &self.lines[ix + 1];
-            let columns = (plain(header) && plain(delimiter))
-                .then(|| parse_table_delimiter(&text[delimiter.range.clone()]))
-                .flatten();
-            let header_cells = table_cells(text, header.range.clone());
-            let Some(columns) = columns.filter(|c| c.len() == header_cells.len()) else {
+            // Only paragraph lines can head a table, so every other pair is
+            // skipped before any cell is split: a blank line has no cells, and
+            // trimming its range away leaves nothing to slice.
+            if !(plain(header) && plain(delimiter)) {
+                ix += 1;
+                continue;
+            }
+            let Some(columns) = parse_table_delimiter(&text[delimiter.range.clone()]) else {
                 ix += 1;
                 continue;
             };
+            let header_cells = table_cells(text, header.range.clone());
+            if columns.len() != header_cells.len() {
+                ix += 1;
+                continue;
+            }
             let first = ix;
             let mut rows = Vec::new();
             let mut row = ix;
@@ -1381,6 +1389,12 @@ fn table_cells(text: &str, range: Range<usize>) -> Vec<Range<usize>> {
         i += 1;
     }
     let body = &text[range.clone()];
+    // A line of nothing but whitespace has no cells. It has to leave here:
+    // trimming it away moves `start` past `end` below, and the first slice
+    // would then read a byte range backwards and panic.
+    if body.trim().is_empty() {
+        return Vec::new();
+    }
     let lead = body.len() - body.trim_start().len();
     let start = range.start + lead;
     let end = range.start + body.trim_end().len();
@@ -2803,6 +2817,35 @@ mod tests {
             panic!("a table");
         };
         assert_eq!(rows[0].cells[1], 6..6);
+    }
+
+    #[test]
+    fn a_whitespace_only_line_is_blank_and_never_a_table_header() {
+        // Table detection used to split the cells of every line pair, so a line
+        // of only spaces or tabs was trimmed to nothing and sliced backwards:
+        // "byte range starts at 26914 but ends at 26911".
+        for text in ["a\n \nb", "a\n   \nb", "a\n\t \t\nb", "a\r\n   \r\nb"] {
+            let doc = parse_document(text);
+            assert_eq!(doc.lines.len(), 3, "{text:?}");
+            assert_eq!(doc.lines[1].kind, LiveLineKind::Blank, "{text:?}");
+            assert_covered(text);
+        }
+        // it is skipped, not taken as a header that hides the table below it
+        let text = "  \n| a | b |\n| - | - |\n";
+        let doc = parse_document(text);
+        assert_eq!(doc.blocks.len(), 1);
+        assert!(matches!(doc.blocks[0].kind, LiveBlockKind::Table { .. }));
+        assert_eq!(doc.blocks[0].lines, 1..3);
+        assert_covered(text);
+    }
+
+    #[test]
+    fn a_blank_line_has_no_cells() {
+        assert!(table_cells("   ", 0..3).is_empty());
+        assert!(table_cells("", 0..0).is_empty());
+        // a blank cell inside a row still keeps its caret past its first space
+        let row = "| a |   |";
+        assert_eq!(table_cells(row, 0..row.len())[1], 6..6);
     }
 
     #[test]
