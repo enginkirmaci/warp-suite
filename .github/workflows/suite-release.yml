@@ -125,10 +125,11 @@ jobs:
     needs: [linux, windows]
     # Only publish when BOTH platforms built. `needs` alone would also skip this
     # job when windows is skipped, so the condition is explicit - and it
-    # deliberately does NOT accept `skipped`: skip_windows is a Linux build
-    # check, and publishing from it would ship a Linux-only release under the
-    # real version tag (that is how v0.1.2 briefly went out without installers).
-    if: ${{ always() && needs.linux.result == 'success' && needs.windows.result == 'success' }}
+    # deliberately does NOT accept `skipped` or `cancelled`: skip_windows is a
+    # Linux build check, and publishing from it would ship a Linux-only release
+    # under the real version tag (that is how v0.1.2 briefly went out without
+    # installers). `always()` also admits cancelled jobs, so exclude them.
+    if: ${{ always() && !cancelled() && needs.linux.result == 'success' && needs.windows.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v8
@@ -155,3 +156,4 @@ jobs:
             artifacts/*.tar.gz
             artifacts/*.exe
             artifacts/*.zip
+            artifacts/REVISIONS.txt
