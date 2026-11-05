@@ -73,7 +73,8 @@ impl ModelChoice {
 const LAUNCH_DEADLINE: Duration = Duration::from_secs(15);
 
 fn config_dir() -> PathBuf {
-    crate::paths::home().join(".warp-agent")
+    // the door endpoint lives in warp-agent's own folder under the suite root
+    crate::paths::AppPaths::user_data_root().join("agent")
 }
 
 /// The door endpoint as published by a running warp-agent.

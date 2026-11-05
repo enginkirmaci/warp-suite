@@ -45,7 +45,7 @@ impl Global for ScaleHost {}
 
 // ---- the shared setting ----------------------------------------------------
 
-/// The settings file every app shares, beside the `~/.warp/notes` store.
+/// The settings file every app shares, at the root of the `~/.warp` tree.
 fn shared_file() -> Option<PathBuf> {
     let home = std::env::var_os("HOME")
         .filter(|h| !h.is_empty())

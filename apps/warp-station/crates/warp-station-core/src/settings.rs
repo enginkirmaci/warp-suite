@@ -320,7 +320,7 @@ impl Default for WarpAgentSettings {
 }
 
 /// The warp-notes integration: the Notes surfaces launch the external app
-/// over the shared ~/.warp/notes store, so these toggle the feature set and
+/// over the shared ~/notes store, so these toggle the feature set and
 /// name its binary.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase", default)]
@@ -403,7 +403,18 @@ pub struct SettingsService {
 
 impl SettingsService {
     pub fn open() -> Self {
-        Self::at(AppPaths::settings_file())
+        let service = Self::at(AppPaths::settings_file());
+        // one-time: the notes store moved out of `~/.warp/notes` to `~/notes`,
+        // so an explicitly saved old default would now point at the notes
+        // app's own settings folder
+        let legacy = AppPaths::legacy_notes_dir().to_string_lossy().to_string();
+        let mut current = service.get();
+        if clear_legacy_notes_path(&mut current, &legacy) {
+            let _ = service.update(|settings| {
+                clear_legacy_notes_path(settings, &legacy);
+            });
+        }
+        service
     }
 
     pub fn at(path: PathBuf) -> Self {
@@ -439,6 +450,18 @@ impl SettingsService {
         };
         jsonio::write_json_atomically(&path, &updated)?;
         Ok(updated)
+    }
+}
+
+/// The notes store moved out of `~/.warp/notes`; a settings file that still
+/// names the old default would point at the notes app's settings folder.
+/// Clears it back to "use the default" and reports whether it changed.
+fn clear_legacy_notes_path(settings: &mut AppSettings, legacy: &str) -> bool {
+    if settings.general.notes_store_path.trim() == legacy {
+        settings.general.notes_store_path.clear();
+        true
+    } else {
+        false
     }
 }
 
@@ -770,5 +793,23 @@ mod tests {
         assert!(json.contains("\"HomeView\""));
         let back: AppSettings = serde_json::from_str(&json).unwrap();
         assert_eq!(back.repos, arranged.repos);
+    }
+
+    #[test]
+    fn a_saved_legacy_notes_path_clears_but_a_custom_one_stays() {
+        let legacy = "/home/e/.warp/notes";
+        let mut stale = AppSettings::default();
+        stale.general.notes_store_path = legacy.into();
+        assert!(clear_legacy_notes_path(&mut stale, legacy));
+        assert!(stale.general.notes_store_path.is_empty());
+        assert!(
+            !clear_legacy_notes_path(&mut stale, legacy),
+            "cleared once, then a no-op"
+        );
+
+        let mut custom = AppSettings::default();
+        custom.general.notes_store_path = "/data/notes".into();
+        assert!(!clear_legacy_notes_path(&mut custom, legacy));
+        assert_eq!(custom.general.notes_store_path, "/data/notes");
     }
 }

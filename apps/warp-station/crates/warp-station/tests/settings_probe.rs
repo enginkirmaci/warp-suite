@@ -576,9 +576,12 @@ fn prompt_templates_list_edit_reset(cx: &mut TestAppContext) {
     assert!(wcx.debug_bounds("template-customized-readme").is_none());
 
     // a body modified straight on disk badges once a fresh page re-opens
-    std::fs::create_dir_all(home.join(".warp").join("assistant")).unwrap();
+    std::fs::create_dir_all(home.join(".warp").join("station").join("assistant")).unwrap();
     std::fs::write(
-        home.join(".warp").join("assistant").join("readme.md"),
+        home.join(".warp")
+            .join("station")
+            .join("assistant")
+            .join("readme.md"),
         "custom {repo_name}",
     )
     .expect("seed a customized body");

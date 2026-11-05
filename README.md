@@ -90,7 +90,7 @@ lives in `scripts/`, so a local build and CI run the same code.
 The apps talk to each other; these are the interfaces that must move
 together. When one changes, update the other side in the **same** commit.
 
-- **warp-agent loopback door** (`~/.warp-agent/ipc.port` + `ipc.token`,
+- **warp-agent loopback door** (`~/.warp/agent/ipc.port` + `ipc.token`,
   token-authenticated NDJSON on `127.0.0.1`): commands `open-workspace`,
   `new-chat`, `run-prompt`, `models`, `status` (+ status pushes).
   `new-chat`/`run-prompt` accept `harness`/`model`/`variant`, and `models`
@@ -103,15 +103,22 @@ together. When one changes, update the other side in the **same** commit.
   field). Warp Station's `SnapIt.Executable` setting points at the Rust
   `warp-snapit.exe`, which is a portable-zip deliverable (no installer) and
   skipped in the Linux bundle (`linux_skip = true` in `apps.toml`).
-- **Shared notes store** (`~/.warp/notes`, one folder per repo): Warp
+- **Shared notes store** (`~/notes`, one folder per repo): Warp
   Station's notes surfaces (titlebar toggle, tools menu, repo-row icons,
   global-search note hits) launch
   [warp-notes](https://github.com/enginkirmaci/warp-notes)
   with `--store` (Warp Station's resolved `notes_store_path`) plus `--repo`/`--note`;
-  standalone launches root at the shared store and a legacy
-  `~/.devtools/notes` renames over on whichever app runs first. Missing
+  standalone launches root at the shared store; a store an older release
+  kept in `~/.warp/notes` (or the older `~/.devtools/notes`) moves to
+  `~/notes` on whichever app runs first. Missing
   warp-notes binary = the notes surfaces fail with a toast, nothing else
   breaks.
+- **Per-user layout** (`~/.warp`): every app's own data sits in its own
+  folder — `station/`, `agent/`, `notes/` — beside the SnapIt settings in
+  `snapit/`, the shared `ui.json` at the root and one `logs/` for every
+  app's rolling file. The notes store is user content, not app data, so it
+  stays outside at `~/notes`. `warpui_kit_platform::paths` owns the tree and
+  the startup migrations that adopt the older folders.
 - **Shared text size and palette** (`~/.warp/ui.json`: `text_size` is `small`,
   `normal`, `large` or `larger` — the old `compact` spelling reads as normal —
   and `palette` is `copper`, `plum`, `pine` or `blue`): `warpui-kit-core` owns

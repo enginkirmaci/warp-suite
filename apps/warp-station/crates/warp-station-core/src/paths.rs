@@ -1,39 +1,52 @@
-//! Global per-user locations. Everything lives under ~/.warp — one shared
-//! suite root (the notes store, the kit's ui.json); never relocate the root
-//! or change the on-disk formats (a renamed subfolder ships with a startup
-//! migration, see [`migrate_legacy_data`]).
+//! Global per-user locations. Every app's data lives under `~/.warp` — one
+//! shared suite root carrying each app's own folder, the kit's `ui.json` and
+//! the SnapIt settings; the notes store is user content in `~/notes`. Never
+//! relocate a folder without a startup migration (see [`migrate_legacy_data`]
+//! and [`migrate_suite_layout`]).
 
 use std::path::{Path, PathBuf};
+use warpui_kit_platform::paths as suite;
 
 pub struct AppPaths;
 
 impl AppPaths {
+    /// The shared suite root, `~/.warp`.
     pub fn user_data_root() -> PathBuf {
-        home().join(".warp")
+        suite::suite_root()
     }
+    /// This app's own folder, `~/.warp/station`.
+    pub fn app_dir() -> PathBuf {
+        suite::app_dir("station")
+    }
+    /// The one logs folder every app writes into, `~/.warp/logs`.
     pub fn logs_dir() -> PathBuf {
-        Self::user_data_root().join("logs")
+        suite::logs_dir()
     }
     pub fn settings_file() -> PathBuf {
-        Self::user_data_root().join("settings.json")
+        Self::app_dir().join("settings.json")
     }
     pub fn repos_cache_file() -> PathBuf {
-        Self::user_data_root().join("repos.cache.json")
+        Self::app_dir().join("repos.cache.json")
     }
     pub fn notes_dir() -> PathBuf {
-        home().join(".warp").join("notes")
+        suite::notes_store_root()
+    }
+    /// The notes folder older builds used, `~/.warp/notes` (the notes app's
+    /// own folder now). Only the migration needs it.
+    pub fn legacy_notes_dir() -> PathBuf {
+        Self::user_data_root().join("notes")
     }
     /// The assistant folder: one user-editable prompt template per wand
     /// (commit message, README, daily summary). General to the AI surface —
     /// it belongs to neither the OpenCode CLI nor warp-agent, so its name
     /// carries neither.
     pub fn assistant_dir() -> PathBuf {
-        Self::user_data_root().join("assistant")
+        Self::app_dir().join("assistant")
     }
     /// The model catalog cache, beside the repo cache — both are throwaway
     /// catalogs the app rewrites from its source (the door, the repo tree).
     pub fn models_cache_file() -> PathBuf {
-        Self::user_data_root().join("models.cache.json")
+        Self::app_dir().join("models.cache.json")
     }
 }
 
@@ -53,6 +66,63 @@ pub fn migrate_legacy_ai_data() {
 /// layout always win, and a missing legacy root is a no-op.
 pub fn migrate_legacy_data() {
     migrate_legacy_data_at(&AppPaths::user_data_root(), &home().join(".devtools"));
+}
+
+/// The per-app layout this build writes, adopted on every start: this app's
+/// own files move from the `~/.warp` root into `~/.warp/station`, and note
+/// content an older build kept in `~/.warp/notes` moves to the store at
+/// `~/notes`. Both steps are idempotent, so they run before every launch.
+pub fn migrate_suite_layout() {
+    migrate_app_entries_at(&AppPaths::user_data_root(), &AppPaths::app_dir());
+    suite::adopt_notes_store(&AppPaths::legacy_notes_dir());
+}
+
+/// The entries the root used to carry for this app; only they move into
+/// [`AppPaths::app_dir`] — `ui.json`, `notes/`, `snapit/` and `logs/` stay
+/// where the suite keeps them.
+const ROOT_APP_ENTRIES: [&str; 4] = [
+    "settings.json",
+    "repos.cache.json",
+    "models.cache.json",
+    "assistant",
+];
+
+/// The testable body of [migrate_suite_layout]'s first half: `root` is the
+/// suite root and `app` this app's folder. A folder collision keeps both
+/// sides for a manual pass; a superseded file is retired.
+fn migrate_app_entries_at(root: &Path, app: &Path) {
+    if !root.is_dir() {
+        return;
+    }
+    let mut moved = 0usize;
+    for name in ROOT_APP_ENTRIES {
+        let source = root.join(name);
+        if !source.exists() {
+            continue;
+        }
+        let dest = app.join(name);
+        if dest.exists() {
+            if source.is_dir() {
+                tracing::warn!(
+                    "keeping the legacy {}: {} already exists",
+                    source.display(),
+                    dest.display()
+                );
+                continue;
+            }
+            let _ = std::fs::remove_file(&source);
+            continue;
+        }
+        if std::fs::create_dir_all(app).is_err() {
+            continue;
+        }
+        if std::fs::rename(&source, &dest).is_ok() {
+            moved += 1;
+        }
+    }
+    if moved > 0 {
+        tracing::info!("moved {moved} item(s) into {}", app.display());
+    }
 }
 
 /// The testable body of [migrate_legacy_data]; `root` is the data root and
@@ -178,15 +248,7 @@ fn migrate_legacy_dir(root: &Path, old: &Path) {
 /// $HOME on unix; USERPROFILE first on Windows — a POSIX-style $HOME leaked
 /// from a Git Bash parent shell is not a valid Win32 path.
 pub(crate) fn home() -> PathBuf {
-    let keys: [&str; 2] = if cfg!(windows) {
-        ["USERPROFILE", "HOME"]
-    } else {
-        ["HOME", "USERPROFILE"]
-    };
-    keys.iter()
-        .find_map(|key| std::env::var_os(key).filter(|value| !value.is_empty()))
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("."))
+    suite::home()
 }
 
 /// Folder-text identity: case-insensitive on Windows (the filesystem is),
@@ -207,13 +269,74 @@ mod tests {
     use super::*;
 
     #[test]
-    fn root_is_dot_warp_under_home() {
-        let p = AppPaths::user_data_root();
-        assert!(p.ends_with(".warp"));
-        assert!(AppPaths::settings_file().ends_with("settings.json"));
-        assert!(AppPaths::repos_cache_file().ends_with("repos.cache.json"));
-        assert!(AppPaths::assistant_dir().ends_with("assistant"));
-        assert!(AppPaths::models_cache_file().ends_with("models.cache.json"));
+    fn the_suite_root_and_the_app_folder_sit_under_home() {
+        let root = AppPaths::user_data_root();
+        assert_eq!(root, home().join(".warp"));
+        assert_eq!(AppPaths::app_dir(), root.join("station"));
+        assert_eq!(AppPaths::logs_dir(), root.join("logs"));
+        assert_eq!(
+            AppPaths::settings_file(),
+            AppPaths::app_dir().join("settings.json")
+        );
+        assert_eq!(
+            AppPaths::repos_cache_file(),
+            AppPaths::app_dir().join("repos.cache.json")
+        );
+        assert_eq!(
+            AppPaths::assistant_dir(),
+            AppPaths::app_dir().join("assistant")
+        );
+        assert_eq!(
+            AppPaths::models_cache_file(),
+            AppPaths::app_dir().join("models.cache.json")
+        );
+        assert_eq!(AppPaths::notes_dir(), home().join("notes"));
+        assert_eq!(AppPaths::legacy_notes_dir(), root.join("notes"));
+    }
+
+    #[test]
+    fn the_root_app_entries_move_into_the_app_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join(".warp");
+        let app = root.join("station");
+        std::fs::create_dir_all(root.join("assistant")).unwrap();
+        std::fs::write(root.join("assistant").join("readme.md"), "body").unwrap();
+        std::fs::write(root.join("settings.json"), "{}").unwrap();
+        std::fs::write(root.join("ui.json"), "{}").unwrap();
+        std::fs::create_dir_all(root.join("notes")).unwrap();
+
+        migrate_app_entries_at(&root, &app);
+
+        assert_eq!(
+            std::fs::read_to_string(app.join("settings.json")).unwrap(),
+            "{}"
+        );
+        assert!(app.join("assistant").join("readme.md").is_file());
+        assert!(!root.join("settings.json").exists());
+        assert!(!root.join("assistant").exists());
+        assert!(
+            root.join("ui.json").is_file(),
+            "the shared ui.json stays at the root"
+        );
+        assert!(
+            root.join("notes").is_dir(),
+            "the notes app's folder is not this app's to move"
+        );
+    }
+
+    #[test]
+    fn a_migrated_root_is_a_noop_on_the_next_pass() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join(".warp");
+        let app = root.join("station");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("settings.json"), "{}").unwrap();
+
+        migrate_app_entries_at(&root, &app);
+        migrate_app_entries_at(&root, &app);
+
+        assert!(app.join("settings.json").is_file());
+        assert!(!root.join("settings.json").exists());
     }
 
     #[test]

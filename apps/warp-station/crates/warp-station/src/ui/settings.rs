@@ -682,7 +682,8 @@ impl Render for SettingsPage {
                         .text_color(theme::text())
                         .hover(|s| s.bg(theme::raised()))
                         .on_click(|_, _, _| {
-                            let folder = warp_station_core::paths::AppPaths::user_data_root();
+                            // this app's own data, not the whole suite root
+                            let folder = warp_station_core::paths::AppPaths::app_dir();
                             let _ = std::fs::create_dir_all(&folder);
                             let _ =
                                 warp_station_core::terminal::open_folder(&folder.to_string_lossy());

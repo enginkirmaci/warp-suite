@@ -1,5 +1,5 @@
 //! The notes store's read side for the global search: per-repo note folders
-//! under the store root (default ~/.warp/notes, shared with the warp-notes
+//! under the store root (default ~/notes, shared with the warp-notes
 //! app), capped content search. The read/search layer itself is the platform
 //! kit's (`warpui_kit_platform::notes`) — warp-notes rides the same code for
 //! its page search; tree loading, CRUD and the markdown editing ops live

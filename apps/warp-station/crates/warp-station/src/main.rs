@@ -32,6 +32,10 @@ fn main() {
     // `ai`) before the AI surface moved to warp-agent: split them out once
     warp_station_core::paths::migrate_legacy_ai_data();
 
+    // every app now has its own folder under ~/.warp, and the notes store
+    // moved to ~/notes: adopt the root files and the old store once
+    warp_station_core::paths::migrate_suite_layout();
+
     let _log_guard = logging::initialize();
 
     application()

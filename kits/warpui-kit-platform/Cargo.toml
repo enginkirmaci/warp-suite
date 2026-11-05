@@ -25,3 +25,7 @@ rust-embed = { version = "8", default-features = false, optional = true }
 [features]
 default = ["assets"]
 assets = ["dep:gpui", "dep:gpui-kit", "dep:rust-embed"]
+
+[dev-dependencies]
+# the layout migrations are exercised against throwaway home directories
+tempfile = "3"

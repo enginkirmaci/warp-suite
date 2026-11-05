@@ -1,5 +1,5 @@
 //! The notes store's shared read side: per-repo note folders under the store
-//! root (default `~/.warp/notes`), sanitized names, capped content search.
+//! root (default `~/notes`), sanitized names, capped content search.
 //! warp-notes rides this for its page search and name sanitizing, and
 //! warp-station-core for its global search over the same on-disk format —
 //! the two copies had drifted into identical files with identical tests.
@@ -18,7 +18,7 @@ pub struct NotesSearchHit {
 }
 
 /// The store root for a configured path: the setting when set, the app's
-/// default otherwise (`~/.warp/notes`).
+/// default otherwise (`~/notes`).
 pub fn resolve_store_root(configured: &str, default_root: &Path) -> PathBuf {
     let trimmed = configured.trim();
     if trimmed.is_empty() {

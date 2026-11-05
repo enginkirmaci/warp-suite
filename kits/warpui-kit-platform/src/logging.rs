@@ -6,7 +6,7 @@ use std::path::Path;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
-/// Log to `<dir>/<prefix><date>.log` and stderr, filtered by `RUST_LOG` or
+/// Log to `<dir>/<prefix>.log.<date>` and stderr, filtered by `RUST_LOG` or
 /// `info`. Returns the worker guard the app must hold for the life of the
 /// process, or None when the dir was not creatable.
 pub fn init(dir: &Path, file_prefix: &str) -> Option<tracing_appender::non_blocking::WorkerGuard> {

@@ -28,7 +28,7 @@ icon_prefix = "warp-station"
 scalable_svg = "crates/warp-station/assets/icons/logo.svg"
 notes = """
 Repository workbench (Rust/GPUI workspace: warp-station, warp-station-core).
-AI surface drives warp-agent's loopback door (~/.warp-agent/ipc.port +
+AI surface drives warp-agent's loopback door (~/.warp/agent/ipc.port +
 ipc.token, NDJSON: open-workspace, new-chat, run-prompt, models, status).
 Linux deliverable: warp-station alone (the zone snapper has its own
 warp-snapit app below).
@@ -40,7 +40,7 @@ scalable_svg = "packaging/linux/icons/warpagent.svg"
 notes = """
 Chat client over `opencode serve` (Rust/GPUI, single crate). Owns the
 loopback door protocol Warp Station consumes. Changing door commands, the
-ipc.port/ipc.token file names or their ~/.warp-agent location is a
+ipc.port/ipc.token file names or their ~/.warp/agent location is a
 cross-app contract change: update Warp Station in the same commit.
 """
 
@@ -66,8 +66,10 @@ scalable_svg = "packaging/linux/icons/warpnotes.svg"
 notes = """
 Per-repo markdown notes (Rust/GPUI, single crate) - the Notes window
 Warp Station's notes toggle, tools menu and repo-row icons launch. Reads
-the shared ~/.warp/notes store (one folder per repo; a legacy
-~/.devtools/notes renames over on first run, whichever app starts first).
+the shared ~/notes store (one folder per repo; a store older releases kept
+in ~/.warp/notes or ~/.devtools/notes moves there on first run, whichever
+app starts first). Its own settings and the suite's shared logs live under
+~/.warp.
 Launch contract: `warp-notes [--store <path>] [--repo <name>]
 [--note <path>]` - Warp Station always passes --store (its
 notes_store_path setting, default the shared root) so a customized path

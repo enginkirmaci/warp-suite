@@ -9,17 +9,19 @@ cargo run            # debug run
 cargo test           # unit + live git parity + headless UI probes
 ```
 
-User data lives in `~/.warp` (settings, repos cache, notes, `assistant/`
-with the prompt templates, and `models.cache.json` for the model catalog). An
-old `opencode/` folder — or a stray `ai/` from a development build — is split
-into those on startup, and a legacy `~/.devtools` root is absorbed into
-`~/.warp` on first launch.
+User data lives under `~/.warp`: this app's own folder `~/.warp/station`
+(settings, repos cache, `models.cache.json` and `assistant/` with the prompt
+templates), the suite's shared `logs/`, the kit's `ui.json` and the SnapIt
+settings. The notes store is user content in `~/notes`. An old `opencode/`
+folder — or a stray `ai/` from a development build — is split on startup, a
+legacy `~/.devtools` root is absorbed into `~/.warp` on first launch, and the
+root files move into `~/.warp/station` once.
 
 ## warp-agent integration
 
 The AI surface (commit-message / README wands, the daily summary, the
 harness/model/variant catalog) runs in [warp-agent](../warp-agent) over its
-loopback door (`~/.warp-agent/ipc.port` + `ipc.token`) — Warp Station no longer
+loopback door (`~/.warp/agent/ipc.port` + `ipc.token`) — Warp Station no longer
 spawns `opencode serve` itself. Rules: a missing warp-agent binary turns the
 AI features off; a merely closed one is launched on demand. Wand runs happen
 as visible warp-agent chats in the repo's workspace (added when missing), the

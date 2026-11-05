@@ -1,6 +1,6 @@
 //! Launches the external warp-notes app (the Notes window of the warp
 //! family): fire-and-forget, detached from Warp Station' lifetime, over the
-//! shared ~/.warp/notes store. A missing binary only fails that one launch.
+//! shared ~/notes store. A missing binary only fails that one launch.
 
 use crate::exe;
 use std::path::Path;
