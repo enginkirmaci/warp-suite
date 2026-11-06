@@ -8664,6 +8664,7 @@ dependencies = [
  "gpui-pre-platform",
  "image",
  "libc",
+ "markdown",
  "reqwest",
  "rust-embed",
  "serde",

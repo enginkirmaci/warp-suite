@@ -122,6 +122,9 @@ pub enum NetCommand {
     /// cache). Passive: a closed door falls back to the cache, never a launch.
     LoadModels {
         harness: String,
+        /// Ask warp-agent to re-read the backend instead of answering from
+        /// its in-memory catalog (the settings refresh button).
+        refresh: bool,
     },
     /// The yesterday-summary wand: day activity across every repo → prompt →
     /// one run in warp-agent's General workspace → the summary file path.
@@ -429,6 +432,9 @@ pub enum UiEvent {
     ModelsLoaded {
         harness: String,
         catalog: warp_station_core::opencode::ModelCatalog,
+        /// True when the door answered from the backend this time; false is
+        /// the cache fallback (closed door, unknown command, timeout).
+        fresh: bool,
     },
     /// The summary wand finished (Ok = the written file path).
     SummaryDone {
@@ -1075,7 +1081,7 @@ async fn net_main(cmd_rx: Receiver<NetCommand>, evt_tx: Sender<UiEvent>) {
                     });
                 });
             }
-            NetCommand::LoadModels { harness } => {
+            NetCommand::LoadModels { harness, refresh } => {
                 // passive on purpose: loading the catalog must never launch
                 // warp-agent; only runs launch it. A closed door serves the
                 // cache so the settings pickers keep working offline. Spawned
@@ -1083,19 +1089,29 @@ async fn net_main(cmd_rx: Receiver<NetCommand>, evt_tx: Sender<UiEvent>) {
                 // timeout, which must not stall other user actions.
                 let evt_tx = evt_tx.clone();
                 tokio::spawn(async move {
-                    let catalog = match warp_station_core::warp::Client::connect().await {
-                        Ok(mut client) => match client.models(&harness).await {
+                    let (catalog, fresh) = match warp_station_core::warp::Client::connect().await {
+                        Ok(mut client) => match client.models(&harness, refresh).await {
                             Ok(catalog) => {
                                 warp_station_core::opencode::store_harness_catalog(
                                     &harness, &catalog,
                                 );
-                                catalog
+                                (catalog, true)
                             }
-                            Err(_) => warp_station_core::opencode::cached_harness_catalog(&harness),
+                            Err(_) => (
+                                warp_station_core::opencode::cached_harness_catalog(&harness),
+                                false,
+                            ),
                         },
-                        Err(_) => warp_station_core::opencode::cached_harness_catalog(&harness),
+                        Err(_) => (
+                            warp_station_core::opencode::cached_harness_catalog(&harness),
+                            false,
+                        ),
                     };
-                    let _ = evt_tx.send_blocking(UiEvent::ModelsLoaded { harness, catalog });
+                    let _ = evt_tx.send_blocking(UiEvent::ModelsLoaded {
+                        harness,
+                        catalog,
+                        fresh,
+                    });
                 });
             }
             NetCommand::NugetStart { config } => nuget.start(config),
@@ -1185,13 +1201,16 @@ async fn net_main(cmd_rx: Receiver<NetCommand>, evt_tx: Sender<UiEvent>) {
                     .await
                     .unwrap_or_default();
 
-                    // the turn runs silently in this repo's warp-agent
-                    // workspace: station shows the wand's progress and result,
-                    // warp-agent's own UI stays untouched
-                    let workspace = folder.to_string_lossy().to_string();
+                    // the turn runs silently in warp-agent's General
+                    // workspace, like the daily summary: the prompt carries
+                    // the diff or the tree, so the run needs no repo folder —
+                    // and launching with one would add the repo to
+                    // warp-agent's sidebar, with its own server, just to write
+                    // a message. Station shows the progress and the result;
+                    // warp-agent's own UI stays untouched.
                     let result = match warp_station_core::warp::connect_or_launch(
                         std::path::Path::new(&warp_exe),
-                        Some(&folder),
+                        None,
                     )
                     .await
                     {
@@ -1200,7 +1219,7 @@ async fn net_main(cmd_rx: Receiver<NetCommand>, evt_tx: Sender<UiEvent>) {
                             let log_id = id.clone();
                             client
                                 .run_prompt(
-                                    &workspace,
+                                    warp_station_core::warp::GENERAL,
                                     &prompt,
                                     &choice,
                                     true,

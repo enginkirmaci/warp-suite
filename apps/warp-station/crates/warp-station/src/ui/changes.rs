@@ -58,6 +58,9 @@ pub struct ChangesView {
     file_by_repo: std::collections::HashMap<String, (String, bool)>,
     /// The row whose discard took its first click; the second one discards.
     discard_armed: Option<(String, bool)>,
+    /// The unstaged header's discard-all has been clicked once: the second
+    /// click throws the whole working tree away.
+    discard_all_armed: bool,
     patches: std::collections::HashMap<(String, bool), String>,
     /// The branch selector: the shared FilteredPicker in branch mode.
     branch_picker: Entity<FilteredPicker>,
@@ -113,6 +116,7 @@ impl ChangesView {
             selected_file: None,
             file_by_repo: std::collections::HashMap::new(),
             discard_armed: None,
+            discard_all_armed: false,
             patches: std::collections::HashMap::new(),
             branch_picker,
             branch_ui,
@@ -141,6 +145,7 @@ impl ChangesView {
         self.loaded_for = repo;
         self.selected_file = None;
         self.discard_armed = None;
+        self.discard_all_armed = false;
         self.patches.clear();
         self.branch_picker.update(cx, FilteredPicker::dismiss);
         {
@@ -382,6 +387,9 @@ impl Render for ChangesView {
                 .unwrap_or_default()
                 .change_groups();
             self.groups_cache = Some((generation, Rc::new(groups)));
+            // a new snapshot can add or drop files under an armed discard-all,
+            // so the arming never outlives the tree it was given for
+            self.discard_all_armed = false;
             // a new snapshot means the fetched patches may be stale
             self.patches.clear();
             if let Some((path, staged)) = self.selected_file.clone() {
@@ -428,7 +436,7 @@ impl Render for ChangesView {
                 .border_color(theme::hairline())
                 .child(self.render_file_list(&groups, cx));
             files = if groups.0.is_empty() && !committing {
-                files.child(stage_hint())
+                files.child(stage_hint(self.store.clone(), groups.1.len()))
             } else {
                 files.child(self.render_commit_card(busy, window, cx))
             };
@@ -541,26 +549,33 @@ impl ChangesView {
             return list.into_any_element();
         }
 
-        // order: unstaged first, then staged; headers render only when
-        // their side has rows, each carrying Discard-all (+ stage/unstage all)
+        // order: unstaged first, then staged; headers render only when their
+        // side has rows. Unstaged carries both whole-tree verbs — discard-all
+        // (the arrow glyph the rows discard with, armed before it fires) and
+        // stage-all — while staged only ever unstages: discarding the index
+        // wholesale has no place there.
         let show_tooltips = self.store.read(cx).settings().general.show_tooltips;
         if !unstaged.is_empty() {
+            let trailing = vec![
+                discard_all_button(
+                    self.discard_all_armed,
+                    unstaged.iter().map(|f| f.path.clone()).collect(),
+                    self.store.clone(),
+                    cx.entity(),
+                    show_tooltips,
+                ),
+                staging_link(
+                    "stage-all",
+                    "Stage all",
+                    GitAction::StageAll,
+                    self.store.clone(),
+                ),
+            ];
             list = list.child(section_header(
                 "Unstaged Changes",
                 unstaged.len(),
                 false,
-                show_tooltips,
-                vec![
-                    (
-                        "discard-all-u",
-                        "Discard",
-                        GitAction::DiscardUnstaged(
-                            unstaged.iter().map(|f| f.path.clone()).collect(),
-                        ),
-                    ),
-                    ("stage-all", "Stage All", GitAction::StageAll),
-                ],
-                self.store.clone(),
+                trailing,
             ));
             for file in unstaged {
                 list = list.child(self.render_row(file, false, cx));
@@ -571,16 +586,12 @@ impl ChangesView {
                 "Staged Changes",
                 staged.len(),
                 true,
-                show_tooltips,
-                vec![
-                    (
-                        "discard-all-s",
-                        "Discard",
-                        GitAction::DiscardStaged(staged.iter().map(|f| f.path.clone()).collect()),
-                    ),
-                    ("stage-all-clear", "Unstage All", GitAction::UnstageAll),
-                ],
-                self.store.clone(),
+                vec![staging_link(
+                    "stage-all-clear",
+                    "Unstage all",
+                    GitAction::UnstageAll,
+                    self.store.clone(),
+                )],
             ));
             for file in staged {
                 list = list.child(self.render_row(file, true, cx));
@@ -1790,9 +1801,7 @@ fn section_header(
     label: &str,
     count: usize,
     with_check: bool,
-    show_tooltips: bool,
-    actions: Vec<(&'static str, &'static str, GitAction)>,
-    store: Entity<Store>,
+    trailing: Vec<gpui::AnyElement>,
 ) -> impl IntoElement + use<> {
     let mut header = div()
         .flex()
@@ -1822,65 +1831,133 @@ fn section_header(
                 .child(format!("({count})")),
         )
         .child(div().flex_1());
-    for (id, action_label, action) in actions {
-        let store = store.clone();
-        let stage_action = action_label.starts_with("Stage") || action_label.starts_with("Unstage");
-        // header actions as bare glyphs: undo arrow for discard, plus/minus
-        // for (un)staging — the label survives as the tooltip
-        let glyph = if stage_action {
-            if action_label.starts_with("Unstage") {
-                "icons/icon-minus.svg"
-            } else {
-                "icons/icon-plus.svg"
-            }
-        } else {
-            "icons/icon-undo.svg"
-        };
-        let color = if stage_action {
-            theme::blue_bright()
-        } else {
-            theme::text_muted()
-        };
-        let button = div()
-            .id(id)
-            .a11y_button(action_label)
-            .cursor_pointer()
-            .rounded_md()
-            .p_1()
-            .flex()
-            .items_center()
-            .text_color(color)
-            .hover(move |s| {
-                if stage_action {
-                    s.bg(theme::tint(theme::accent()))
-                } else {
-                    s.bg(theme::tint(theme::DANGER)).text_color(theme::DANGER)
-                }
-            })
-            .on_click(move |_, _, cx| {
-                store.update(cx, |s, cx| s.run_git(action.clone(), cx));
-            })
-            .child(icon(glyph, px(theme::icon_small()), color));
-        header = header.child(crate::ui::with_tooltip(button, show_tooltips, action_label));
+    for element in trailing {
+        header = header.child(element);
     }
     header
 }
 
+/// The unstaged header's discard-all: the row discard's arrow glyph, so the
+/// whole-tree verb reads as the same action its rows offer. Its first click
+/// arms it and its second throws every unstaged change away — the row
+/// discards take their confirmation the same way.
+fn discard_all_button(
+    armed: bool,
+    files: Vec<String>,
+    store: Entity<Store>,
+    this: Entity<ChangesView>,
+    show_tooltips: bool,
+) -> gpui::AnyElement {
+    let label = if armed {
+        "Confirm discard"
+    } else {
+        "Discard all unstaged changes"
+    };
+    let button = div()
+        .id("discard-all-u")
+        .debug_selector(|| "discard-all-u".into())
+        .a11y_button(label)
+        .cursor_pointer()
+        .rounded_md()
+        .p_1()
+        .flex()
+        .items_center()
+        .hover(|s| s.bg(theme::tint(theme::DANGER)))
+        .on_click(move |_, _, cx| {
+            if armed {
+                this.update(cx, |this, _| this.discard_all_armed = false);
+                store.update(cx, |s, cx| {
+                    s.run_git(GitAction::DiscardUnstaged(files.clone()), cx)
+                });
+            } else {
+                this.update(cx, |this, cx| {
+                    this.discard_all_armed = true;
+                    cx.notify();
+                });
+            }
+        })
+        .when(armed, |d| {
+            d.px_1p5()
+                .text_size(px(theme::font_meta()))
+                .font_weight(FontWeight::MEDIUM)
+                .text_color(theme::DANGER)
+                .child("Confirm")
+        })
+        .when(!armed, |d| {
+            d.child(icon(
+                "icons/icon-undo.svg",
+                px(theme::icon_small()),
+                theme::text_muted(),
+            ))
+        });
+    crate::ui::with_tooltip(button, show_tooltips, label).into_any_element()
+}
+
+/// A whole-list staging verb as a text action — no icon, no outline, just the
+/// accent's ink with an underline on hover (the design's `.link`). The stage
+/// footer and both section headers offer it, so the verb is learned once.
+fn staging_link(
+    id: &'static str,
+    label: &'static str,
+    action: GitAction,
+    store: Entity<Store>,
+) -> gpui::AnyElement {
+    let selector = id.to_string();
+    div()
+        .id(SharedString::from(id))
+        .debug_selector(move || selector.clone())
+        .a11y_button(label)
+        .cursor_pointer()
+        .flex_shrink_0()
+        // padding only grows the hit area: at rest the link is bare text
+        .px(px(2.))
+        .py(px(5.))
+        .text_size(px(theme::font_meta()))
+        .font_weight(FontWeight::MEDIUM)
+        .text_color(theme::blue_bright())
+        .hover(|s| s.underline())
+        .on_click(move |_, _, cx| {
+            store.update(cx, |s, cx| s.run_git(action.clone(), cx));
+        })
+        .child(label)
+        .into_any_element()
+}
+
 /// The no-staged-files footer: the commit box only exists when a commit can
 /// succeed, so this says why it is missing instead of leaving the column
-/// blank.
-fn stage_hint() -> gpui::AnyElement {
-    div()
+/// blank. The footer repeats the stage-all verb as text — where the commit
+/// button would otherwise be — whenever there is something to stage.
+fn stage_hint(store: Entity<Store>, unstaged: usize) -> gpui::AnyElement {
+    let mut footer = div()
         .debug_selector(|| "changes-stage-hint".into())
         .flex_shrink_0()
         .px_3()
         .py_2()
         .border_t_1()
         .border_color(theme::hairline())
-        .text_size(px(theme::font_meta()))
-        .text_color(theme::text_muted())
-        .child("Stage changes to write a commit")
-        .into_any_element()
+        .flex()
+        .flex_row()
+        .items_center()
+        .gap_3()
+        .child(
+            // wraps rather than truncating: at the column's narrowest the
+            // sentence the footer exists for must stay readable
+            div()
+                .flex_1()
+                .min_w_0()
+                .text_size(px(theme::font_meta()))
+                .text_color(theme::text_muted())
+                .child("Stage changes to commit"),
+        );
+    if unstaged > 0 {
+        footer = footer.child(staging_link(
+            "stage-all-footer",
+            "Stage all",
+            GitAction::StageAll,
+            store,
+        ));
+    }
+    footer.into_any_element()
 }
 
 /// The clean working tree: what is true, plus the last commit so the tab still
@@ -2081,6 +2158,7 @@ fn build_branch_picker(
                             fonts: theme::active_tokens(),
                             accent: theme::blue_bright(),
                             show_tooltips: false,
+                            refreshing: false,
                         },
                     }
                 },
@@ -2166,6 +2244,7 @@ fn branch_data(
             fonts: theme::active_tokens(),
             accent: theme::blue_bright(),
             show_tooltips,
+            refreshing: false,
         };
     }
 
@@ -2227,6 +2306,7 @@ fn branch_data(
         fonts: theme::active_tokens(),
         accent: theme::blue_bright(),
         show_tooltips,
+        refreshing: false,
     }
 }
 

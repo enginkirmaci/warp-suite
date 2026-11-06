@@ -94,9 +94,13 @@ together. When one changes, update the other side in the **same** commit.
   token-authenticated NDJSON on `127.0.0.1`): commands `open-workspace`,
   `new-chat`, `run-prompt`, `models`, `status` (+ status pushes).
   `new-chat`/`run-prompt` accept `harness`/`model`/`variant`, and `models`
-  answers with the harnesses and each model's variants. warp-agent owns the
-  protocol; Warp Station is the client — a missing warp-agent binary turns
-  Warp Station's AI features off, a closed one is launched on demand.
+  answers with the harnesses and each model's variants. `models` also takes
+  `refresh: true`: the door re-reads that harness's backend (starting it when
+  needed) instead of answering from its in-memory catalog, which is what the
+  settings refresh buttons ask for; without the flag the answer may be the
+  catalog loaded earlier in the session. warp-agent owns the protocol; Warp
+  Station is the client — a missing warp-agent binary turns Warp Station's AI
+  features off, a closed one is launched on demand.
 - **SnapIt settings**: [warp-snapit](https://github.com/enginkirmaci/warp-snapit)
   and Warp Station read the same `~/.warp/snapit` settings/layouts
   (string-typed numbers, `"x,y"` points, the misspelled `DeactivedScreens`

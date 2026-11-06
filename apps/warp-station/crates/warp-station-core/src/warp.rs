@@ -212,9 +212,9 @@ impl Client {
     /// The harness's model catalog with the variants each model offers. The
     /// door starts that harness when it has no catalog yet, so this can take
     /// as long as a server boot.
-    pub async fn models(&mut self, harness: &str) -> Result<ModelCatalog> {
+    pub async fn models(&mut self, harness: &str, refresh: bool) -> Result<ModelCatalog> {
         let answer = self
-            .request(cmd::MODELS, json!({"harness": harness}))
+            .request(cmd::MODELS, json!({"harness": harness, "refresh": refresh}))
             .await?;
         Ok(catalog_from_answer(&answer, harness))
     }
@@ -510,7 +510,7 @@ mod tests {
         std::fs::write(dir.path().join("ipc.port"), format!("{port}\n")).unwrap();
         let mut client = Client::connect_in(dir.path()).await.unwrap();
         assert!(client.request("ping", json!({})).await.is_ok());
-        let catalog = client.models("opencode").await.unwrap();
+        let catalog = client.models("opencode", false).await.unwrap();
         assert_eq!(catalog.harnesses.len(), 2);
         assert_eq!(catalog.models.len(), 2);
         assert_eq!(catalog.variants_for("opencode", "a/x"), ["low", "high"]);

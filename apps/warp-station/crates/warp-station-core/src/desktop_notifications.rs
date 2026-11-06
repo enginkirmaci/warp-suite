@@ -213,7 +213,7 @@ mod tests {
 
     #[test]
     fn unfocused_toasts_mirror_and_focused_ones_do_not() {
-        let (mut settings, mut dedup) = gate();
+        let (settings, mut dedup) = gate();
         // away: the toast is rendered but nobody sees it — mirror it
         let away = wants_desktop(
             Category::ActionConfirmations,

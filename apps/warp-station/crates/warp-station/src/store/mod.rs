@@ -219,6 +219,9 @@ pub struct Store {
     /// When each repo's last GitHub/Azure snapshot landed, for the open and
     /// eager passes' freshness gate ([Self::maybe_activity_kick]).
     activity_landed_at: std::collections::HashMap<String, std::time::Instant>,
+    /// The harness a user-driven catalog refresh is waiting on; the answer's
+    /// `fresh` flag decides whether it becomes "updated" or a cache notice.
+    pub models_refresh_requested: Option<String>,
     /// Last focus state the tick observed; None before the first observation,
     /// so a launch that starts focused does not look like a focus regain.
     window_focused: Option<bool>,
@@ -368,6 +371,7 @@ impl Store {
             fetch_baseline: None,
             fetch_probe_coverage: None,
             activity_landed_at: std::collections::HashMap::new(),
+            models_refresh_requested: None,
             window_focused: None,
             focus_requested: false,
             cache_generation: 0,
@@ -867,8 +871,20 @@ impl Store {
                 }
                 cx.notify();
             }
-            UiEvent::ModelsLoaded { harness, catalog } => {
-                self.apply_catalog(&harness, catalog);
+            UiEvent::ModelsLoaded {
+                harness,
+                catalog,
+                fresh,
+            } => {
+                self.apply_catalog(&harness, catalog, fresh);
+                if self.models_refresh_requested.as_deref() == Some(harness.as_str()) {
+                    self.models_refresh_requested = None;
+                    if fresh {
+                        self.notify_success("Models updated");
+                    } else {
+                        self.notify_error("Could not refresh models — showing the cached catalog");
+                    }
+                }
                 cx.notify();
             }
             UiEvent::TemplateLoaded {
@@ -1263,14 +1279,34 @@ impl Store {
 
     /// Loads one harness's model catalog through the door (cache-backed when
     /// offline; never launches warp-agent). The settings model picker asks
-    /// for the harness it is showing.
-    pub fn load_models_for(&mut self, harness: String, cx: &mut Context<Self>) {
+    /// for the harness it is showing; `refresh` asks the door to re-read the
+    /// backend instead of answering from its in-memory list.
+    pub fn load_models_for(&mut self, harness: String, refresh: bool, cx: &mut Context<Self>) {
+        // a load for another harness retires the previous refresh's pending
+        // toast: the answer would otherwise report a catalog the page left
+        if self
+            .models_refresh_requested
+            .as_deref()
+            .is_some_and(|pending| pending != harness)
+        {
+            self.models_refresh_requested = None;
+        }
+        if refresh {
+            self.models_refresh_requested = Some(harness.clone());
+        }
         if self.warp_ready().is_some() {
-            let _ = self.net.send_blocking(NetCommand::LoadModels { harness });
+            let _ = self
+                .net
+                .send_blocking(NetCommand::LoadModels { harness, refresh });
         } else {
+            if refresh {
+                self.models_refresh_requested = None;
+                self.notify_error("Could not refresh models — warp-agent is disabled or missing");
+            }
             self.apply_catalog(
                 &harness,
                 warp_station_core::opencode::cached_harness_catalog(&harness),
+                false,
             );
             cx.notify();
         }
@@ -1278,7 +1314,14 @@ impl Store {
 
     /// Replaces one harness's slice of the catalog; the other harness's
     /// entries stay so switching the radio never empties a loaded list.
-    fn apply_catalog(&mut self, harness: &str, catalog: warp_station_core::opencode::ModelCatalog) {
+    /// A `fresh` empty answer clears the harness's slice (the backend really
+    /// has no models now); an offline miss keeps the last known list.
+    fn apply_catalog(
+        &mut self,
+        harness: &str,
+        catalog: warp_station_core::opencode::ModelCatalog,
+        fresh: bool,
+    ) {
         if !catalog.harnesses.is_empty() {
             self.harnesses = catalog.harnesses.clone();
         }
@@ -1287,7 +1330,9 @@ impl Store {
         }
         self.catalog.harnesses = self.harnesses.clone();
         if catalog.models.is_empty() {
-            // an offline miss keeps the last known list rather than clearing it
+            if fresh {
+                self.catalog.models.retain(|model| model.harness != harness);
+            }
             return;
         }
         self.catalog.models.retain(|model| model.harness != harness);

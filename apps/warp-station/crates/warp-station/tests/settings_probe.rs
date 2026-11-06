@@ -671,6 +671,86 @@ fn click(cx: &mut gpui::VisualTestContext, selector: &'static str) {
     cx.update(|window, cx| drop(window.draw(cx)));
 }
 
+/// The Model picker's refresh control must ask the door to re-read the
+/// backend, not reuse the initial load path: before this, the button sent the
+/// same cache-served command and the catalog could never change while
+/// warp-agent stayed up.
+#[gpui_kit::gpui::test]
+fn the_model_refresh_asks_the_door_for_a_fresh_catalog(cx: &mut TestAppContext) {
+    let _home_guard = HOME_ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    cx.update(gpui_kit::init);
+    cx.update(warp_station::theme::apply_kit_theme);
+
+    let home = std::env::temp_dir().join(format!(
+        "warp-station-model-refresh-probe-{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&home);
+    std::fs::create_dir_all(home.join(".warp")).unwrap();
+    // SAFETY: process-global env; serialized against the sibling HOME probes
+    unsafe {
+        std::env::set_var("HOME", &home);
+        #[cfg(windows)]
+        std::env::set_var("USERPROFILE", &home);
+        std::env::set_var("XDG_CONFIG_HOME", home.join(".config"));
+    }
+
+    // warp_ready() locates this path; the test binary is a real file, so the
+    // probe exercises the door path instead of the disabled/failed branch
+    let exe = std::env::current_exe()
+        .expect("the test binary path")
+        .to_string_lossy()
+        .to_string();
+    let scratch = home.join(".warp").join("settings.json");
+    std::fs::write(
+        &scratch,
+        serde_json::json!({
+            "WarpAgent": {
+                "EnableWarpAgent": true,
+                "Executable": exe,
+                "Harness": "opencode"
+            }
+        })
+        .to_string(),
+    )
+    .expect("scratch settings");
+
+    let (net_tx, net_rx) = async_channel::unbounded();
+    let store = cx.new(|_cx| {
+        Store::with_settings(
+            net_tx,
+            std::sync::Arc::new(warp_station_core::settings::SettingsService::at(
+                scratch.clone(),
+            )),
+        )
+    });
+    let handle = cx.open_window(
+        gpui::size(gpui::px(1400.), gpui::px(3000.)),
+        |window, cx| SettingsPage::new(store.clone(), window, cx),
+    );
+    let mut wcx = gpui::VisualTestContext::from_window(handle.into(), cx);
+    wcx.run_until_parked();
+    wcx.update(|window, cx| drop(window.draw(cx)));
+    click(&mut wcx, "settings-ai");
+
+    // the page construction already sent its initial (cache-served) load
+    while net_rx.try_recv().is_ok() {}
+
+    click(&mut wcx, "picker-refresh-Model");
+    let mut refreshed = false;
+    while let Ok(command) = net_rx.try_recv() {
+        if matches!(command, NetCommand::LoadModels { refresh: true, .. }) {
+            refreshed = true;
+        }
+    }
+    assert!(
+        refreshed,
+        "the refresh button must ask warp-agent for a fresh catalog"
+    );
+
+    let _ = std::fs::remove_dir_all(&home);
+}
+
 /// Drains the net channel and returns the last command (None when idle).
 fn last_command(net_rx: &async_channel::Receiver<NetCommand>) -> Option<NetCommand> {
     let mut last = None;

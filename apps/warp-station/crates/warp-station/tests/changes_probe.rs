@@ -220,7 +220,8 @@ fn git_verbs_and_commit_follow_the_repo_state(cx: &mut TestAppContext) {
         }
     }
 
-    let (net_tx, _net_rx) = async_channel::unbounded();
+    // the receiver stays bound: the footer's Stage all must reach the net
+    let (net_tx, net_rx) = async_channel::unbounded();
     let store = cx.new(|cx| {
         let mut store = Store::with_settings(net_tx, scratch_service("changes-git-verbs-relevant"));
         store.replace_repos(vec![RepoEntry {
@@ -276,6 +277,30 @@ fn git_verbs_and_commit_follow_the_repo_state(cx: &mut TestAppContext) {
         cx.debug_bounds("commit-message").is_some(),
         "staged: commit box"
     );
+    assert!(
+        cx.debug_bounds("stage-all-footer").is_none(),
+        "a staged tree shows the commit box, not the stage footer"
+    );
+    assert!(
+        cx.debug_bounds("stage-all-clear").is_some(),
+        "staged: the unstage-all verb is a named button"
+    );
+    assert!(
+        cx.debug_bounds("discard-all-s").is_none(),
+        "staged: discarding the whole index is not offered"
+    );
+    click(cx, "stage-all-clear");
+    let mut unstaged_all = false;
+    while let Ok(command) = net_rx.try_recv() {
+        unstaged_all |= matches!(
+            command,
+            warp_station::net::NetCommand::Git {
+                action: warp_station::net::GitAction::UnstageAll,
+                ..
+            }
+        );
+    }
+    assert!(unstaged_all, "the header button unstages everything");
 
     // behind and ahead: Pull, Push and Sync appear
     cx.update_entity(&store, |s: &mut Store, _| {
@@ -304,6 +329,62 @@ fn git_verbs_and_commit_follow_the_repo_state(cx: &mut TestAppContext) {
     );
     assert!(cx.debug_bounds("commit-button").is_none());
     assert!(cx.debug_bounds("changes-stage-hint").is_some());
+    assert!(
+        cx.debug_bounds("discard-all-u").is_some(),
+        "unstaged still offers its discard-all"
+    );
+    assert!(
+        cx.debug_bounds("stage-all").is_some(),
+        "the unstaged header names its stage-all action"
+    );
+    // the trash arms first: one click must not throw the working tree away
+    click(cx, "discard-all-u");
+    assert!(
+        !drain_discard(&net_rx),
+        "one click only arms the discard-all"
+    );
+    assert!(
+        cx.debug_bounds("discard-all-u").is_some(),
+        "the armed button is still there to confirm"
+    );
+    click(cx, "discard-all-u");
+    assert!(
+        drain_discard(&net_rx),
+        "the second click discards every unstaged file"
+    );
+    // a fresh snapshot disarms it again: the tree the arm was given for is gone
+    click(cx, "discard-all-u");
+    cx.update_entity(&store, |s: &mut Store, _| {
+        s.set_changes(Some(snapshot(false, true)))
+    });
+    cx.run_until_parked();
+    cx.update(|window, cx| drop(window.draw(cx)));
+    click(cx, "discard-all-u");
+    assert!(
+        !drain_discard(&net_rx),
+        "a fresh snapshot disarms the discard-all"
+    );
+    click(cx, "discard-all-u");
+    assert!(
+        drain_discard(&net_rx),
+        "the re-armed click still needs its confirmation"
+    );
+    assert!(
+        cx.debug_bounds("stage-all-footer").is_some(),
+        "the footer keeps the stage-all action"
+    );
+    click(cx, "stage-all-footer");
+    let mut staged_all = false;
+    while let Ok(command) = net_rx.try_recv() {
+        staged_all |= matches!(
+            command,
+            warp_station::net::NetCommand::Git {
+                action: warp_station::net::GitAction::StageAll,
+                ..
+            }
+        );
+    }
+    assert!(staged_all, "the footer button stages everything");
     assert!(cx.debug_bounds("rail-Pull").is_none());
     assert!(cx.debug_bounds("rail-Push").is_none());
     assert!(cx.debug_bounds("rail-Sync").is_none());
@@ -543,6 +624,21 @@ fn git_commands(
         }
     }
     git
+}
+
+/// Drains the channel, reporting whether it carried a whole-tree discard.
+fn drain_discard(net_rx: &async_channel::Receiver<warp_station::net::NetCommand>) -> bool {
+    let mut found = false;
+    while let Ok(command) = net_rx.try_recv() {
+        found |= matches!(
+            command,
+            warp_station::net::NetCommand::Git {
+                action: warp_station::net::GitAction::DiscardUnstaged(_),
+                ..
+            }
+        );
+    }
+    found
 }
 
 #[gpui_kit::gpui::test]

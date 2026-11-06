@@ -24,6 +24,7 @@ let picker = cx.new(|cx| {
             fonts: tokens_for(cx),
             accent: accent_for(cx),
             show_tooltips: true,
+            refreshing: false,       // true spins the refresh button
         }),
         window,
         cx,
@@ -42,6 +43,11 @@ Three mount shapes via `PickerSpec::overlay` + `OverlayAnchor`:
 | `Composer` | No trigger — the host mounts the entity only while its pill is open; a full-bleed catcher dismisses, picks and dismissal land through closures holding the owner weakly |
 
 The new-branch-style flows are app-built: return `PickerBody::Replace(...)` to take over the panel body, or a `footer` element under the list. Trailing row actions (the armed delete) are rendered by the shell; the arm/confirm cycle stays in the app via `with_on_trailing`.
+
+`set_disabled(true)` dims the trigger and refuses to open it, for a slot whose
+value an adjacent control owns (warp-agent's Variant field while "always select
+the highest variant" is on). The data stays live, so switching it back on needs
+no rebuild.
 
 ## License
 

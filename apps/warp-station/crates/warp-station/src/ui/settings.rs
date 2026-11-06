@@ -398,7 +398,7 @@ impl SettingsPage {
             })
             .detach();
         }
-        store.update(cx, |s, cx| s.load_models_for(selected_harness, cx));
+        store.update(cx, |s, cx| s.load_models_for(selected_harness, false, cx));
         page
     }
 
@@ -585,7 +585,7 @@ impl SettingsPage {
                 }
             }
             if effects.models {
-                store.load_models_for(after.warp_agent.harness.clone(), cx);
+                store.load_models_for(after.warp_agent.harness.clone(), false, cx);
             }
             cx.notify();
         });
@@ -681,7 +681,16 @@ impl Render for SettingsPage {
                     .text_color(theme::text())
                     .child("Settings"),
             )
-            .child(rows);
+            // eight sections do not fit a short window; the selected section
+            // must stay reachable instead of being clipped by the pane
+            .child(
+                div()
+                    .id("settings-sections-scroll")
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_y_scroll()
+                    .child(rows),
+            );
 
         let (title, hint) = SECTIONS
             .iter()
@@ -953,16 +962,6 @@ impl SettingsPage {
                     "Text size",
                     "Also shared by every app",
                     warpui_kit_core::text_size_control(),
-                    rows.is_empty(),
-                ));
-                rows.push(kit_settings::row_with_desc(
-                    "settings-row-Typeface".to_string(),
-                    "Typeface",
-                    "Interface and code fonts",
-                    div()
-                        .text_size(px(theme::font_body()))
-                        .text_color(theme::text())
-                        .child("Inter + JetBrains Mono"),
                     rows.is_empty(),
                 ));
                 let reduced = self.store.read(cx).settings().general.reduce_motion;
@@ -1261,7 +1260,7 @@ impl SettingsPage {
                     "settings-row-Model".to_string(),
                     "Model",
                     div()
-                        .w(px(240.))
+                        .w(px(320.))
                         .flex_shrink_0()
                         .child(self.model_picker.clone()),
                     rows.is_empty(),
@@ -1802,7 +1801,7 @@ impl SettingsPage {
         self.variant
             .update(cx, |state, cx| state.set_value("", window, cx));
         self.store
-            .update(cx, |store, cx| store.load_models_for(harness, cx));
+            .update(cx, |store, cx| store.load_models_for(harness, false, cx));
         self.schedule_commit(cx);
         cx.notify();
     }
@@ -1926,7 +1925,7 @@ fn model_picker(
         let mut picker = FilteredPicker::new(spec, target, data, window, cx);
         picker.set_on_refresh(Box::new(move |cx| {
             let harness = refresh_scope.read(cx).harness.clone();
-            refresh_store.update(cx, |store, cx| store.load_models_for(harness, cx));
+            refresh_store.update(cx, |store, cx| store.load_models_for(harness, true, cx));
         }));
         picker.observe_entity(store, cx);
         picker.observe_entity(field, cx);
@@ -1992,6 +1991,7 @@ fn model_data(
     cx: &gpui::App,
 ) -> PickerData {
     let harness = scope.read(cx).harness.clone();
+    let refreshing = store.read(cx).models_refresh_requested.as_deref() == Some(harness.as_str());
     let selected = field.read(cx).value().trim().to_string();
     let filter = filter.to_lowercase();
     let mut models: Vec<String> = store
@@ -2066,6 +2066,7 @@ fn model_data(
         fonts: theme::active_tokens(),
         accent: theme::blue_bright(),
         show_tooltips: store.read(cx).settings().general.show_tooltips,
+        refreshing,
     }
 }
 
@@ -2142,6 +2143,7 @@ fn variant_data(
         fonts: theme::active_tokens(),
         accent: theme::blue_bright(),
         show_tooltips: store.read(cx).settings().general.show_tooltips,
+        refreshing: false,
     }
 }
 

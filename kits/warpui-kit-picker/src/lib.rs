@@ -146,6 +146,9 @@ pub struct PickerData {
     pub fonts: FontTokens,
     pub accent: gpui::Rgba,
     pub show_tooltips: bool,
+    /// True while the picker's refresh action is in flight. The refresh
+    /// button spins and ignores further clicks until the source clears it.
+    pub refreshing: bool,
 }
 
 /// Re-read on every render with the current filter string. The window rides
@@ -263,6 +266,10 @@ pub struct FilteredPicker {
     on_trailing: Option<TrailingFn>,
     filter: Entity<InputState>,
     open: bool,
+    /// The host switched this slot off (a value an adjacent toggle owns): the
+    /// trigger keeps its shape but dims, and a click does not open the list
+    /// until the host switches it back on.
+    disabled: bool,
     /// The field slot's trigger bounds, written from prepaint and read when
     /// the floating panel opens. It lives on the entity because a fresh
     /// `Cell` per render would always be empty.
@@ -294,6 +301,7 @@ impl FilteredPicker {
             on_trailing: None,
             filter,
             open,
+            disabled: false,
             trigger_bounds: Rc::new(Cell::new(None)),
             composer_placement: Rc::new(Cell::new(None)),
             _subscriptions: vec![sub_filter],
@@ -385,6 +393,9 @@ impl FilteredPicker {
     }
 
     pub fn set_open(&mut self, open: bool, window: &mut Window, cx: &mut Context<Self>) {
+        if self.disabled && open {
+            return;
+        }
         if open && !self.open {
             self.filter.update(cx, |state, cx| {
                 state.set_value("", window, cx);
@@ -392,6 +403,22 @@ impl FilteredPicker {
             });
         }
         self.open = open;
+        cx.notify();
+    }
+
+    /// Switches the trigger off without discarding its data: a disabled
+    /// trigger dims, refuses to open, and closes a list already showing.
+    pub fn set_disabled(&mut self, disabled: bool, cx: &mut Context<Self>) {
+        if self.disabled == disabled {
+            return;
+        }
+        self.disabled = disabled;
+        if disabled && self.open {
+            self.open = false;
+            if let Some(close) = &self.on_dismiss {
+                close(cx);
+            }
+        }
         cx.notify();
     }
 
@@ -692,6 +719,7 @@ impl FilteredPicker {
             .flex_1()
             .min_w_0()
             .cursor_pointer()
+            .when(self.disabled, |trigger| trigger.cursor_default())
             .when_some(self.spec.trigger_min_h, |t, min_h| t.min_h(px(min_h)))
             .when(self.spec.trigger_rounded_lg, |t| t.rounded_lg())
             .when(!self.spec.trigger_rounded_lg, |t| t.rounded_md())
@@ -707,7 +735,10 @@ impl FilteredPicker {
             .flex()
             .items_center()
             .gap_2()
-            .hover(|s| s.border_color(palette::text_muted()));
+            .when(!self.disabled, |trigger| {
+                trigger.hover(|s| s.border_color(palette::text_muted()))
+            })
+            .when(self.disabled, |trigger| trigger.opacity(0.45));
         if self.spec.stop_trigger_mousedown {
             trigger = trigger.on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation());
         }
@@ -766,13 +797,19 @@ impl FilteredPicker {
         cx: &mut Context<Self>,
     ) -> gpui::Stateful<gpui::Div> {
         let fonts = data.fonts;
+        let refreshing = data.refreshing;
+        let selector = format!("picker-refresh-{}", self.spec.key);
+        let debug_selector = selector.clone();
+        let label = if refreshing {
+            "Refreshing models"
+        } else {
+            self.spec.refresh_label
+        };
         div()
-            .id(SharedString::from(format!(
-                "picker-refresh-{}",
-                self.spec.key
-            )))
-            .a11y_button(self.spec.refresh_label)
-            .cursor_pointer()
+            .id(SharedString::from(selector))
+            .debug_selector(move || debug_selector.clone())
+            .a11y_button(label)
+            .when(!refreshing, |button| button.cursor_pointer())
             .rounded_md()
             .px_2()
             .py_1()
@@ -782,18 +819,33 @@ impl FilteredPicker {
             .text_color(palette::text_muted())
             .border_1()
             .border_color(palette::hairline())
-            .hover(|s| s.bg(palette::HOVER))
-            .on_click(cx.listener(|this, _, _, cx| {
+            .when(!refreshing, |button| button.hover(|s| s.bg(palette::HOVER)))
+            .on_click(cx.listener(move |this, _, _, cx| {
+                // a second click while the first is in flight would queue a
+                // duplicate backend read
+                if refreshing {
+                    return;
+                }
                 if let Some(on_refresh) = &this.on_refresh {
                     on_refresh(cx);
                     cx.notify();
                 }
             }))
-            .child(warpui_kit_core::icon(
-                self.spec.icons.refresh,
-                px(fonts.icon_small),
-                palette::text_muted(),
-            ))
+            .child(if refreshing {
+                warpui_kit_core::motion::spinner(
+                    SharedString::from(format!("picker-refresh-spin-{}", self.spec.key)),
+                    self.spec.icons.refresh,
+                    px(fonts.icon_small),
+                    palette::text_muted(),
+                )
+            } else {
+                warpui_kit_core::icon(
+                    self.spec.icons.refresh,
+                    px(fonts.icon_small),
+                    palette::text_muted(),
+                )
+                .into_any_element()
+            })
     }
 
     fn build_trigger_row(&self, data: &PickerData, cx: &mut Context<Self>) -> gpui::AnyElement {

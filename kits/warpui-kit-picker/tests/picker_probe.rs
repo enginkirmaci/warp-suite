@@ -3,6 +3,8 @@
 //! composer overlay renders its catcher and routes pick + dismissal through
 //! the owner's closures.
 
+use std::cell::Cell;
+use std::rc::Rc;
 use std::sync::Arc;
 
 use gpui::prelude::*;
@@ -78,6 +80,7 @@ fn data(_filter: &str, _window: &Window, _cx: &App) -> PickerData {
         fonts,
         accent: palette::accent(),
         show_tooltips: false,
+        refreshing: false,
     }
 }
 
@@ -489,5 +492,98 @@ fn composer_escape_dismisses(cx: &mut TestAppContext) {
         *dismissals.lock().unwrap(),
         1,
         "Escape dismisses the composer popup through the owner"
+    );
+}
+
+/// A refresh in flight turns the button into a spinner and swallows the
+/// second click; a parked spinner must not let a bulk refresh be queued twice.
+#[gpui_kit::gpui::test]
+fn a_refreshing_picker_ignores_its_refresh_button(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+    let refreshing = Rc::new(Cell::new(true));
+    let calls = Rc::new(Cell::new(0usize));
+    let refreshing_in = refreshing.clone();
+    let calls_in = calls.clone();
+
+    let (_handle, cx) = cx.add_window_view(move |window, cx| {
+        let field = cx.new(|cx| InputState::new(window, cx).placeholder("target"));
+        let mut spec = spec(false, OverlayAnchor::Rail);
+        spec.refresh = true;
+        let data_refreshing = refreshing_in.clone();
+        let calls = calls_in.clone();
+        let picker = cx.new(|cx| {
+            let mut picker = FilteredPicker::new(
+                spec,
+                PickerTarget::Field(field.clone()),
+                Box::new(move |filter, window, cx| {
+                    let mut data = data(filter, window, cx);
+                    data.refreshing = data_refreshing.get();
+                    data
+                }),
+                window,
+                cx,
+            );
+            picker.set_on_refresh(Box::new(move |_| {
+                calls.set(calls.get() + 1);
+            }));
+            picker
+        });
+        Host { field, picker }
+    });
+    cx.run_until_parked();
+    cx.update(|window, cx| drop(window.draw(cx)));
+    assert!(
+        cx.debug_bounds("picker-refresh-test").is_some(),
+        "the refresh button renders beside the trigger"
+    );
+
+    click(cx, "picker-refresh-test");
+    assert_eq!(calls.get(), 0, "a spinning refresh swallows the click");
+
+    refreshing.set(false);
+    cx.update(|window, cx| drop(window.draw(cx)));
+    click(cx, "picker-refresh-test");
+    assert_eq!(calls.get(), 1, "a parked refresh button fires again");
+}
+
+/// A slot whose value an adjacent toggle owns refuses to open, and a host
+/// that disables it while the list is showing closes the list.
+#[gpui_kit::gpui::test]
+fn a_disabled_picker_does_not_open(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+    let (handle, cx) = cx.add_window_view(|window, cx| {
+        let field = cx.new(|cx| InputState::new(window, cx).placeholder("target"));
+        let picker = cx.new(|cx| {
+            FilteredPicker::new(
+                spec(false, OverlayAnchor::Rail),
+                PickerTarget::Field(field.clone()),
+                Box::new(data),
+                window,
+                cx,
+            )
+        });
+        Host { field, picker }
+    });
+    cx.run_until_parked();
+    cx.update(|window, cx| drop(window.draw(cx)));
+    click(cx, "model-trigger-test");
+    assert!(
+        cx.debug_bounds("model-panel-test").is_some(),
+        "the enabled slot opens"
+    );
+
+    handle.update(cx, |host, cx| {
+        host.picker
+            .update(cx, |picker, cx| picker.set_disabled(true, cx));
+    });
+    cx.update(|window, cx| drop(window.draw(cx)));
+    assert!(
+        cx.debug_bounds("model-panel-test").is_none(),
+        "disabling the slot closes a list that was showing"
+    );
+    click(cx, "model-trigger-test");
+    assert!(
+        cx.debug_bounds("model-panel-test").is_none(),
+        "a disabled slot does not open"
     );
 }
