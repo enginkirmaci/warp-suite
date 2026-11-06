@@ -230,7 +230,30 @@ async fn remove_partial_clone(path: std::path::PathBuf) {
 }
 
 pub async fn fetch(folder: &Path) -> GitOutcome {
-    sync(folder, &["fetch".into(), "--prune".into()]).await
+    // the default remote only, no tags: negotiating every tag and sweeping
+    // every configured remote is the dominant per-repo cost of a fetch pass,
+    // and the ahead/behind badges track the default remote's refs alone.
+    // A folder without a resolvable remote keeps the plain fetch (its outcome
+    // is "git rejected it", which the pass logs either way).
+    sync(
+        folder,
+        &fetch_args(read::default_remote_name(folder).as_deref()),
+    )
+    .await
+}
+
+/// The background fetch pass's command line. Separated from [`fetch`] so a
+/// unit test can pin the shape a sweep sends without a git fixture.
+pub fn fetch_args(remote: Option<&str>) -> Vec<String> {
+    match remote {
+        Some(remote) => vec![
+            "fetch".into(),
+            "--prune".into(),
+            "--no-tags".into(),
+            remote.to_string(),
+        ],
+        None => vec!["fetch".into(), "--prune".into()],
+    }
 }
 
 pub async fn pull(folder: &Path) -> GitOutcome {
@@ -403,4 +426,21 @@ pub async fn commit(folder: &Path, message: &str) -> Option<String> {
 
 pub async fn revert_commit(folder: &Path, hash: &str) -> GitOutcome {
     simple(folder, &["revert".into(), "--no-edit".into(), hash.into()]).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The sweep's command line fetches the default remote only, without
+    /// tags; a folder the remote lookup cannot resolve keeps the plain
+    /// fetch — whose `git` error the pass logs.
+    #[test]
+    fn fetch_args_fetch_the_default_remote_without_tags() {
+        assert_eq!(
+            fetch_args(Some("origin")),
+            vec!["fetch", "--prune", "--no-tags", "origin"]
+        );
+        assert_eq!(fetch_args(None), vec!["fetch", "--prune"]);
+    }
 }
