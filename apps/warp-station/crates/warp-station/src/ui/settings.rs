@@ -1080,7 +1080,7 @@ impl SettingsPage {
                     "set-sync-on-focus",
                     "Sync when window activates",
                     "settings-row-Sync when window activates".to_string(),
-                    "Fetches and refreshes once on focus regain and restarts both auto timers",
+                    "Fetches only the repos five or more minutes stale on focus regain, and restarts both auto timers",
                     self.sync_on_focus,
                     rows.is_empty(),
                     cx.listener(|this, _, _, cx| {

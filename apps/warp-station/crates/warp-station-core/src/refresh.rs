@@ -8,6 +8,11 @@
 use std::future::Future;
 use std::sync::Arc;
 
+/// How many `git fetch` children a fetch pass runs at once. Fetch is
+/// network-bound (the local rescan stays on its own, faster track), so a
+/// wider fan-out shrinks the wall-clock pass without contending for cores.
+pub const FETCH_PARALLELISM: usize = 8;
+
 /// Bounded fan-out over a snapshot of the repo list — the shared pass shape:
 /// up to `max_parallelism` workers at once.
 pub async fn throttled_pass<T, F, Fut>(items: Vec<T>, max_parallelism: usize, worker: F)

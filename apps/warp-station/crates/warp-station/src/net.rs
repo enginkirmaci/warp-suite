@@ -337,10 +337,13 @@ pub enum UiEvent {
         removed: Vec<String>,
     },
     /// `after_fetch` marks the pass a FetchAll ends with, so the store can
-    /// re-read the selected repo's open workspace from the post-fetch state.
+    /// re-read the selected repo's open workspace from the post-fetch state
+    /// (one event per repo as each fetch lands). `progress` is that pass's
+    /// (done, total) for the toolbar's fetch indicator; None elsewhere.
     StatusSettled {
         probes: Vec<StatusProbe>,
         after_fetch: bool,
+        progress: Option<(u32, u32)>,
     },
     DeepScanSettled {
         root: String,
@@ -756,75 +759,80 @@ async fn background_loop(rx: Receiver<NetCommand>, evt_tx: Sender<UiEvent>) {
                 });
             }
             NetCommand::FetchAll { folders } => {
+                // each repo reports as it lands: its probe goes out the
+                // moment its fetch settles, so badges stream in instead of
+                // waiting for the whole sweep (the lane order still puts
+                // this pass behind the scan the refresh queued first)
+                let total = folders.len() as u32;
+                let done = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
+                let evt_tx = evt_tx.clone();
                 warp_station_core::refresh::throttled_pass(
-                    folders.clone(),
-                    3,
-                    |folder| async move {
-                        let outcome = warp_station_core::git::cli::fetch(&folder).await;
-                        if !outcome.ok {
-                            tracing::warn!(
-                                "auto fetch failed in {}: {}",
-                                folder.display(),
-                                outcome.error.as_deref().unwrap_or("git rejected it")
-                            );
+                    folders,
+                    warp_station_core::refresh::FETCH_PARALLELISM,
+                    move |folder| {
+                        let done = done.clone();
+                        let evt_tx = evt_tx.clone();
+                        async move {
+                            let outcome = warp_station_core::git::cli::fetch(&folder).await;
+                            if !outcome.ok {
+                                tracing::warn!(
+                                    "auto fetch failed in {}: {}",
+                                    folder.display(),
+                                    outcome.error.as_deref().unwrap_or("git rejected it")
+                                );
+                            }
+                            // probe regardless of the fetch outcome: a failed
+                            // fetch keeps the refs it had, and the badge
+                            // should still say what they are now
+                            let probe = probe_one(&folder).await;
+                            let done = done.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+                            let _ = evt_tx.send_blocking(UiEvent::StatusSettled {
+                                probes: vec![probe],
+                                after_fetch: true,
+                                progress: Some((done, total)),
+                            });
                         }
                     },
                 )
                 .await;
-                // the settled probes refresh the ahead/behind badges through
-                // the same burst-apply the manual passes use
-                let probes = probe_pass(folders).await;
-                let _ = evt_tx.send_blocking(UiEvent::StatusSettled {
-                    probes,
-                    after_fetch: true,
-                });
             }
             NetCommand::GitHubPass { folders, gh_exe } => {
-                use std::sync::{Arc, Mutex};
-                let collected = Arc::new(Mutex::new(Vec::new()));
-                let sink = collected.clone();
                 let gh = gh_exe.clone();
+                let evt_tx = evt_tx.clone();
                 warp_station_core::refresh::throttled_pass(folders, 2, move |folder| {
-                    let sink = sink.clone();
+                    let evt_tx = evt_tx.clone();
                     let gh = gh.clone();
                     async move {
                         let snapshot = warp_station_core::github::refresh(&folder, &gh).await;
-                        sink.lock()
-                            .unwrap()
-                            .push((folder.to_string_lossy().to_string(), snapshot));
+                        // one repo at a time, so the PR counts stream in as
+                        // their `gh` calls land
+                        let _ = evt_tx.send_blocking(UiEvent::GitHubSettled {
+                            items: vec![(folder.to_string_lossy().to_string(), snapshot)],
+                        });
                     }
                 })
                 .await;
-                let items = Arc::try_unwrap(collected)
-                    .map(|m| m.into_inner().unwrap())
-                    .unwrap_or_default();
-                let _ = evt_tx.send_blocking(UiEvent::GitHubSettled { items });
             }
             NetCommand::AzurePass {
                 folders,
                 pat,
                 custom_base,
             } => {
-                use std::sync::{Arc, Mutex};
-                let collected = Arc::new(Mutex::new(Vec::new()));
-                let sink = collected.clone();
+                let evt_tx = evt_tx.clone();
                 warp_station_core::refresh::throttled_pass(folders, 2, move |folder| {
-                    let sink = sink.clone();
+                    let evt_tx = evt_tx.clone();
                     let pat = pat.clone();
                     let custom_base = custom_base.clone();
                     async move {
                         let snapshot =
                             warp_station_core::azure::refresh(&folder, &pat, &custom_base).await;
-                        sink.lock()
-                            .unwrap()
-                            .push((folder.to_string_lossy().to_string(), snapshot));
+                        // streamed per repo like the GitHub pass
+                        let _ = evt_tx.send_blocking(UiEvent::AzureSettled {
+                            items: vec![(folder.to_string_lossy().to_string(), snapshot)],
+                        });
                     }
                 })
                 .await;
-                let items = Arc::try_unwrap(collected)
-                    .map(|m| m.into_inner().unwrap())
-                    .unwrap_or_default();
-                let _ = evt_tx.send_blocking(UiEvent::AzureSettled { items });
             }
             _ => {}
         }
@@ -912,6 +920,7 @@ async fn net_main(cmd_rx: Receiver<NetCommand>, evt_tx: Sender<UiEvent>) {
                 let _ = evt_tx.send_blocking(UiEvent::StatusSettled {
                     probes,
                     after_fetch: false,
+                    progress: None,
                 });
             }
             NetCommand::DeepScan {
@@ -1329,6 +1338,7 @@ async fn net_main(cmd_rx: Receiver<NetCommand>, evt_tx: Sender<UiEvent>) {
                 let _ = evt_tx.send_blocking(UiEvent::StatusSettled {
                     probes: probe_pass(vec![folder]).await,
                     after_fetch: false,
+                    progress: None,
                 });
             }
         }
@@ -1521,6 +1531,35 @@ impl OutcomeExt for warp_station_core::git::cli::GitOutcome {
     }
 }
 
+/// One status probe. The per-folder core of [`probe_pass`], also called
+/// directly when a fetch pass reports its repo as each fetch lands.
+async fn probe_one(folder: &Path) -> StatusProbe {
+    let fetch_seed = repo_store::read_last_fetch_seed(folder);
+    probe_one_with_seed(folder, fetch_seed)
+}
+
+fn probe_one_with_seed(
+    folder: &Path,
+    fetch_seed: Option<chrono::DateTime<chrono::Local>>,
+) -> StatusProbe {
+    warp_station_core::git::read::probe(folder)
+        .map(|p| StatusProbe {
+            folder_path: folder.to_string_lossy().to_string(),
+            branch_name: p.branch_name,
+            modified_count: p.modified_count,
+            ahead_count: p.ahead_count,
+            behind_count: p.behind_count,
+            last_commit_at: p.last_commit_at,
+            last_fetch_at: fetch_seed,
+            has_remote: p.has_remote,
+            branch_on_remote: p.branch_on_remote,
+        })
+        .unwrap_or_else(|| StatusProbe {
+            folder_path: folder.to_string_lossy().to_string(),
+            ..Default::default()
+        })
+}
+
 /// One throttled status pass: git2 probes under a 4-way semaphore, every
 /// failure settling as a zeroed snapshot for its folder. Collected, then
 /// returned for one burst apply.
@@ -1532,23 +1571,10 @@ async fn probe_pass(folders: Vec<PathBuf>) -> Vec<StatusProbe> {
         let collected = sink.clone();
         async move {
             let fetch_seed = repo_store::read_last_fetch_seed(&folder);
-            let probe = warp_station_core::git::read::probe(&folder)
-                .map(|p| StatusProbe {
-                    folder_path: folder.to_string_lossy().to_string(),
-                    branch_name: p.branch_name,
-                    modified_count: p.modified_count,
-                    ahead_count: p.ahead_count,
-                    behind_count: p.behind_count,
-                    last_commit_at: p.last_commit_at,
-                    last_fetch_at: fetch_seed,
-                    has_remote: p.has_remote,
-                    branch_on_remote: p.branch_on_remote,
-                })
-                .unwrap_or_else(|| StatusProbe {
-                    folder_path: folder.to_string_lossy().to_string(),
-                    ..Default::default()
-                });
-            collected.lock().unwrap().push(probe);
+            collected
+                .lock()
+                .unwrap()
+                .push(probe_one_with_seed(&folder, fetch_seed));
         }
     })
     .await;

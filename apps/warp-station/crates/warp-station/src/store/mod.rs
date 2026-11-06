@@ -18,6 +18,18 @@ pub use crate::notices::{Notice, NoticeKind};
 /// How long a button holds its past tense.
 const FINISHED_HOLD: std::time::Duration = std::time::Duration::from_millis(1200);
 
+/// The dedicated GitHub/Azure activity cadence: the full-list pass that keeps
+/// the rail's PR/issue counts fresh without waiting for a user refresh (the
+/// per-refresh passes cover only the eager set below).
+const ACTIVITY_REFRESH_SECS: u64 = 15 * 60;
+/// How long a repo's GitHub/Azure snapshot stays trusted: opening the repo
+/// or a refresh's eager set re-asks once the snapshot is older.
+const ACTIVITY_TTL: std::time::Duration = std::time::Duration::from_secs(10 * 60);
+/// The focus-regain sync fetches only repos whose status is older than this:
+/// a pre-focus status younger is fresh enough to trust, and the pass stays a
+/// trickle instead of a blast.
+const FOCUS_STALE_SECS: i64 = 5 * 60;
+
 pub struct Store {
     pub net: async_channel::Sender<NetCommand>,
     settings: Arc<SettingsService>,
@@ -184,6 +196,29 @@ pub struct Store {
     /// The interval (seconds) the refresh schedule was armed with; a settings
     /// save that leaves it alone keeps the running countdown.
     auto_refresh_armed_secs: Option<u64>,
+    /// When the next full-list GitHub/Azure activity pass fires: the rail's
+    /// PR/issue counts cadence, deliberately slower than the fetch/refresh
+    /// clocks it no longer rides on. Armed by
+    /// [Self::refresh_activity_schedule], checked on the same tick.
+    pub next_activity_refresh: Option<std::time::Instant>,
+    /// The running fetch pass's streaming progress, straight from the
+    /// per-repo settle events: the Refresh button's Fetching k/n stage.
+    pub fetch_progress: Option<(u32, u32)>,
+    /// True while the running pass belongs to a user-visible refresh; the
+    /// bulk timers (auto fetch) stream their badges without touching the
+    /// button label.
+    fetch_visible: bool,
+    /// The queued fetch pass's per-folder behind counts, read at queue time:
+    /// [Self::summarize_fetch_pass] compares the final counts against this
+    /// once the pass's last repo lands.
+    fetch_baseline: Option<std::collections::HashMap<String, u32>>,
+    /// The folders the fetch pass covers for the refresh in flight: the
+    /// post-scan probe skips exactly these, since the pass re-probes each of
+    /// its own as the fetch lands.
+    fetch_probe_coverage: Option<std::collections::HashSet<String>>,
+    /// When each repo's last GitHub/Azure snapshot landed, for the open and
+    /// eager passes' freshness gate ([Self::maybe_activity_kick]).
+    activity_landed_at: std::collections::HashMap<String, std::time::Instant>,
     /// Last focus state the tick observed; None before the first observation,
     /// so a launch that starts focused does not look like a focus regain.
     window_focused: Option<bool>,
@@ -327,6 +362,12 @@ impl Store {
             auto_fetch_armed_secs: None,
             next_auto_refresh: None,
             auto_refresh_armed_secs: None,
+            next_activity_refresh: None,
+            fetch_progress: None,
+            fetch_visible: false,
+            fetch_baseline: None,
+            fetch_probe_coverage: None,
+            activity_landed_at: std::collections::HashMap::new(),
             window_focused: None,
             focus_requested: false,
             cache_generation: 0,
@@ -364,6 +405,10 @@ impl Store {
         store.reproject();
         store.arm_auto_fetch_at_launch();
         store.refresh_auto_refresh_schedule();
+        // the launch just queued the full GitHub/Azure pass below, so the
+        // activity clock starts a whole cadence out
+        store.next_activity_refresh =
+            Some(std::time::Instant::now() + std::time::Duration::from_secs(ACTIVITY_REFRESH_SECS));
 
         // Cache first for instant labels, then the session scan + a status
         // pass over whatever we know (the scan's settle re-probes the merged
@@ -495,26 +540,97 @@ impl Store {
         });
     }
 
-    /// A full refresh — the repository page's Refresh button, the auto-refresh
-    /// timer and the focus-regain sync all run this: fetch every repo with a
-    /// remote (busy folders excluded), rescan with the current settings, then
-    /// re-probe on settle. A pass also restarts both periodic clocks, since it
-    /// just did their work. While a scan is already in flight that pass is
-    /// this ask: the clocks restart, nothing is queued behind it.
+    /// A full refresh — the repository page's Refresh button and the
+    /// auto-refresh timer run this. The order is local-first: the scan (a
+    /// filesystem walk, milliseconds) refreshes the list at once, then the
+    /// much slower fetch pass rides behind it, re-probing each repo as its
+    /// own fetch lands (per-repo badges). Stale GitHub/Azure snapshots for
+    /// the eager set (favorites + the selected repo) re-ask on the side. A
+    /// pass also restarts both periodic clocks, since it just did their
+    /// work. While a scan is already in flight that pass is this ask: the
+    /// clocks restart, nothing is queued behind it.
     pub fn refresh(&mut self, cx: &mut Context<Self>) {
+        self.refresh_inner(cx, false);
+    }
+
+    /// The focus-regain form: the same local-first refresh, but only repos
+    /// whose status is older than [FOCUS_STALE_SECS] are fetched, so the
+    /// synthesis is a trickle. `last_fetch_at` unset counts as stale.
+    pub fn refresh_fetched_stale(&mut self, cx: &mut Context<Self>) {
+        self.refresh_inner(cx, true);
+    }
+
+    /// Shared body for [Self::refresh] and [Self::refresh_fetched_stale]:
+    /// scan first (local), fetch queued after it, `stale_only` shrinking the
+    /// fetch list to repos whose last fetch predates the stale window.
+    fn refresh_inner(&mut self, cx: &mut Context<Self>, stale_only: bool) {
         if self.scanning {
             self.reset_auto_schedules();
             cx.notify();
             return;
         }
         let settings = self.settings();
-        let folders = self.fetchable_folders();
-        if !folders.is_empty() {
-            let _ = self.net.send_blocking(NetCommand::FetchAll { folders });
+        let mut folders = self.fetchable_folders();
+        if stale_only {
+            let stale_at = chrono::Local::now() - chrono::Duration::seconds(FOCUS_STALE_SECS);
+            let fetched_at: std::collections::HashMap<String, chrono::DateTime<chrono::Local>> =
+                self.repos
+                    .iter()
+                    .filter_map(|repo| {
+                        repo.git_last_fetch_at
+                            .map(|at| (repo.folder_path.to_string_lossy().to_string(), at))
+                    })
+                    .collect();
+            // None = never probed with a fetch seed: count it stale
+            folders.retain(|folder| {
+                fetched_at
+                    .get(folder.to_string_lossy().as_ref())
+                    .map(|at| *at < stale_at)
+                    .unwrap_or(true)
+            });
         }
         self.kick_scan(&settings);
+        self.queue_fetch(&folders, true);
+        self.kick_eager_activity();
         self.reset_auto_schedules();
         cx.notify();
+    }
+
+    /// Queues the fetch pass and records which folders it re-probes itself,
+    /// so the scan's settle only probes the complement. An empty list is no
+    /// coverage and no pass. `visible` marks the pass user-visible: the
+    /// button label tracks k/n only then (the auto-fetch timer stays quiet).
+    fn queue_fetch(&mut self, folders: &[std::path::PathBuf], visible: bool) {
+        if folders.is_empty() {
+            self.fetch_probe_coverage = None;
+            return;
+        }
+        self.fetch_probe_coverage = Some(
+            folders
+                .iter()
+                .map(|f| f.to_string_lossy().to_string())
+                .collect(),
+        );
+        // the wake-up baseline: the behind counts the pass set out from
+        self.fetch_baseline = Some(
+            folders
+                .iter()
+                .filter_map(|folder| {
+                    self.repos
+                        .iter()
+                        .find(|repo| &repo.folder_path == folder)
+                        .map(|repo| (folder.to_string_lossy().to_string(), repo.git_to_pull_count))
+                })
+                .collect(),
+        );
+        // a new pass resets the previous one's state
+        self.fetch_visible = visible;
+        self.fetch_progress = None;
+        self.net
+            .send_blocking(NetCommand::FetchAll {
+                folders: folders.to_vec(),
+            })
+            .ok();
     }
 
     pub fn on_net_event(&mut self, event: UiEvent, cx: &mut Context<Self>) {
@@ -524,23 +640,34 @@ impl Store {
                 self.list_version += 1;
                 self.scanning = false;
                 self.reproject();
-                // statuses re-check after every rescan without coordination
+                // the fetch pass re-probes its own folders as each fetch
+                // lands, so the settle probe covers only the complement —
+                // the no-remote repos after a refresh, every repo after a
+                // scan-only kick (no fetch pass queued)
+                let coverage = self.fetch_probe_coverage.take();
                 let folders: Vec<std::path::PathBuf> = self
                     .repos
                     .iter()
                     .filter(|repo| !repo.is_archived())
                     .map(|r| r.folder_path.clone())
+                    .filter(|folder| {
+                        coverage
+                            .as_ref()
+                            .map(|cover| !cover.contains(&folder.to_string_lossy().to_string()))
+                            .unwrap_or(true)
+                    })
                     .collect();
-                let _ = self.net.send_blocking(NetCommand::ProbeAll {
-                    folders: folders.clone(),
-                });
-                self.kick_github_pass(&folders);
-                self.kick_azure_pass(&folders);
+                if !folders.is_empty() {
+                    let _ = self.net.send_blocking(NetCommand::ProbeAll { folders });
+                }
+                // the GitHub/Azure sweeps moved to the activity schedule and
+                // the eager set; a scan settling no longer sweeps the list
                 cx.notify();
             }
             UiEvent::StatusSettled {
                 probes,
                 after_fetch,
+                progress,
             } => {
                 let by_folder = self.repo_index_by_folder();
                 for probe in &probes {
@@ -554,9 +681,25 @@ impl Store {
                         repo_store::apply_status_probe(&mut self.repos[ix], probe);
                     }
                 }
-                // a fetch pass ends here: the selected repo's open workspace
-                // re-reads so the rail's file list and branches show the
-                // post-fetch state without a manual reselect
+                // a fetch pass streams one repo at a time: the settled badge
+                // goes up as each fetch lands, and the toolbar tracks k/n
+                // while the pass belongs to a user-visible refresh
+                if after_fetch && let Some((done, total)) = progress {
+                    if self.fetch_visible {
+                        self.fetch_progress = Some((done, total));
+                    }
+                    // the pass's wake-up summary is a pass aggregate: only
+                    // computed once the last repo's probe landed, compared
+                    // against the behind counts read at queue time
+                    if done >= total {
+                        self.fetch_visible = false;
+                        self.fetch_progress = None;
+                        self.summarize_fetch_pass();
+                    }
+                }
+                // a fetch pass report ends here: the selected repo's open
+                // workspace re-reads so the rail's file list and branches
+                // show the post-fetch state without a manual reselect
                 if after_fetch
                     && let Some(selected) = self.selected_repo.clone()
                     && probes.iter().any(|p| p.folder_path == selected)
@@ -628,6 +771,9 @@ impl Store {
             }
             UiEvent::AzureSettled { items } => {
                 for (folder, snapshot) in items {
+                    // the freshness gate for the eager and open passes
+                    self.activity_landed_at
+                        .insert(folder.clone(), std::time::Instant::now());
                     self.azure_by_folder.insert(folder, Arc::new(snapshot));
                 }
                 self.reproject();
@@ -636,6 +782,9 @@ impl Store {
             UiEvent::GitHubSettled { items } => {
                 let by_folder = self.repo_index_by_folder();
                 for (folder, snapshot) in items {
+                    // the freshness gate for the eager and open passes
+                    self.activity_landed_at
+                        .insert(folder.clone(), std::time::Instant::now());
                     if let Some(&ix) = by_folder.get(&folder) {
                         let entry = &mut self.repos[ix];
                         entry.github_pr_count = snapshot.pulls.len() as u32;
@@ -954,6 +1103,101 @@ impl Store {
             pat,
             custom_base: settings.repos.azure_dev_ops_url.clone(),
         });
+    }
+
+    /// The eager GitHub/Azure set of a refresh: favorites and the selected
+    /// repo, non-archived. The integration gates live in the kickers, so a
+    /// disabled column means this sends nothing.
+    fn eager_activity_folders(&self) -> Vec<std::path::PathBuf> {
+        let selected = self.selected_repo.clone();
+        self.repos
+            .iter()
+            .filter(|repo| {
+                !repo.is_archived()
+                    && (repo.is_favorite()
+                        || selected.as_deref() == Some(repo.folder_path.to_string_lossy().as_ref()))
+            })
+            .map(|repo| repo.folder_path.clone())
+            .collect()
+    }
+
+    /// Kicks the GitHub/Azure passes for `folders`, skipping the snapshots
+    /// that landed within [ACTIVITY_TTL] unless `force`. Freshness is tracked
+    /// per folder in one map for both integrations: the two sweeps answer at
+    /// the same cadence, so a shared age is honest enough.
+    fn maybe_activity_kick(&mut self, folders: &[std::path::PathBuf], force: bool) {
+        if folders.is_empty() {
+            return;
+        }
+        let now = std::time::Instant::now();
+        let due: Vec<std::path::PathBuf> = folders
+            .iter()
+            .filter(|folder| {
+                force
+                    || self
+                        .activity_landed_at
+                        .get(&folder.to_string_lossy().to_string())
+                        .map(|landed| now.duration_since(*landed) >= ACTIVITY_TTL)
+                        .unwrap_or(true)
+            })
+            .cloned()
+            .collect();
+        if due.is_empty() {
+            return;
+        }
+        self.kick_github_pass(&due);
+        self.kick_azure_pass(&due);
+    }
+
+    /// The refresh's eager activity set: favorites and the selected repo,
+    /// skipped when their snapshots are still fresh.
+    fn kick_eager_activity(&mut self) {
+        let folders = self.eager_activity_folders();
+        self.maybe_activity_kick(&folders, false);
+    }
+
+    /// A repo just opened: its GitHub/Azure snapshots re-ask when stale — the
+    /// "lazy on open" leg of the activity plan.
+    fn kick_open_activity(&mut self, folder: &str) {
+        let folders = vec![std::path::PathBuf::from(folder)];
+        self.maybe_activity_kick(&folders, false);
+    }
+
+    /// The activity clock: a slower, dedicated cadence for the full-list
+    /// GitHub/Azure sweeps (non-archived) that keep the rail's PR/issue
+    /// counts fresh independently of the per-refresh eager set. The launch
+    /// arm sits a whole cadence out — the startup queues the full pass.
+    pub fn refresh_activity_schedule(&mut self) {
+        self.next_activity_refresh =
+            Some(std::time::Instant::now() + std::time::Duration::from_secs(ACTIVITY_REFRESH_SECS));
+    }
+
+    /// The tick's activity check: when due, run the full-list GitHub/Azure
+    /// passes and re-arm a whole cadence out. The first scan and status pass
+    /// must land first (the same hold the auto fetch uses; an empty list has
+    /// nothing to sweep).
+    pub fn check_activity_refresh(&mut self, cx: &mut Context<Self>) {
+        let Some(due) = self.next_activity_refresh else {
+            return;
+        };
+        if std::time::Instant::now() < due {
+            return;
+        }
+        if self.repos.is_empty() || self.repos.iter().all(|repo| !repo.git_status_loaded) {
+            return;
+        }
+        let folders: Vec<std::path::PathBuf> = self
+            .repos
+            .iter()
+            .filter(|repo| !repo.is_archived())
+            .map(|r| r.folder_path.clone())
+            .collect();
+        if !folders.is_empty() {
+            self.kick_github_pass(&folders);
+            self.kick_azure_pass(&folders);
+        }
+        self.refresh_activity_schedule();
+        cx.notify();
     }
 
     /// Resolves the warp-agent binary when the AI surface is enabled; None =
@@ -1325,6 +1569,77 @@ impl Store {
         }
     }
 
+    /// The pass's result → the desktop: names what came down only when the
+    /// pass actually pushed something further behind, and lets the settings
+    /// and the dedup window answer whether the desktop should ring at all.
+    /// The wake-up aggregate of a finished fetch pass, desktop-only: repos
+    /// that went further behind than [Self::queue_fetch] found them, in list
+    /// order. The per-repo settle events arrive one at a time, so the
+    /// summary waits for the pass's last repo and reads the final counts
+    /// against the queued baseline. Nothing went further behind → no toast,
+    /// so a quiet remote pings once, a busy one once per change.
+    fn summarize_fetch_pass(&mut self) {
+        let Some(baseline) = self.fetch_baseline.take() else {
+            return;
+        };
+        if let Some(text) = self.fetch_summary_text(&baseline) {
+            self.notify_fetch_summary(text);
+        }
+    }
+
+    /// The pass's text: repos whose behind count now exceeds the queued
+    /// baseline, named in list order. Archived repos stay out even when a
+    /// user archived one mid-pass — their folder can be in the queued
+    /// baseline, and a folder the desktop sees as hibernating has no wake-up.
+    fn fetch_summary_text(
+        &self,
+        previous: &std::collections::HashMap<String, u32>,
+    ) -> Option<String> {
+        let changed: Vec<(&RepoEntry, u32)> = self
+            .repos
+            .iter()
+            .filter_map(|entry| {
+                let before = previous.get(entry.folder_path.to_string_lossy().as_ref())?;
+                let behind = entry.git_to_pull_count;
+                let moved_further = !entry.is_archived() && behind > 0 && behind > *before;
+                moved_further.then_some((entry, behind))
+            })
+            .collect();
+        match changed.len() {
+            0 => None,
+            1 => {
+                let (entry, behind) = changed[0];
+                Some(format!(
+                    "{} is {} commit{} behind",
+                    entry.name,
+                    behind,
+                    if behind == 1 { "" } else { "s" }
+                ))
+            }
+            _ => {
+                let names = changed
+                    .iter()
+                    .map(|(entry, behind)| format!("{} ({})", entry.name, behind))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                Some(format!("{} repos behind: {names}", changed.len()))
+            }
+        }
+    }
+
+    /// The auto-fetch pass's aggregate, desktop-only: the store's background
+    /// events are silent in-app (their results land in the repos list, visible
+    /// on return), so the service gets no toast to mirror and routes straight
+    /// to the desktop gate — same unfocused rule, same dedup as everything
+    /// else.
+    pub fn notify_fetch_summary(&mut self, text: impl Into<String>) {
+        let settings = self.settings().notifications;
+        let focused = self.window_focused;
+        if let Some(desktop) = self.notices.push_desktop_only(text, focused, &settings) {
+            notices::publish_desktop(desktop);
+        }
+    }
+
     // ---- periodic fetch and refresh -----------------------------------------
 
     /// The effective auto-fetch interval in seconds:
@@ -1475,7 +1790,7 @@ impl Store {
             self.auto_fetch_armed_secs = None;
         }
         if !folders.is_empty() {
-            let _ = self.net.send_blocking(NetCommand::FetchAll { folders });
+            self.queue_fetch(&folders, false);
         }
     }
 
@@ -1542,10 +1857,11 @@ impl Store {
     }
 
     /// One focus edge, fed by [Self::check_focus_sync]: regaining focus after
-    /// the app was unfocused runs one full refresh (fetch + rescan + probe)
-    /// when `SyncOnFocus` is on, then restarts both periodic clocks. The first
-    /// observation only primes the edge, so a launch that starts focused does
-    /// not duplicate the startup pass.
+    /// the app was unfocused runs the local-first refresh, fetching only the
+    /// repos whose status is stale ([FOCUS_STALE_SECS]) when `SyncOnFocus` is
+    /// on, then restarts both periodic clocks. The first observation only
+    /// primes the edge, so a launch that starts focused does not duplicate
+    /// the startup pass.
     pub fn on_focus_changed(&mut self, focused: bool, cx: &mut Context<Self>) {
         let was = self.window_focused.replace(focused);
         let Some(was) = was else {
@@ -1557,8 +1873,9 @@ impl Store {
         if !self.settings().repos.sync_on_focus.unwrap_or(false) {
             return;
         }
-        // refresh() restarts both clocks; an in-flight scan counts as the sync
-        self.refresh(cx);
+        // the stale-first shrink keeps the pass a trickle; refresh_inner
+        // restarts both clocks, and an in-flight scan counts as the sync
+        self.refresh_fetched_stale(cx);
     }
 
     /// The tick's focus poll: [Self::on_focus_changed] with the live window
@@ -1695,6 +2012,9 @@ impl Store {
         self.persist_selection_soon(Some(folder.to_string()), cx);
         self.reset_repo_workspace();
         self.load_repo_workspace(folder);
+        // the just-opened repo's GitHub/Azure snapshots re-ask once stale —
+        // the rail's counts for it may date back an activity cadence
+        self.kick_open_activity(folder);
         cx.notify();
     }
 
@@ -2132,7 +2452,26 @@ impl Store {
         if self.wand_busy.is_some() {
             return Some("Generating".to_string());
         }
-        self.scanning.then(|| "Refreshing".to_string())
+        if self.scanning {
+            return Some("Refreshing".to_string());
+        }
+        // the user-visible fetch pass streams k/n after the scan settles
+        self.fetch_progress
+            .map(|(done, total)| format!("Fetching {done}/{total}"))
+    }
+
+    /// The repository page's Refresh button state: "Refreshing" while the
+    /// scan runs, then "Fetching k/n" while the pass drains (per repo, as
+    /// each fetch lands), then the resting label. The counter never sleeps
+    /// on a bulk timer pass — those are silent.
+    pub fn refresh_label(&self) -> String {
+        if self.scanning {
+            "Refreshing".to_string()
+        } else if let Some((done, total)) = self.fetch_progress {
+            format!("Fetching {done}/{total}")
+        } else {
+            "Refresh".to_string()
+        }
     }
 
     /// Takes a pending "bring the window forward" request from the
@@ -2844,6 +3183,129 @@ mod tests {
         store.focus_requested = true;
         assert!(store.take_focus_request());
         assert!(!store.take_focus_request(), "the request is one-shot");
+        let _ = std::fs::remove_file(&scratch);
+    }
+
+    /// The fetch summary's wake-up math over the store's real shape: queue
+    /// (a baseline read) → probe apply → text. Only repos this pass pushed
+    /// further behind are named — a remote that did not move, or one that
+    /// stayed behind by the count the pass already knew, stays silent (a
+    /// quiet remote must not ring the desktop every interval).
+    #[test]
+    fn the_fetch_summary_names_only_what_got_further_behind() {
+        let (tx, _rx) = async_channel::unbounded();
+        let scratch = std::env::temp_dir().join(format!(
+            "warp-station-fetch-summary-{}.json",
+            std::process::id()
+        ));
+        std::fs::write(&scratch, "{}").expect("scratch settings");
+        let mut store = Store::with_settings(tx, Arc::new(SettingsService::at(scratch.clone())));
+
+        let entry = |name: &str, folder: &str, behind: u32| repo_store::RepoEntry {
+            name: name.into(),
+            folder_path: std::path::PathBuf::from(folder),
+            solution_path: None,
+            tags: Vec::new(),
+            git_branch_name: None,
+            git_modified_count: 0,
+            git_to_push_count: 0,
+            git_to_pull_count: behind,
+            git_last_commit_at: None,
+            git_last_fetch_at: None,
+            git_has_remote: true,
+            git_branch_published: true,
+            git_status_loaded: true,
+            github_pr_count: 0,
+            github_issue_count: 0,
+        };
+        store.repos = vec![
+            entry("alpha", "/probe/alpha", 0),
+            entry("bend", "/probe/bend", 1),
+        ];
+        let by_folder = std::collections::HashMap::from([
+            ("/probe/alpha".to_string(), 0usize),
+            ("/probe/bend".to_string(), 1usize),
+        ]);
+        let probe = |folder: &str, behind: u32| repo_store::StatusProbe {
+            folder_path: folder.into(),
+            behind_count: behind,
+            has_remote: true,
+            ..Default::default()
+        };
+        let apply = |store: &mut Store, probes: &[repo_store::StatusProbe]| {
+            for probe in probes {
+                if let Some(&ix) = by_folder.get(&probe.folder_path) {
+                    repo_store::apply_status_probe(&mut store.repos[ix], probe);
+                }
+            }
+        };
+        // the queue-time baseline the pass sets out from (the queue captures
+        // it itself; the test reads the same pre-pass counts to hand over)
+        let baseline_for = |store: &Store, folders: &[&str]| {
+            folders
+                .iter()
+                .filter_map(|folder| {
+                    store.repos.iter().find_map(|entry| {
+                        (entry.folder_path == std::path::PathBuf::from(folder))
+                            .then(|| (folder.to_string(), entry.git_to_pull_count))
+                    })
+                })
+                .collect::<std::collections::HashMap<String, u32>>()
+        };
+
+        // pass one: alpha fell 2 behind, bend's count sits where it was
+        let probes = vec![probe("/probe/alpha", 2), probe("/probe/bend", 1)];
+        let previous = baseline_for(&store, &["/probe/alpha", "/probe/bend"]);
+        apply(&mut store, &probes);
+        assert_eq!(
+            store.fetch_summary_text(&previous),
+            Some("alpha is 2 commits behind".into()),
+            "one repo moved: the summary names it alone"
+        );
+
+        // pass two: nothing moved further; the same counts must stay silent
+        // even though bend is still 1 behind the remote
+        let before = baseline_for(&store, &["/probe/alpha", "/probe/bend"]);
+        assert_eq!(
+            store.fetch_summary_text(&before),
+            None,
+            "a quiet pass repeats nothing, whatever the standing behind counts"
+        );
+
+        // pass three: bend also catches new commits — both names, in list order
+        let probes = vec![probe("/probe/alpha", 4), probe("/probe/bend", 3)];
+        let previous = baseline_for(&store, &["/probe/alpha", "/probe/bend"]);
+        apply(&mut store, &probes);
+        assert_eq!(
+            store.fetch_summary_text(&previous),
+            Some("2 repos behind: alpha (4), bend (3)".into())
+        );
+
+        // archived repos never make the summary, even when the pass queued
+        // before they were archived: the ghost folder stays in the baseline,
+        // and the pass's probe finds it two behind against a one-behind queue
+        let mut archived = entry("ghost", "/probe/ghost", 1);
+        archived.tags = vec![repo_store::ARCHIVED_TAG.into()];
+        store.repos.push(archived);
+        let previous: std::collections::HashMap<String, u32> = std::collections::HashMap::from([
+            ("/probe/alpha".to_string(), 4u32),
+            ("/probe/bend".to_string(), 3u32),
+            ("/probe/ghost".to_string(), 1u32),
+        ]);
+        let probe = probe("/probe/ghost", 2);
+        let ghost_ix = store
+            .repos
+            .iter()
+            .position(|entry| entry.name == "ghost")
+            .expect("the ghost entry is in the list for this scenario");
+        repo_store::apply_status_probe(&mut store.repos[ghost_ix], &probe);
+        // the archived entry read back: named in the list, behind 2 now
+        assert_eq!(store.repos[ghost_ix].git_to_pull_count, 2);
+        assert_eq!(
+            store.fetch_summary_text(&previous),
+            None,
+            "an archived repo alone never rings the desktop, whatever it fell behind by"
+        );
         let _ = std::fs::remove_file(&scratch);
     }
 

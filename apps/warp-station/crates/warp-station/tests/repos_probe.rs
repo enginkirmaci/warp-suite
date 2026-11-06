@@ -998,11 +998,12 @@ fn auto_refresh_runs_the_refresh_button_and_reschedules(cx: &mut TestAppContext)
     let _ = std::fs::remove_file(&scratch);
 }
 
-/// The Refresh button is a full sync: it fetches the remote repos first, then
-/// rescans, and restarts both periodic clocks so the next automatic pass is a
-/// full interval out.
+/// The Refresh button is local-first: it rescans (a filesystem walk, fast)
+/// before anything network-bound, then queues the fetch pass behind it, and
+/// restarts both periodic clocks so the next automatic pass is a full
+/// interval out.
 #[gpui::test]
-fn refresh_fetches_rescans_and_restarts_both_timers(cx: &mut TestAppContext) {
+fn refresh_rescans_first_fetches_second_and_restarts_both_timers(cx: &mut TestAppContext) {
     use warp_station::net::NetCommand;
 
     let _env_turn = AUTO_FETCH_ENV.lock().unwrap_or_else(|e| e.into_inner());
@@ -1043,20 +1044,26 @@ fn refresh_fetches_rescans_and_restarts_both_timers(cx: &mut TestAppContext) {
     cx.update_entity(&store, |s: &mut Store, cx| s.refresh(cx));
 
     let mut fetched: Option<Vec<PathBuf>> = None;
-    let mut scans = 0;
+    let mut scan_index: Option<usize> = None;
+    let mut send_index = 0;
     while let Ok(command) = net_rx.try_recv() {
         match command {
             NetCommand::FetchAll { folders } => fetched = Some(folders),
-            NetCommand::Scan { .. } => scans += 1,
+            NetCommand::Scan { .. } => scan_index = Some(send_index),
             _ => {}
         }
+        send_index += 1;
     }
+    let scan_index = scan_index.expect("refresh rescans");
     assert_eq!(
-        fetched.expect("refresh fetches first"),
+        fetched.expect("refresh fetches the remote repos"),
         vec![PathBuf::from("/probe/alpha")],
         "only the repos with a remote are fetched"
     );
-    assert_eq!(scans, 1, "then the repository page's rescan");
+    assert_eq!(
+        scan_index, 0,
+        "the scan goes out first: the local refresh never waits for the network"
+    );
     cx.read_entity(&store, |s, _| {
         assert!(s.scanning, "the toolbar shows Refreshing");
         assert!(
@@ -1073,9 +1080,10 @@ fn refresh_fetches_rescans_and_restarts_both_timers(cx: &mut TestAppContext) {
 }
 
 /// The focus-regain sync: the first observation primes the edge (a focused
-/// launch must not double the startup pass), a later focus regain runs one
-/// full fetch + refresh and restarts both clocks; a pass already in flight
-/// only restarts the clocks, and the switch being off sends nothing.
+/// launch must not double the startup pass), a later focus regain runs the
+/// local-first refresh but fetches only the repos whose status is stale,
+/// restarting both clocks; a pass already in flight only restarts the
+/// clocks, and the switch being off sends nothing.
 #[gpui::test]
 fn focus_regain_syncs_once_and_restarts_both_timers(cx: &mut TestAppContext) {
     use warp_station::net::NetCommand;
@@ -1144,7 +1152,7 @@ fn focus_regain_syncs_once_and_restarts_both_timers(cx: &mut TestAppContext) {
         );
     });
 
-    // the normal edge: fetch + refresh once, both clocks restarted
+    // the normal edge: rescan + one stale fetch, both clocks restarted
     cx.update_entity(&store, |s: &mut Store, _| s.scanning = false);
     cx.update_entity(&store, |s: &mut Store, cx| s.on_focus_changed(false, cx));
     cx.update_entity(&store, |s: &mut Store, cx| s.on_focus_changed(true, cx));
@@ -1160,7 +1168,7 @@ fn focus_regain_syncs_once_and_restarts_both_timers(cx: &mut TestAppContext) {
     assert_eq!(
         fetched.expect("the focus regain fetches"),
         vec![PathBuf::from("/probe/alpha")],
-        "only the repos with a remote are fetched"
+        "never-fetched repos count as stale"
     );
     assert_eq!(scans, 1, "and rescans once");
     cx.read_entity(&store, |s, _| {
@@ -1173,6 +1181,26 @@ fn focus_regain_syncs_once_and_restarts_both_timers(cx: &mut TestAppContext) {
         );
     });
 
+    // a fresh pre-focus status is trusted: two minutes old stays short of
+    // the stale window, so the focus regain scans but sends no fetch or
+    // activity pass
+    cx.update_entity(&store, |s, _| {
+        s.repos[0].git_last_fetch_at = Some(chrono::Local::now() - chrono::Duration::seconds(120));
+    });
+    cx.update_entity(&store, |s: &mut Store, cx| s.on_focus_changed(false, cx));
+    cx.update_entity(&store, |s: &mut Store, cx| s.on_focus_changed(true, cx));
+    while let Ok(command) = net_rx.try_recv() {
+        assert!(
+            !matches!(
+                command,
+                NetCommand::FetchAll { .. }
+                    | NetCommand::GitHubPass { .. }
+                    | NetCommand::AzurePass { .. }
+            ),
+            "a fresh repo keeps the focus pass to a scan"
+        );
+    }
+
     // switch off: a focus regain sends nothing
     cx.update_entity(&store, |s: &mut Store, _| {
         s.update_settings(|settings| settings.repos.sync_on_focus = None);
@@ -1180,6 +1208,297 @@ fn focus_regain_syncs_once_and_restarts_both_timers(cx: &mut TestAppContext) {
     cx.update_entity(&store, |s: &mut Store, cx| s.on_focus_changed(false, cx));
     cx.update_entity(&store, |s: &mut Store, cx| s.on_focus_changed(true, cx));
     assert!(!drained_a_sync(&net_rx), "the switch is off");
+
+    let _ = std::fs::remove_file(&scratch);
+}
+
+/// Opens a fake `gh` executable so the pass kickers resolve deterministically
+/// (the real `gh` on PATH would leak in through the same code path).
+fn fake_gh_executable(tag: &str) -> PathBuf {
+    let path =
+        std::env::temp_dir().join(format!("warp-station-fake-gh-{tag}-{}", std::process::id()));
+    std::fs::write(&path, b"").expect("scratch gh");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+    }
+    path
+}
+
+/// The GitHub/Azure activity schedule: when due it sweeps the live list —
+/// every remote-relevant non-archived repo, archived rows stay out — then
+/// re-arms the cadence; with either integration switched off, nothing goes
+/// out at all.
+#[gpui::test]
+fn activity_passes_sweep_the_live_list_and_skip_archived(cx: &mut TestAppContext) {
+    use warp_station::net::NetCommand;
+
+    let _env_turn = AUTO_FETCH_ENV.lock().unwrap_or_else(|e| e.into_inner());
+    cx.update(gpui_kit::init);
+    scratch_home();
+
+    let gh = fake_gh_executable("activity");
+    let scratch = std::env::temp_dir().join(format!(
+        "warp-station-activity-probe-{}.json",
+        std::process::id()
+    ));
+    std::fs::write(
+        &scratch,
+        format!(
+            r#"{{"Repos": {{ "GitHubExecutable": "{}", "AzureDevOpsPat": "pat" }}, "Notifications": {{ "Enabled": false }}}}"#,
+            gh.display()
+        ),
+    )
+    .expect("scratch settings");
+
+    let (net_tx, net_rx) = async_channel::unbounded();
+    let store = cx.new(|_cx| {
+        let mut store = Store::with_settings(
+            net_tx,
+            std::sync::Arc::new(warp_station_core::settings::SettingsService::at(
+                scratch.clone(),
+            )),
+        );
+        store.replace_repos(vec![
+            entry("alpha", "/probe/alpha", &[]),
+            entry("beta", "/probe/beta", &["archived"]),
+        ]);
+        // a pass due right now on the next tick
+        store.next_activity_refresh =
+            Some(std::time::Instant::now() - std::time::Duration::from_secs(1));
+        store
+    });
+    // the constructor's own startup scan and full activity pass are in flight
+    while net_rx.try_recv().is_ok() {}
+
+    cx.update_entity(&store, |s: &mut Store, cx| s.check_activity_refresh(cx));
+
+    let mut github_folders: Option<Vec<PathBuf>> = None;
+    let mut azure_folders: Option<Vec<PathBuf>> = None;
+    while let Ok(command) = net_rx.try_recv() {
+        match command {
+            NetCommand::GitHubPass { folders, .. } => github_folders = Some(folders),
+            NetCommand::AzurePass { folders, .. } => azure_folders = Some(folders),
+            _ => {}
+        }
+    }
+    let live = vec![PathBuf::from("/probe/alpha")];
+    assert_eq!(
+        github_folders.expect("the GitHub sweep fires when enabled"),
+        live,
+        "the activity sweep covers the live repos only"
+    );
+    assert_eq!(
+        azure_folders.expect("the Azure sweep fires when enabled"),
+        live,
+        "the activity sweep covers the live repos only"
+    );
+    cx.read_entity(&store, |s, _| {
+        assert!(
+            s.next_activity_refresh.expect("each fire re-arms") > std::time::Instant::now(),
+            "the activity clock re-arms a cadence out"
+        );
+    });
+
+    // an integration switched off sends nothing, even due
+    cx.update_entity(&store, |s: &mut Store, _| {
+        s.update_settings(|settings| {
+            settings.repos.enable_git_hub = false;
+            settings.repos.enable_azure_dev_ops = false;
+        });
+        s.next_activity_refresh =
+            Some(std::time::Instant::now() - std::time::Duration::from_secs(1));
+    });
+    cx.update_entity(&store, |s: &mut Store, cx| s.check_activity_refresh(cx));
+    while let Ok(command) = net_rx.try_recv() {
+        assert!(
+            !matches!(
+                command,
+                NetCommand::GitHubPass { .. } | NetCommand::AzurePass { .. }
+            ),
+            "disabled integrations never queue an activity pass"
+        );
+    }
+    cx.read_entity(&store, |s, _| {
+        assert!(
+            s.next_activity_refresh.expect("the clock re-arms anyway") > std::time::Instant::now(),
+        );
+    });
+
+    let _ = std::fs::remove_file(&scratch);
+    let _ = std::fs::remove_file(&gh);
+}
+
+/// A refresh's eager GitHub/Azure set: favorites and the selected repo, the
+/// archived tagged rows excluded; disabled integrations keep the eager set
+/// silent too.
+#[gpui::test]
+fn refresh_kicks_the_eager_github_and_azure_set_only(cx: &mut TestAppContext) {
+    use warp_station::net::NetCommand;
+
+    let _env_turn = AUTO_FETCH_ENV.lock().unwrap_or_else(|e| e.into_inner());
+    cx.update(gpui_kit::init);
+    scratch_home();
+
+    let gh = fake_gh_executable("eager");
+    let scratch = std::env::temp_dir().join(format!(
+        "warp-station-eager-probe-{}.json",
+        std::process::id()
+    ));
+    std::fs::write(
+        &scratch,
+        format!(
+            r#"{{"Repos": {{ "GitHubExecutable": "{}", "AzureDevOpsPat": "pat" }}, "Notifications": {{ "Enabled": false }}}}"#,
+            gh.display()
+        ),
+    )
+    .expect("scratch settings");
+
+    let (net_tx, net_rx) = async_channel::unbounded();
+    let store = cx.new(|_cx| {
+        let mut store = Store::with_settings(
+            net_tx,
+            std::sync::Arc::new(warp_station_core::settings::SettingsService::at(
+                scratch.clone(),
+            )),
+        );
+        store.replace_repos(vec![
+            entry("alpha", "/probe/alpha", &["favorites"]),
+            entry("beta", "/probe/beta", &[]),
+            entry("gamma", "/probe/gamma", &["favorites", "archived"]),
+        ]);
+        store
+    });
+    while net_rx.try_recv().is_ok() {}
+
+    cx.update_entity(&store, |s: &mut Store, _| {
+        s.scanning = false;
+        s.selected_repo = Some("/probe/beta".to_string());
+    });
+    cx.update_entity(&store, |s: &mut Store, cx| s.refresh(cx));
+
+    let mut github_folders: Option<Vec<PathBuf>> = None;
+    let mut azure_folders: Option<Vec<PathBuf>> = None;
+    while let Ok(command) = net_rx.try_recv() {
+        match command {
+            NetCommand::GitHubPass { folders, .. } => github_folders = Some(folders),
+            NetCommand::AzurePass { folders, .. } => azure_folders = Some(folders),
+            _ => {}
+        }
+    }
+    let eager = vec![PathBuf::from("/probe/alpha"), PathBuf::from("/probe/beta")];
+    assert_eq!(
+        github_folders.expect("the favorite and the selected repo re-ask"),
+        eager,
+        "the eager set covers favorites and the selection, not the archived"
+    );
+    assert_eq!(
+        azure_folders.expect("the same set feeds Azure"),
+        eager,
+        "the eager set covers favorites and the selection, not the archived"
+    );
+
+    // a disabled integration silences its side of the eager set
+    cx.update_entity(&store, |s: &mut Store, _| {
+        s.scanning = false;
+        s.update_settings(|settings| {
+            settings.repos.enable_git_hub = false;
+            settings.repos.enable_azure_dev_ops = false;
+        });
+    });
+    cx.update_entity(&store, |s: &mut Store, cx| s.refresh(cx));
+    while let Ok(command) = net_rx.try_recv() {
+        assert!(
+            !matches!(
+                command,
+                NetCommand::GitHubPass { .. } | NetCommand::AzurePass { .. }
+            ),
+            "disabled integrations never queue the eager set"
+        );
+    }
+
+    let _ = std::fs::remove_file(&scratch);
+    let _ = std::fs::remove_file(&gh);
+}
+
+/// The fetch pass streams: each per-repo settle applies its probe the moment
+/// it lands and drives the toolbar's Fetching k/n stage, which clears when
+/// the pass's last repo lands.
+#[gpui::test]
+fn fetch_pass_reports_progress_per_repo(cx: &mut TestAppContext) {
+    use warp_station::net::UiEvent;
+
+    let _env_turn = AUTO_FETCH_ENV.lock().unwrap_or_else(|e| e.into_inner());
+    cx.update(gpui_kit::init);
+    scratch_home();
+
+    let scratch = std::env::temp_dir().join(format!(
+        "warp-station-progress-probe-{}.json",
+        std::process::id()
+    ));
+    std::fs::write(&scratch, r#"{"Notifications": {"Enabled": false}}"#).expect("scratch settings");
+
+    let (net_tx, net_rx) = async_channel::unbounded();
+    let store = cx.new(|_cx| {
+        let mut store = Store::with_settings(
+            net_tx,
+            std::sync::Arc::new(warp_station_core::settings::SettingsService::at(
+                scratch.clone(),
+            )),
+        );
+        store.replace_repos(vec![
+            entry("alpha", "/probe/alpha", &[]),
+            entry("beta", "/probe/beta", &[]),
+        ]);
+        store
+    });
+    while net_rx.try_recv().is_ok() {}
+    // the constructor's startup scan is still "in flight" (the store shows
+    // Refreshing): a refresh while it runs coalesces away, so clear it first
+    cx.update_entity(&store, |s: &mut Store, _| s.scanning = false);
+    cx.update_entity(&store, |s: &mut Store, cx| s.refresh(cx));
+    // drain the scan + fetch queue before the settled events arrive
+    while net_rx.try_recv().is_ok() {}
+
+    let probe = |folder: &str| warp_station_core::repo_store::StatusProbe {
+        folder_path: folder.to_string(),
+        ..Default::default()
+    };
+    cx.update_entity(&store, |s: &mut Store, cx| {
+        s.on_net_event(
+            UiEvent::StatusSettled {
+                probes: vec![probe("/probe/alpha")],
+                after_fetch: true,
+                progress: Some((1, 2)),
+            },
+            cx,
+        );
+    });
+    cx.read_entity(&store, |s, _| {
+        assert_eq!(
+            s.fetch_progress,
+            Some((1, 2)),
+            "the button stage shows the settled repo's k/n"
+        );
+    });
+
+    cx.update_entity(&store, |s: &mut Store, cx| {
+        s.on_net_event(
+            UiEvent::StatusSettled {
+                probes: vec![probe("/probe/beta")],
+                after_fetch: true,
+                progress: Some((2, 2)),
+            },
+            cx,
+        );
+    });
+    cx.read_entity(&store, |s, _| {
+        assert_eq!(
+            s.fetch_progress, None,
+            "the stage clears once the pass's last repo lands"
+        );
+    });
 
     let _ = std::fs::remove_file(&scratch);
 }
@@ -1246,6 +1565,7 @@ fn fetch_settled_reloads_the_selected_workspace(cx: &mut TestAppContext) {
             warp_station::net::UiEvent::StatusSettled {
                 probes: vec![probe("/probe/alpha")],
                 after_fetch: true,
+                progress: None,
             },
             cx,
         );
@@ -1262,6 +1582,7 @@ fn fetch_settled_reloads_the_selected_workspace(cx: &mut TestAppContext) {
             warp_station::net::UiEvent::StatusSettled {
                 probes: vec![probe("/probe/alpha")],
                 after_fetch: false,
+                progress: None,
             },
             cx,
         );
@@ -1277,6 +1598,7 @@ fn fetch_settled_reloads_the_selected_workspace(cx: &mut TestAppContext) {
             warp_station::net::UiEvent::StatusSettled {
                 probes: vec![probe("/probe/other")],
                 after_fetch: true,
+                progress: None,
             },
             cx,
         );
