@@ -34,6 +34,7 @@ struct HarnessScope {
 #[derive(Clone, Copy, PartialEq)]
 enum Section {
     General,
+    Notifications,
     Appearance,
     Repositories,
     Git,
@@ -43,12 +44,18 @@ enum Section {
 }
 
 /// The sections in list order: value, row id, title, what it holds.
-const SECTIONS: [(Section, &str, &str, &str); 7] = [
+const SECTIONS: [(Section, &str, &str, &str); 8] = [
     (
         Section::General,
         "settings-general",
         "General",
         "Startup and tooltips",
+    ),
+    (
+        Section::Notifications,
+        "settings-notifications",
+        "Notifications",
+        "Desktop toasts when unfocused",
     ),
     (
         Section::Appearance,
@@ -95,6 +102,12 @@ pub struct SettingsPage {
     show_tooltips: bool,
     start_minimized: bool,
     start_at_boot: bool,
+    // Notifications (the desktop mirror)
+    notify_enabled: bool,
+    notify_only_unfocused: bool,
+    notify_errors: bool,
+    notify_actions: bool,
+    notify_fetch: bool,
     // Scanning
     scan_folders: Entity<TextareaState>,
     excluded_folders: Entity<TextareaState>,
@@ -281,6 +294,11 @@ impl SettingsPage {
             show_tooltips: general.show_tooltips,
             start_minimized: general.start_minimized,
             start_at_boot: general.start_at_boot,
+            notify_enabled: settings.notifications.enabled,
+            notify_only_unfocused: settings.notifications.only_when_unfocused,
+            notify_errors: settings.notifications.errors,
+            notify_actions: settings.notifications.action_confirmations,
+            notify_fetch: settings.notifications.fetch_summaries,
             scan_folders: area(window, cx, &line_list(&repos.repo_scan_folders)),
             excluded_folders: area(window, cx, &line_list(&repos.excluded_folders)),
             git_folder_pattern: field(window, cx, &repos.git_folder_pattern),
@@ -443,6 +461,13 @@ impl SettingsPage {
             self.enable_azure,
             self.enable_deepseek,
         );
+        let notifications = (
+            self.notify_enabled,
+            self.notify_only_unfocused,
+            self.notify_errors,
+            self.notify_actions,
+            self.notify_fetch,
+        );
         let snap_it_auto_start = self.snap_it_auto_start;
         let snap_it_exe = Self::value(&self.snap_it_executable, cx);
         let warp_enabled = self.warp_enabled;
@@ -524,6 +549,11 @@ impl SettingsPage {
                 s.repos.azure_dev_ops_url = azure_url;
                 s.snap_it.auto_start = snap_it_auto_start;
                 s.snap_it.executable = snap_it_exe;
+                s.notifications.enabled = notifications.0;
+                s.notifications.only_when_unfocused = notifications.1;
+                s.notifications.errors = notifications.2;
+                s.notifications.action_confirmations = notifications.3;
+                s.notifications.fetch_summaries = notifications.4;
             });
             // the intervals may have changed: re-arm both periodic passes
             store.refresh_auto_fetch_schedule();
@@ -835,6 +865,77 @@ impl SettingsPage {
                     rows.is_empty(),
                     window,
                     cx,
+                ));
+            }
+            Section::Notifications => {
+                // the desktop mirror's master switch and its two dimensions:
+                // when (the unfocused gate) and what (the three categories).
+                // Every flip autosaves like the other sections'; the only side
+                // effect is the copy, so save() carries no kicks for it.
+                rows.push(kit_settings::switch_row_with_desc(
+                    "set-notify-enabled",
+                    "Desktop notifications",
+                    "settings-row-Desktop notifications".to_string(),
+                    "Mirrors the app's toasts to the desktop",
+                    self.notify_enabled,
+                    rows.is_empty(),
+                    cx.listener(|this, _, _, cx| {
+                        this.notify_enabled = !this.notify_enabled;
+                        this.save(cx);
+                        cx.notify();
+                    }),
+                ));
+                rows.push(kit_settings::switch_row_with_desc(
+                    "set-notify-unfocused",
+                    "Only while unfocused",
+                    "settings-row-Only while unfocused".to_string(),
+                    "Nothing reaches the desktop while a Warp Station window has focus",
+                    self.notify_only_unfocused,
+                    rows.is_empty(),
+                    cx.listener(|this, _, _, cx| {
+                        this.notify_only_unfocused = !this.notify_only_unfocused;
+                        this.save(cx);
+                        cx.notify();
+                    }),
+                ));
+                rows.push(kit_settings::subhead("What to hear about"));
+                rows.push(kit_settings::switch_row(
+                    "set-notify-errors",
+                    "Errors",
+                    "settings-row-Errors".to_string(),
+                    self.notify_errors,
+                    rows.is_empty(),
+                    cx.listener(|this, _, _, cx| {
+                        this.notify_errors = !this.notify_errors;
+                        this.save(cx);
+                        cx.notify();
+                    }),
+                ));
+                rows.push(kit_settings::switch_row_with_desc(
+                    "set-notify-actions",
+                    "Action confirmations",
+                    "settings-row-Action confirmations".to_string(),
+                    "Merges, commits, agent handoffs, generation drafts, password copies",
+                    self.notify_actions,
+                    rows.is_empty(),
+                    cx.listener(|this, _, _, cx| {
+                        this.notify_actions = !this.notify_actions;
+                        this.save(cx);
+                        cx.notify();
+                    }),
+                ));
+                rows.push(kit_settings::switch_row_with_desc(
+                    "set-notify-fetch",
+                    "Fetch summaries",
+                    "settings-row-Fetch summaries".to_string(),
+                    "One aggregate after a background fetch brings repos further behind — desktop only",
+                    self.notify_fetch,
+                    rows.is_empty(),
+                    cx.listener(|this, _, _, cx| {
+                        this.notify_fetch = !this.notify_fetch;
+                        this.save(cx);
+                        cx.notify();
+                    }),
                 ));
             }
             Section::Appearance => {

@@ -5,6 +5,7 @@ pub mod assets;
 pub mod ipc;
 pub mod logging;
 pub mod net;
+pub mod notices;
 pub mod store;
 pub mod theme;
 pub mod ui;

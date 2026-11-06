@@ -1089,3 +1089,82 @@ fn the_settings_head_keeps_its_actions_inside_the_pane(cx: &mut TestAppContext) 
         );
     }
 }
+
+/// The Notifications section: the desktop mirror's rows render, and a flip of
+/// the master switch lands in the settings file (the store re-opens and reads
+/// the written graph, like the Reduce-motion check does).
+#[gpui_kit::gpui::test]
+fn notifications_section_rows_persist(cx: &mut TestAppContext) {
+    let _home_guard = HOME_ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    cx.update(gpui_kit::init);
+    cx.update(warp_station::theme::apply_kit_theme);
+
+    let home = std::env::temp_dir().join(format!(
+        "warp-station-notifications-probe-{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&home);
+    std::fs::create_dir_all(home.join(".warp")).unwrap();
+    // SAFETY: process-global env; serialized against the sibling HOME probes
+    unsafe {
+        std::env::set_var("HOME", &home);
+        // USERPROFILE too: Windows resolves the data root from it first, so a
+        // HOME-only scratch leaves the real ~/.warp live for anything that
+        // saves through the store's default service
+        #[cfg(windows)]
+        std::env::set_var("USERPROFILE", &home);
+        std::env::set_var("XDG_CONFIG_HOME", home.join(".config"));
+    }
+
+    let (net_tx, _net_rx) = async_channel::unbounded();
+    let store = cx.new(|cx| Store::new(cx, net_tx));
+    let (_window_handle, cx) =
+        cx.add_window_view(|window, cx| SettingsPage::new(store, window, cx));
+    cx.run_until_parked();
+    cx.update(|window, cx| drop(window.draw(cx)));
+
+    click(cx, "settings-notifications");
+    cx.update(|window, cx| drop(window.draw(cx)));
+    assert!(
+        cx.debug_bounds("settings-row-Desktop notifications")
+            .is_some(),
+        "the master switch renders"
+    );
+    assert!(
+        cx.debug_bounds("settings-row-Only while unfocused")
+            .is_some(),
+        "the unfocused gate renders"
+    );
+    for row in [
+        "settings-row-Errors",
+        "settings-row-Action confirmations",
+        "settings-row-Fetch summaries",
+    ] {
+        assert!(
+            cx.debug_bounds(row).is_some(),
+            "the category rows render ({row})"
+        );
+    }
+
+    // flip the master switch off (the switch sits at the row's end) and the
+    // write-through lands in the settings file without a Save press
+    let row = cx
+        .debug_bounds("settings-row-Desktop notifications")
+        .expect("the master row is on screen");
+    cx.simulate_click(
+        gpui::point(row.right() - gpui::px(20.), row.center().y),
+        gpui::Modifiers::default(),
+    );
+    cx.run_until_parked();
+    assert!(
+        !cx.update(|_, _| {
+            warp_station_core::settings::SettingsService::open()
+                .get()
+                .notifications
+                .enabled
+        }),
+        "the flip persists into the settings file"
+    );
+
+    let _ = std::fs::remove_dir_all(&home);
+}

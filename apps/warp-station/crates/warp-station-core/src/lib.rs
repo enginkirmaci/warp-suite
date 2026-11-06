@@ -6,6 +6,7 @@ pub mod autostart;
 pub mod azure;
 pub mod clipboard_password;
 pub mod code_search;
+pub mod desktop_notifications;
 pub mod exe;
 pub mod git;
 pub mod github;

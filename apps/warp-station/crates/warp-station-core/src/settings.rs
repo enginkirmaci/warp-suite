@@ -32,6 +32,43 @@ pub struct AppSettings {
     pub warp_notes: WarpNotesSettings,
     #[serde(default)]
     pub general: GeneralSettings,
+    #[serde(default)]
+    pub notifications: NotificationsSettings,
+}
+
+/// What a desktop notification may interrupt the desktop with. The section is
+/// new (files before it carry no `Notifications` key at all), so absence reads
+/// as every default: mirroring toasts while Warp Station is unfocused, with
+/// errors, action confirmations and fetch summaries all allowed.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "PascalCase", default)]
+pub struct NotificationsSettings {
+    /// The master switch: off silences the desktop channel entirely (the
+    /// in-app toasts are unaffected).
+    pub enabled: bool,
+    /// Only copy the toasts to the desktop while no Warp Station window has
+    /// focus — anything on screen is already visible in its own toast.
+    pub only_when_unfocused: bool,
+    /// Mirrors error toasts ("Commit failed for alpha: …").
+    pub errors: bool,
+    /// Mirrors confirmation toasts: merges, commits, agent handoffs,
+    /// generation drafts, password copies.
+    pub action_confirmations: bool,
+    /// The auto-fetch pass's aggregate ("3 repos behind, 1 fetch failed") —
+    /// the pass itself is silent, so this is desktop-only.
+    pub fetch_summaries: bool,
+}
+
+impl Default for NotificationsSettings {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            only_when_unfocused: true,
+            errors: true,
+            action_confirmations: true,
+            fetch_summaries: true,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -793,6 +830,36 @@ mod tests {
         assert!(json.contains("\"HomeView\""));
         let back: AppSettings = serde_json::from_str(&json).unwrap();
         assert_eq!(back.repos, arranged.repos);
+    }
+
+    #[test]
+    fn notifications_round_trip_and_absent_means_on_unfocused() {
+        // files before the section carry no key at all: absence reads as the
+        // defaults (mirroring on, unfocused-only, every category allowed)
+        let legacy: AppSettings = serde_json::from_str("{}").unwrap();
+        assert!(legacy.notifications.enabled);
+        assert!(legacy.notifications.only_when_unfocused);
+        assert!(legacy.notifications.errors);
+        assert!(legacy.notifications.action_confirmations);
+        assert!(legacy.notifications.fetch_summaries);
+
+        let tuned: AppSettings = serde_json::from_str(
+            r#"{"Notifications": {"Enabled": false, "OnlyWhenUnfocused": false,
+                "Errors": false, "ActionConfirmations": false, "FetchSummaries": false}}"#,
+        )
+        .unwrap();
+        assert!(!tuned.notifications.enabled);
+        assert!(!tuned.notifications.only_when_unfocused);
+        assert!(!tuned.notifications.errors);
+        assert!(!tuned.notifications.action_confirmations);
+        assert!(!tuned.notifications.fetch_summaries);
+
+        // and the whole section serializes back under the same PascalCase keys
+        let json = serde_json::to_string_pretty(&tuned).unwrap();
+        assert!(json.contains("\"Notifications\""));
+        assert!(json.contains("\"OnlyWhenUnfocused\": false"));
+        let back: AppSettings = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.notifications, tuned.notifications);
     }
 
     #[test]

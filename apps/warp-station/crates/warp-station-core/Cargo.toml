@@ -22,5 +22,13 @@ warpui-kit-platform = { path = "../../../../kits/warpui-kit-platform", default-f
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
+# WinRT toasts on Windows (Action Center): the crate wraps Windows.UI.Notifications
+# and falls back to PowerShell's whitelisted AppUserModelID, so toasts appear
+# without a Start-menu registration (the crate's own POWERSHELL_APP_ID).
+# Linux uses the notify-send spawner in the same module, so the dependency
+# stays behind cfg(windows).
+[target.'cfg(windows)'.dependencies]
+tauri-winrt-notification = "0.7"
+
 [dev-dependencies]
 tempfile = "3"

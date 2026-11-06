@@ -5,10 +5,15 @@
 pub mod projection;
 
 use crate::net::{GitAction, NetCommand, TemplateOp, UiEvent, WandKind, WarpWorkspaceStatus};
+use crate::notices::{self, Notices};
 use gpui::{App, Context};
 use std::sync::Arc;
 use warp_station_core::repo_store::{self, RepoEntry};
 use warp_station_core::settings::{AppSettings, RepoSortMode, ReposSettings, SettingsService};
+
+// the toasts' types live beside the notification service; the store re-exports
+// them so every existing `crate::store::NoticeKind` call site stays put
+pub use crate::notices::{Notice, NoticeKind};
 
 /// How long a button holds its past tense.
 const FINISHED_HOLD: std::time::Duration = std::time::Duration::from_millis(1200);
@@ -127,10 +132,10 @@ pub struct Store {
     pub warp_connected: bool,
     /// Live warp-agent status per workspace folder (running chat titles).
     pub warp_running: std::collections::HashMap<String, WarpWorkspaceStatus>,
-    /// Toast stack (newest last), capped; the window overlay renders it and
-    /// the per-second tick expires it.
-    pub notices: Vec<Notice>,
-    notice_generation: u64,
+    /// The notification service: the toast stack (newest last, capped; the
+    /// window overlay renders it and the per-second tick expires it) plus the
+    /// desktop-mirror routing. `notify_*` calls into it.
+    pub notices: Notices,
     /// Global-search results (repos by name/path + note content hits).
     pub global_search: Vec<GlobalSearchHit>,
     /// E2E hook: WARP_STATION_NOTES=1 asks for Notes on launch; the main
@@ -297,8 +302,7 @@ impl Store {
             summary_busy: false,
             warp_connected: false,
             warp_running: std::collections::HashMap::new(),
-            notices: Vec::new(),
-            notice_generation: 0,
+            notices: Notices::default(),
             global_search: Vec::new(),
             // E2E hook: WARP_STATION_NOTES=1 opens Notes (warp-notes) on launch
             notes_requested: std::env::var("WARP_STATION_NOTES").as_deref() == Ok("1"),
@@ -1279,18 +1283,18 @@ impl Store {
 
     // ---- toasts -------------------------------------------------------------
 
+    /// The one event walk: the toast lands as always, and the notification
+    /// service decides whether the text also reaches the desktop (the
+    /// settings' rules — unfocused gate, categories, dedup — all live there).
+    /// The publish itself runs on a detached thread, so nothing here waits —
+    /// including no context: this never touches a window, only the desktop.
     pub fn notify(&mut self, kind: NoticeKind, text: impl Into<String>) {
-        let id = self.notice_generation;
-        self.notice_generation += 1;
-        self.notices.push(Notice {
-            id,
-            kind,
-            text: text.into(),
-            born: std::time::Instant::now(),
-        });
-        // a burst of failures must not stack a wall of cards
-        if self.notices.len() > 4 {
-            self.notices.remove(0);
+        let settings = self.settings().notifications;
+        // the tick-tracked focus: `None` before the first tick means the
+        // window state is unobserved and reads as visible
+        let focused = self.window_focused;
+        if let Some(desktop) = self.notices.push(kind, text, focused, &settings) {
+            notices::publish_desktop(desktop);
         }
     }
 
@@ -1308,9 +1312,7 @@ impl Store {
 
     /// The toast's close button.
     pub fn dismiss_notice(&mut self, id: u64, cx: &mut Context<Self>) {
-        let before = self.notices.len();
-        self.notices.retain(|n| n.id != id);
-        if self.notices.len() != before {
+        if self.notices.dismiss(id) {
             cx.notify();
         }
     }
@@ -1318,9 +1320,7 @@ impl Store {
     /// Once-per-second tick: drops toasts past their kind's ttl, notifying
     /// only when one actually expired (idle windows stay idle).
     pub fn tick_notices(&mut self, cx: &mut Context<Self>) {
-        let before = self.notices.len();
-        self.notices.retain(|n| n.born.elapsed() < n.kind.ttl());
-        if self.notices.len() != before {
+        if self.notices.tick() {
             cx.notify();
         }
     }
@@ -2704,45 +2704,6 @@ fn capitalized_label(label: &str) -> String {
     }
 }
 
-/// A toast's severity: which glyph + color it shows and how long it stays up.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum NoticeKind {
-    Success,
-    Info,
-    Error,
-}
-
-impl NoticeKind {
-    /// Errors read longer; confirmations clear in the classic few seconds.
-    pub fn ttl(self) -> std::time::Duration {
-        match self {
-            NoticeKind::Error => std::time::Duration::from_secs(8),
-            NoticeKind::Info | NoticeKind::Success => std::time::Duration::from_secs(4),
-        }
-    }
-
-    /// The copy helpers answer fixed static strings ("Password copied…",
-    /// "No password stored", "Clipboard copy failed…"); classify those.
-    pub fn for_copy_message(message: &str) -> Self {
-        if message.starts_with("Clipboard copy failed") {
-            NoticeKind::Error
-        } else if message == "No password stored" {
-            NoticeKind::Info
-        } else {
-            NoticeKind::Success
-        }
-    }
-}
-
-/// One toast in the window's corner stack.
-#[derive(Clone, Debug)]
-pub struct Notice {
-    pub id: u64,
-    pub kind: NoticeKind,
-    pub text: String,
-    born: std::time::Instant,
-}
-
 /// The detail pane's tabs, in the strip's order.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum WorkspaceTab {
@@ -2883,6 +2844,28 @@ mod tests {
         store.focus_requested = true;
         assert!(store.take_focus_request());
         assert!(!store.take_focus_request(), "the request is one-shot");
+        let _ = std::fs::remove_file(&scratch);
+    }
+
+    /// Unfocused alone is not the desktop's rule: the settings' master switch
+    /// and per-category toggles decide. This store-side seam only mirrors —
+    /// the gate math itself lives in core, already tested there.
+    #[test]
+    fn the_desktop_mirror_reads_the_store_settings() {
+        let (tx, _rx) = async_channel::unbounded();
+        let scratch = std::env::temp_dir().join(format!(
+            "warp-station-notify-settings-{}.json",
+            std::process::id()
+        ));
+        std::fs::write(&scratch, "{}").expect("scratch settings");
+        let store = Store::with_settings(tx, Arc::new(SettingsService::at(scratch.clone())));
+        // defaults: on and unfocused-only
+        assert!(store.settings().notifications.enabled);
+
+        store.update_settings(|s| {
+            s.notifications.enabled = false;
+        });
+        assert!(!store.settings().notifications.enabled);
         let _ = std::fs::remove_file(&scratch);
     }
 

@@ -315,7 +315,7 @@ impl MainWindow {
     /// sits underneath. The per-second tick expires them (errors live
     /// longer than confirmations).
     fn render_toasts(&mut self, cx: &mut Context<Self>) -> Option<gpui::AnyElement> {
-        let notices = self.store.read(cx).notices.clone();
+        let notices = self.store.read(cx).notices.list().to_vec();
         if notices.is_empty() {
             return None;
         }
