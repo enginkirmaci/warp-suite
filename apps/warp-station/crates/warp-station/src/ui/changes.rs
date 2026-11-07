@@ -1925,8 +1925,8 @@ fn staging_link(
 
 /// The no-staged-files footer: the commit box only exists when a commit can
 /// succeed, so this says why it is missing instead of leaving the column
-/// blank. The footer repeats the stage-all verb as text — where the commit
-/// button would otherwise be — whenever there is something to stage.
+/// blank. The stage-all verb stands where the commit button would be and wears
+/// the same primary fill, so the column's one action reads the same either way.
 fn stage_hint(store: Entity<Store>, unstaged: usize) -> gpui::AnyElement {
     let mut footer = div()
         .debug_selector(|| "changes-stage-hint".into())
@@ -1950,11 +1950,14 @@ fn stage_hint(store: Entity<Store>, unstaged: usize) -> gpui::AnyElement {
                 .child("Stage changes to commit"),
         );
     if unstaged > 0 {
-        footer = footer.child(staging_link(
+        let action_store = store.clone();
+        footer = footer.child(crate::ui::primary_button(
             "stage-all-footer",
             "Stage all",
-            GitAction::StageAll,
-            store,
+            true,
+            move |_, _, cx| {
+                action_store.update(cx, |s, cx| s.run_git(GitAction::StageAll, cx));
+            },
         ));
     }
     footer.into_any_element()

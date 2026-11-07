@@ -93,6 +93,10 @@ together. When one changes, update the other side in the **same** commit.
 - **warp-agent loopback door** (`~/.warp/agent/ipc.port` + `ipc.token`,
   token-authenticated NDJSON on `127.0.0.1`): commands `open-workspace`,
   `new-chat`, `run-prompt`, `models`, `status` (+ status pushes).
+  `new-chat`/`run-prompt` take a folder, or `general` for warp-agent's
+  built-in Tasks workspace, where the AI wands run: a wand prompt carries its
+  own diff or file tree, so it must not add the repo to warp-agent's sidebar
+  as a workspace.
   `new-chat`/`run-prompt` accept `harness`/`model`/`variant`, and `models`
   answers with the harnesses and each model's variants. `models` also takes
   `refresh: true`: the door re-reads that harness's backend (starting it when
