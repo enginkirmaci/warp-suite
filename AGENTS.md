@@ -167,8 +167,10 @@ when one side changes, update the other side in the **same commit**.
   Warp Station's `snapit.executable` setting must point at the Rust
   `warp-snapit.exe`; the Rust port ships as a portable zip
   (`linux_skip = true`), not an installer.
-- **Notes store** (`~/notes`, one folder per repo): Warp Station launches
-  warp-notes with `--store` (its resolved `notes_store_path`) and an explicit
+- **Notes store** (default `~/notes`, `notes_store_path` overrides): one store
+  root, repo notes under `projects/<repo>`, notes outside a repo at the root.
+  Warp Station launches warp-notes with `--store` (its resolved
+  `notes_store_path`) and an explicit
   scope: `--root` from the titlebar and the cross-repo surfaces (the whole
   store), `--repo` from a repo's launcher (that folder); a hit also passes
   `--note`. A standalone launch roots at the shared store. A store an older

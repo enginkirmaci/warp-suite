@@ -128,7 +128,8 @@ together. When one changes, update the other side in the **same** commit.
   `snapit.executable` setting points at the Rust `warp-snapit.exe`, which is a
   portable-zip deliverable (no installer) and skipped in the Linux bundle
   (`linux_skip = true` in `apps.toml`).
-- **Shared notes store** (`~/notes`, one folder per repo):
+- **Shared notes store** (default `~/notes`, `notes_store_path` overrides; one
+  repo per folder under `projects/`):
   [warp-notes](https://github.com/enginkirmaci/warp-notes) always gets
   `--store` (Warp Station's resolved `notes_store_path`) and an explicit
   scope — the titlebar toggle and the global-search note hits ask for

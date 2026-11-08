@@ -213,6 +213,10 @@ pub fn mark_notes_store_adopted() {
 /// The entries a store folder may hold that belong to the app, not the store.
 const APP_LOCAL_NAMES: [&str; 3] = ["settings.json", "ui.json", "logs"];
 
+/// Moves an old store into `target` in the current layout: repo folders land
+/// under `target/projects/`, loose markdown at the root. The old stores kept
+/// their repo folders at the root, and the root now belongs to notes that are
+/// not repo-scoped (a store can double as a user vault).
 fn adopt_notes_at(legacy: &Path, target: &Path) -> bool {
     // nothing to move: the source is already gone (or is the target)
     if !legacy.is_dir() || legacy == target {
@@ -243,13 +247,25 @@ fn adopt_notes_at(legacy: &Path, target: &Path) -> bool {
         if !is_note {
             continue;
         }
-        let dest = target.join(entry.file_name());
+        let name = entry.file_name();
+        let is_dir = entry.file_type().is_ok_and(|kind| kind.is_dir());
+        let dest = if is_dir {
+            target.join(crate::notes::PROJECTS_DIR).join(&name)
+        } else {
+            target.join(&name)
+        };
         if dest.exists() {
             tracing::warn!(
                 "keeping the legacy notes entry {}: {} already exists",
                 path.display(),
                 dest.display()
             );
+            failed = true;
+            continue;
+        }
+        if let Some(parent) = dest.parent()
+            && std::fs::create_dir_all(parent).is_err()
+        {
             failed = true;
             continue;
         }
@@ -387,7 +403,13 @@ mod tests {
             "a clean pass reports done"
         );
 
-        assert!(target.join("alpha").join("note.md").is_file());
+        assert!(
+            target
+                .join(crate::notes::PROJECTS_DIR)
+                .join("alpha")
+                .join("note.md")
+                .is_file()
+        );
         assert!(target.join("flat.md").is_file());
         assert!(legacy.join("settings.json").is_file(), "app files stay put");
         assert!(legacy.join("logs").is_dir());
@@ -400,9 +422,16 @@ mod tests {
         let legacy = dir.path().join("old-store");
         let target = dir.path().join("notes");
         std::fs::create_dir_all(legacy.join("alpha")).unwrap();
-        std::fs::create_dir_all(target.join("alpha")).unwrap();
+        std::fs::create_dir_all(target.join(crate::notes::PROJECTS_DIR).join("alpha")).unwrap();
         std::fs::write(legacy.join("alpha").join("old.md"), "old").unwrap();
-        std::fs::write(target.join("alpha").join("new.md"), "new").unwrap();
+        std::fs::write(
+            target
+                .join(crate::notes::PROJECTS_DIR)
+                .join("alpha")
+                .join("new.md"),
+            "new",
+        )
+        .unwrap();
 
         assert!(
             !adopt_notes_at(&legacy, &target),
@@ -410,7 +439,13 @@ mod tests {
         );
 
         assert!(legacy.join("alpha").join("old.md").is_file());
-        assert!(target.join("alpha").join("new.md").is_file());
+        assert!(
+            target
+                .join(crate::notes::PROJECTS_DIR)
+                .join("alpha")
+                .join("new.md")
+                .is_file()
+        );
         assert!(legacy.exists(), "a collision keeps the legacy store");
     }
 }

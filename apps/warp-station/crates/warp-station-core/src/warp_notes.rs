@@ -15,7 +15,8 @@ pub enum NotesScope<'a> {
     /// summary's "Open in Notes"). The app must land here even when it
     /// remembered another scope, so the launch says so outright.
     WholeStore,
-    /// One repository's notes folder: the repo launchers.
+    /// One repository's notes folder, `<store root>/projects/<repo>`: the repo
+    /// launchers.
     Repo(&'a str),
 }
 

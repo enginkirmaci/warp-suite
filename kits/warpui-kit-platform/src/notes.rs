@@ -28,9 +28,16 @@ pub fn resolve_store_root(configured: &str, default_root: &Path) -> PathBuf {
     }
 }
 
-/// One repository's notes folder: `<store_root>/<sanitized repo name>`.
+/// The store subfolder that groups one folder per repository. Repo notes live
+/// under it, so a store that doubles as a user folder (an Obsidian vault, for
+/// one) keeps its own top-level folders free for notes that belong to no repo.
+pub const PROJECTS_DIR: &str = "projects";
+
+/// One repository's notes folder: `<store_root>/projects/<sanitized repo name>`.
 pub fn repo_notes_root(store_root: &Path, repo_name: &str) -> PathBuf {
-    store_root.join(sanitize_entry_name(repo_name, false).unwrap_or_else(|| "notes".into()))
+    store_root
+        .join(PROJECTS_DIR)
+        .join(sanitize_entry_name(repo_name, false).unwrap_or_else(|| "notes".into()))
 }
 
 /// Path-name sanitizer: invalid filename chars and separators become '-',
@@ -223,6 +230,20 @@ mod tests {
         assert_eq!(
             resolve_store_root(" /mnt/notes ", default),
             PathBuf::from("/mnt/notes")
+        );
+    }
+
+    #[test]
+    fn repo_folders_sit_under_projects() {
+        let root = Path::new("/home/e/notes");
+        assert_eq!(
+            repo_notes_root(root, "warp-suite"),
+            PathBuf::from("/home/e/notes/projects/warp-suite")
+        );
+        // the name still goes through the sanitizer
+        assert_eq!(
+            repo_notes_root(root, "a/b"),
+            PathBuf::from("/home/e/notes/projects/a-b")
         );
     }
 }
