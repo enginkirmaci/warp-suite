@@ -4,6 +4,11 @@ This is the entry point for any agent working in this repo. Read it first, then
 the app's own `AGENTS.md` when the work is in one app, then the deep guides in
 `docs/agents/`.
 
+## Language
+
+- Write English only: replies, plans, commit messages, code comments, docs,
+  TODO notes and questions.
+
 ## What this repo is
 
 warp-suite is the monorepo for Engin's connected desktop apps. The apps live
@@ -116,6 +121,21 @@ It type-checks the Rust code, `#[cfg(windows)]` blocks included, compiles no C,
 and links nothing. Report it as a type-check, not a Windows build. The real
 Windows build is the `windows-latest` job in
 [`.github/workflows/suite-release.yml`](.github/workflows/suite-release.yml).
+
+## Commits
+
+- When the task you were given is finished, stop and ask whether to commit.
+  That means: gates green on the crates you touched, no work left in the task,
+  then one short question — "commit?" — not a commit.
+- Never run `git commit` on your own initiative. Approving a plan, asking to
+  keep going, or a follow-up task is not a yes to commit; only an explicit
+  answer in the conversation is.
+- Name what the commit would hold when the tree is not clean. It usually
+  carries other sessions' work, and the owner decides whether it rides along.
+- Stage the paths the task touched, not `git add -A`, and leave every other
+  dirty file as it is.
+- Once approved, follow the repo's existing style: `feat(station): ...`,
+  `fix(agent): ...`, an English imperative subject.
 
 ## Cross-app contracts
 
