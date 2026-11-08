@@ -1,0 +1,42 @@
+{
+    // Open warp-suite itself and press F5; each config builds only its app
+    // (the matching task passes -p) and runs the binary from the shared target
+    // dir (.cargo/config.toml: .build/target).
+    //
+    // One config per app: "type" cannot be platform-specific in launch.json,
+    // and CodeLLDB (vadimcn.vscode-lldb) wedges at the NVIDIA Vulkan ICD dlopen
+    // under its solib handler, so webfreak.debug's gdb adapter is the one that
+    // works here. Debugging on Windows would need a cppvsdbg entry added on
+    // that machine; launch.json cannot choose the type per OS.
+    //
+    // webfreak.debug uses non-standard field names: "target" (not "program")
+    // and "arguments" (a string, not "args") — a missing "target" crashes the
+    // adapter with ERR_INVALID_ARG_TYPE.
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Rust: warp-station (gdb)",
+            "type": "gdb",
+            "request": "launch",
+            "target": "${workspaceFolder}/.build/target/debug/warp-station",
+            "cwd": "${workspaceFolder}",
+            "preLaunchTask": "cargo build (warp-station)"
+        },
+        {
+            "name": "Rust: warp-agent (gdb)",
+            "type": "gdb",
+            "request": "launch",
+            "target": "${workspaceFolder}/.build/target/debug/warp-agent",
+            "cwd": "${workspaceFolder}",
+            "preLaunchTask": "cargo build (warp-agent)"
+        },
+        {
+            "name": "Rust: warp-notes (gdb)",
+            "type": "gdb",
+            "request": "launch",
+            "target": "${workspaceFolder}/.build/target/debug/warp-notes",
+            "cwd": "${workspaceFolder}",
+            "preLaunchTask": "cargo build (warp-notes)"
+        }
+    ]
+}

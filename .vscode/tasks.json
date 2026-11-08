@@ -1,0 +1,35 @@
+{
+    // One task per app, each with -p so the build stays app-sized even though
+    // the suite is one workspace (a bare `cargo build` at the root builds every
+    // member, apps included).
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "cargo build (warp-station)",
+            "type": "shell",
+            "command": "cargo",
+            "args": ["build", "-p", "warp-station"],
+            "options": { "cwd": "${workspaceFolder}" },
+            "group": "build",
+            "problemMatcher": "$rustc"
+        },
+        {
+            "label": "cargo build (warp-agent)",
+            "type": "shell",
+            "command": "cargo",
+            "args": ["build", "-p", "warp-agent"],
+            "options": { "cwd": "${workspaceFolder}" },
+            "group": "build",
+            "problemMatcher": "$rustc"
+        },
+        {
+            "label": "cargo build (warp-notes)",
+            "type": "shell",
+            "command": "cargo",
+            "args": ["build", "-p", "warp-notes"],
+            "options": { "cwd": "${workspaceFolder}" },
+            "group": "build",
+            "problemMatcher": "$rustc"
+        }
+    ]
+}
