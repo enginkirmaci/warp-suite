@@ -625,6 +625,13 @@ impl LiveEditorState {
         (!range.is_empty()).then(|| self.text[range].to_string())
     }
 
+    /// The selected source range; empty when the selection is a bare caret.
+    /// The cheap form of [`Self::selected_text`] for a host that only needs to
+    /// notice that the selection moved.
+    pub fn selection_range(&self) -> Range<usize> {
+        self.selection.range()
+    }
+
     /// Publishes this editor's mouse selection to the read-only selection
     /// global, so a host's Ctrl+C fallback can copy it (the surface holds no
     /// focus, so no Copy action ever dispatches on its own).
