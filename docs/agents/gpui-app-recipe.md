@@ -2,12 +2,15 @@
 
 The annotated skeleton for a new app in this suite, extracted from the apps
 already here (`apps/warp-notes` is the closest whole example, then
-`apps/warp-agent` and `apps/warp-station`). Everything below is conventions they
-already follow — match them rather than inventing variants.
+`apps/warp-station` and `apps/warp-agent`). Everything below is conventions they
+already follow — match them rather than inventing variants. `apps/warp-snapit`
+is the exception: a Windows-only Win32 binary that does not link the kit and
+does not follow this recipe.
 
-The blocks build together on **gpui-kit 0.9 + gpui-pre `=0.3.11`** (the pins in
-this checkout) and pass the gates; `logging.rs` and `paths.rs` are thin wrappers
-over `warpui-kit-platform` and can be copied from `apps/warp-notes/src/`.
+The blocks build together on **gpui-kit 0.9.0 + gpui-pre `=0.3.11`** (the pins
+in this checkout) and pass the gates; `logging.rs` and `paths.rs` are thin
+wrappers over `warpui-kit-platform` and can be copied from
+`apps/warp-notes/src/`.
 
 **Where a new app goes.** Inside warp-suite, under `apps/<name>/`, imported with
 `git subtree add --prefix=apps/<name>` so it keeps its history. The path deps
@@ -80,7 +83,10 @@ Notes:
 
 ## 2. lib.rs and main.rs — bootstrap order
 
-`lib.rs` is the module list; probes depend on it:
+`lib.rs` is the module list; probes depend on it. `apps/warp-notes` and
+`apps/warp-station/crates/warp-station` have the boundary; `apps/warp-agent` is
+binary-only and its one probe targets the markdown kit rather than the app's
+views, so prefer the lib boundary for a new app:
 
 ```rust
 //! MyApp — one-line purpose. The library boundary exists so the headless
@@ -112,13 +118,17 @@ use gpui::{App, Bounds, TitlebarOptions, WindowBounds, WindowOptions, px, size};
 use gpui_platform::application;
 
 fn main() {
-    // 1. logging first — everything after can log. Keep the guard in main
+    // 1. legacy layout migrations first: they may move the folder logging
+    //    and settings live in (see `paths.rs` below)
+    // paths::migrate_legacy_layout();
+
+    // 2. logging next — everything after can log. Keep the guard in main
     //    so the file stays open for the process lifetime.
     let _log_guard = logging::initialize();
-    // 2. panic hook so crashes reach the log
+    // 3. panic hook so crashes reach the log
     services::install_panic_hook();
 
-    // 3. single instance (when it makes sense): a live door owner takes the
+    // 4. single instance (when it makes sense): a live door owner takes the
     //    launch args (a bare liveness probe when there are none) and this
     //    launch exits — see apps/warp-agent/src/ipc.rs
     // if ipc::try_forward(&folders) { return; }
@@ -126,20 +136,20 @@ fn main() {
     application()
         .with_assets(assets::EmbedAssets::new())
         .run(|cx: &mut App| {
-            // 4. kit components (input decorations, popovers) + our palette
-            //    mapped onto their theme tokens — must run before any kit
-            //    component renders. The shared text size settles first so the
-            //    first frame is already sized; a new app has no old setting.
-            gpui_kit::init(cx);
-            warpui_kit_core::adopt_text_size(None);
-            theme::apply_kit_theme(cx);
-            warpui_kit_core::follow_ui_scale(cx, theme::apply_kit_theme);
+            // 5. kit components (input decorations, popovers), the shared text
+            //    size and palette from ~/.warp/ui.json, the follow hooks, the
+            //    first kit-theme pass and reduced motion — all before any kit
+            //    component renders. A new app has no old text size and no
+            //    reduced-motion preference, hence `None, false`.
+            warpui_kit_core::bootstrap::init(cx, None, false, |cx: &mut App| {
+                theme::apply_kit_theme(cx);
+            });
 
-            // 5. app key bindings AFTER init, so ours win "Input" context
+            // 6. app key bindings AFTER the bootstrap, so ours win "Input" context
             //    ties (later registration wins at the same depth)
             // cx.bind_keys([gpui::KeyBinding::new(...)]);
 
-            // 6. spawn background threads / build the store, then open windows.
+            // 7. spawn background threads / build the store, then open windows.
             //    gpui_kit::open_window wraps the view in the kit's Root, which
             //    dialogs, sheets and notifications need.
             let bounds = Bounds::centered(None, size(px(980.), px(700.)), cx);
@@ -164,6 +174,12 @@ fn main() {
         });
 }
 ```
+
+The startup order lives in `bootstrap::init`
+(`kits/warpui-kit-core/src/bootstrap.rs`). It is the only place that calls
+`gpui_kit::init`, `adopt_text_size`, `adopt_palette`, `follow_palette`,
+`follow_ui_scale` and `motion::set_reduced`; do not hand-roll that sequence.
+`docs/agents/design-system.md` explains what each step settles.
 
 `logging.rs` is `apps/warp-notes/src/logging.rs` — one call to
 `warpui_kit_platform::logging::init(&AppPaths::logs_dir(), "myapp-")`, returning
@@ -190,31 +206,45 @@ impl Render for MainWindow {
 ## 3. theme.rs — re-export the family
 
 Colors, fonts, sizes and the kit mapping live in `warpui-kit-core`. An app's
-`theme.rs` re-exports them and adds only its layout constants; full example:
-`apps/warp-notes/src/theme.rs`. `docs/agents/design-system.md` has what is in
-there.
+`theme.rs` re-exports them and adds only its layout constants. Copy
+`apps/warp-agent/src/theme.rs` for the live-accent shape; `warp-notes` and
+Warp Station still pin the accent and should not be copied until they follow
+the ramp. warp-agent's `apply_kit_theme` takes `(AccentColors, &FontTokens,
+&mut App)` because its store holds snapshots; the snippet below reads the live
+values itself, which suits a new app. `docs/agents/design-system.md` has what
+is in there.
 
 ```rust
 //! The MyApp theme: the family palette, type and scale from warpui-kit-core,
 //! re-exported under the app's `theme::` paths, plus the kit mapping.
 
+use warpui_kit_core::palette;
 // every shared font step and color const stays reachable as `theme::X`
 pub use warpui_kit_core::fonts::*;
 pub use warpui_kit_core::shell::scaled;
 
-/// Map the family palette onto gpui-kit's shadcn-style theme tokens. Call
-/// after [`gpui_kit::init`], before opening windows.
+/// Map the family palette onto gpui-kit's shadcn-style theme tokens. Called by
+/// `bootstrap::init` before the first frame, and again after a palette or
+/// text-size change.
 pub fn apply_kit_theme(cx: &mut gpui::App) {
-    // the accent follows the live palette: one switch moves surfaces and accent
-    let accent = palette::current_ramp().accent_colors();
-    warpui_kit_core::apply_kit_theme(accent, &active_tokens(), palette::current_ramp().base, cx);
+    let ramp = palette::current_ramp();
+    warpui_kit_core::apply_kit_theme(
+        // the accent follows the live palette: one switch moves surfaces and accent
+        ramp.accent_colors(),
+        &warpui_kit_core::fonts::active_tokens(),
+        // the step the kit's sidebar token paints; a new app with no
+        // full-height rail passes the canvas, as here. warp-agent passes
+        // window_chrome(), Warp Station surface().
+        ramp.base,
+        cx,
+    );
 }
 
 // The live palette reads through core's readers (they follow the ramp the
 // settings page switches); these aliases are the app's own vocabulary.
 pub use warpui_kit_core::palette::{
-    accent, accent_ink, accent_soft, border_light, hairline, line_strong, on_accent, panel, popup,
-    raised, surface, text, text_dim, text_muted, well,
+    accent, accent_hover, accent_ink, accent_soft, border_light, hairline, line_strong, on_accent,
+    panel, popup, raised, surface, text, text_dim, text_muted, well, window_chrome,
 };
 ```
 
@@ -224,14 +254,15 @@ pub use warpui_kit_core::palette::{
   picked.
 - Don't hardcode font families: naming a missing family makes gpui fall back per
   text run and skip the kit's own probe.
-- Surface order is **well < chrome < base < panel < raised < overlay**, two or
-  three points apart, so a panel needs a border and not just a tone. Font/icon
+- Surface order is **well < chrome < base < panel < raised < overlay**, four to
+  eleven points apart, so a panel needs a border and not just a tone. Font/icon
   size tokens ride one factor so a text size change rescales the whole UI.
-- Show `warpui_kit_core::text_size_control()` in the app's Settings section;
-  the app stores nothing for it.
+- Show `warpui_kit_core::text_size_control()` and `palette_control()` in the
+  app's Appearance settings; the app stores nothing for either.
 - The accent is a parameter of `apply_kit_theme`, not a setting: pass
   `current_ramp().accent_colors()` so a palette switch carries it. warp-notes and
-  warp-station still pass a fixed family and their accent does not follow yet.
+  warp-station still pass a fixed family and their accent does not follow yet;
+  do not copy their signature for a new app (the design doc records the status).
 - gpui's `rgba()` is not const in this rev; const colors use
   `warpui_kit_core::rgba_hex`.
 - `theme.rs` must not keep palette values as constants: the palette is
@@ -244,57 +275,22 @@ pub use warpui_kit_core::palette::{
 //! bundled Lucide set as the fallback so kit components (input decorations,
 //! popovers, …) can resolve their IconName assets.
 
-use gpui::AssetSource;
 use rust_embed::RustEmbed;
 
 #[derive(RustEmbed)]
 #[folder = "assets"]
-struct Assets;
+pub struct Assets;
 
-pub struct EmbedAssets {
-    kit: gpui_kit::assets::Assets,
-}
-
-impl EmbedAssets {
-    pub fn new() -> Self {
-        Self {
-            kit: gpui_kit::assets::Assets,
-        }
-    }
-}
-
-impl Default for EmbedAssets {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl AssetSource for EmbedAssets {
-    fn load(&self, path: &str) -> anyhow::Result<Option<std::borrow::Cow<'static, [u8]>>> {
-        match Assets::get(path) {
-            Some(file) => Ok(Some(file.data)),
-            None => self.kit.load(path),
-        }
-    }
-
-    fn list(&self, path: &str) -> anyhow::Result<Vec<gpui::SharedString>> {
-        let mut ours: Vec<gpui::SharedString> = Assets::iter()
-            .filter(|p| p.starts_with(path))
-            .map(gpui::SharedString::from)
-            .collect();
-        let mut kit = self.kit.list(path)?;
-        ours.append(&mut kit);
-        Ok(ours)
-    }
-}
+pub type EmbedAssets = warpui_kit_platform::assets::KitBackedAssets<Assets>;
 ```
 
 - `rust-embed`'s `debug-embed` feature is not optional here: without it the
   crate resolves `assets` against the process CWD at runtime, so the app only
   finds its icons when launched from the repo root.
-- `warpui-kit-platform` ships the same source behind its `assets` feature
-  (`warpui_kit_platform::assets`); use it instead of copying this block when the
-  app does not need custom behaviour.
+- `KitBackedAssets<E>` owns the `AssetSource` impl (`load` then `list`), with the
+  app's own files first and the kit's as the fallback. Add
+  `warpui-kit-platform` with its default `assets` feature; `rust-embed` still
+  needs `debug-embed` in the app's own dependency.
 - Warp Station outgrew this: `rust-embed` silently drops every file whose
   `canonicalize` fails (mapped/subst Windows volumes fail it for everything),
   leaving an empty set, so its `build.rs` generates an `include_bytes!` table
@@ -304,7 +300,8 @@ impl AssetSource for EmbedAssets {
 ## 5. paths.rs — per-user locations
 
 Suite apps keep everything in one folder under `~/.warp`, one subfolder each,
-with `warpui_kit_platform::paths` owning the layout and its migrations:
+with `warpui_kit_platform::paths` owning the layout and its migrations (the
+notes content is the exception, at `~/notes`):
 
 ```rust
 //! Global per-user locations: settings and rolling logs under ~/.warp/myapp.
@@ -329,13 +326,18 @@ impl AppPaths {
 }
 ```
 
-Settings are serde JSON loaded from `AppPaths::settings_file()`. The `Store`
-entity owns them in warp-agent, `SettingsService` does in
-`apps/warp-station/crates/warp-station-core`, and KwmSwitcher (outside the
-suite) shares an `Arc<RwLock<AppConfig>>` across its threads. Once a format has
-shipped, a moved folder gets a startup migration — `paths::app_dir` and the
-migrations module in `warpui-kit-platform` are where those live now, and an app
-calls the migration before it reads anything.
+Settings are serde JSON loaded from `AppPaths::settings_file()`. warp-agent's
+`Store` owns them, notes' `UiPrefs` owns its `settings.json`, and Warp Station's
+`Store` wraps an `Arc<SettingsService>` from `warp-station-core`; KwmSwitcher
+(outside the suite) shares an `Arc<RwLock<AppConfig>>` across its threads.
+
+Once a layout has shipped, a moved folder gets a startup migration. The
+platform's `paths` module carries the primitives (`adopt_legacy_dir`,
+`adopt_legacy_logs`, `adopt_notes_store`, `mark_notes_store_adopted`) and each
+app composes them in its own startup migration (`AppPaths::migrate_legacy_layout`
+in notes/agent, the `paths::migrate_*` calls in Warp Station); call it before
+logging and before anything reads the moved folders. Migrations are idempotent
+and the notes-store scan is one-shot behind a marker.
 
 ## 6. Packaging and the suite
 
@@ -351,9 +353,14 @@ calls the migration before it reads anything.
   `Exec=` line with the `__WARP_SUITE_BIN__` placeholder resolved at install
   time, so a `.desktop` file must keep that placeholder.
 - A shipped app lives in `apps/<name>/` and gets an `[apps.<name>]` section in
-  `apps.toml` only when it needs non-default build knobs (`linux_build`,
-  `linux_skip`, `icon_prefix`, `scalable_svg`); it documents its contracts under
-  *Cross-app contracts* in the suite README and gets its own `AGENTS.md`.
+  `apps.toml` only when it needs non-default build knobs (`package`,
+  `linux_build`, `linux_skip`, `icon_prefix`, `scalable_svg`); it documents its
+  contracts under *Cross-app contracts* in the suite README and carries its own
+  `AGENTS.md`; the suite-wide rules are in the root `AGENTS.md` and the deep
+  guides live in `docs/agents/`.
+- Windows builds an installer only when `packaging/windows/<app>.iss` exists;
+  without one, `build.ps1` ships a portable zip. A Windows-only app sets
+  `linux_skip = true` (see `apps/warp-snapit` in `apps.toml`).
 - Linux system tray: `ksni` with `blocking`/`async-io` features
   (`KwmSwitcher/src/tray.rs`, outside the suite).
 - Autostart: FreeDesktop `.desktop` entry in the user autostart dir
@@ -364,14 +371,17 @@ calls the migration before it reads anything.
 - `gpui-kit = { version = "0.9", features = ["test-support"] }` under
   `[dev-dependencies]` only.
 - `tests/<name>_probe.rs`, `#[gpui_kit::gpui::test]`,
-  `cx.update(gpui_kit::init)`, real views through the `lib.rs` boundary in
-  headless windows, `VisualTestContext::from_window(handle.into(), cx).into_mut()`.
+  `cx.update(gpui_kit::init)` plus the app's `theme::apply_kit_theme`, real views
+  through the `lib.rs` boundary in headless windows,
+  `VisualTestContext::from_window(handle.into(), cx).into_mut()`.
 - Explicit imports in probe files: a glob of GPUI breaks
   `#[gpui_kit::gpui::test]` (see `docs/agents/testing-and-captures.md`).
 - Geometry assertions via `cx.debug_bounds("selector")`; input via
-  `cx.simulate_mouse_move/up`, keyboard through the focus path; always
-  `run_until_parked()` and force a draw (`drop(window.draw(cx))`) before
+  `cx.simulate_click`/`simulate_mouse_move`, keyboard through the focus path;
+  always `run_until_parked()` and force a draw (`drop(window.draw(cx))`) before
   asserting.
 - Examples to copy: `apps/warp-notes/tests/notes_probe.rs` (a real view),
   `apps/warp-station/crates/warp-station/tests/split_probe.rs` (layout probes),
-  `apps/warp-station/crates/warp-station/tests/settings_probe.rs` (controls).
+  `apps/warp-station/crates/warp-station/tests/settings_probe.rs` (controls),
+  and `kits/warpui-kit-core/tests/` for the shared controls under a scratch
+  `HOME`.

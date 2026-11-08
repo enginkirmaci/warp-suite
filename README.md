@@ -66,7 +66,9 @@ Both builds default the version to `git describe --tags --always
 
 | Path | Purpose |
 |---|---|
+| `AGENTS.md` | suite-wide agent instructions (pins, gates, contracts, traps) |
 | `apps/<name>/` | the app sources, each with its own history (imported with `git subtree`) |
+| `apps/<name>/AGENTS.md` | app-specific agent instructions |
 | `apps.toml` | per-app build knobs (`linux_build`, `linux_skip`, `icon_prefix`, `scalable_svg`) and contract notes |
 | `scripts/manifest.py` | apps.toml reader shared by the scripts + CI |
 | `.cargo/config.toml` | one cargo target dir for the whole suite: `.build/target` for every app, `kits` and `scripts/build.sh` |
@@ -84,6 +86,11 @@ Both builds default the version to `git describe --tags --always
 Each app keeps only packaging assets (`packaging/linux/{*.desktop,icons}`,
 `packaging/windows/{*.ico,*.iss,settings}`); every build and install step
 lives in `scripts/`, so a local build and CI run the same code.
+
+## Agent instructions
+
+Agents start at [`AGENTS.md`](AGENTS.md) for the suite-wide rules, then the
+matching `apps/<name>/AGENTS.md`; the deep guides are in `docs/agents/`.
 
 ## Cross-app contracts
 
