@@ -26,7 +26,7 @@ impl AppPaths {
         Self::app_dir().join("settings.json")
     }
     pub fn repos_cache_file() -> PathBuf {
-        Self::app_dir().join("repos.cache.json")
+        Self::app_dir().join("cache").join("repos.json")
     }
     pub fn notes_dir() -> PathBuf {
         suite::notes_store_root()
@@ -46,7 +46,7 @@ impl AppPaths {
     /// The model catalog cache, beside the repo cache — both are throwaway
     /// catalogs the app rewrites from its source (the door, the repo tree).
     pub fn models_cache_file() -> PathBuf {
-        Self::app_dir().join("models.cache.json")
+        Self::app_dir().join("cache").join("models.json")
     }
 }
 
@@ -74,6 +74,7 @@ pub fn migrate_legacy_data() {
 /// `~/notes`. Both steps are idempotent, so they run before every launch.
 pub fn migrate_suite_layout() {
     migrate_app_entries_at(&AppPaths::user_data_root(), &AppPaths::app_dir());
+    migrate_cache_files_at(&AppPaths::app_dir());
     if suite::notes_store_adopted() {
         return;
     }
@@ -87,6 +88,32 @@ pub fn migrate_suite_layout() {
     let legacy_devtools = home().join(".devtools").join("notes");
     if adopted && !legacy_app.exists() && !legacy_devtools.exists() {
         suite::mark_notes_store_adopted();
+    }
+}
+
+/// The cache files moved from the app folder's root into `cache/` (`repos.json`
+/// and `models.json`). A file already in the new layout wins.
+fn migrate_cache_files_at(app: &Path) {
+    let cache = app.join("cache");
+    for (old, new) in [
+        ("repos.cache.json", "repos.json"),
+        ("models.cache.json", "models.json"),
+    ] {
+        let source = app.join(old);
+        if !source.exists() {
+            continue;
+        }
+        let dest = cache.join(new);
+        if dest.exists() {
+            let _ = std::fs::remove_file(&source);
+            continue;
+        }
+        if std::fs::create_dir_all(&cache).is_err() {
+            continue;
+        }
+        if std::fs::rename(&source, &dest).is_ok() {
+            tracing::info!("moved {} into {}", source.display(), cache.display());
+        }
     }
 }
 
@@ -297,7 +324,7 @@ mod tests {
         );
         assert_eq!(
             AppPaths::repos_cache_file(),
-            AppPaths::app_dir().join("repos.cache.json")
+            AppPaths::app_dir().join("cache").join("repos.json")
         );
         assert_eq!(
             AppPaths::assistant_dir(),
@@ -305,7 +332,7 @@ mod tests {
         );
         assert_eq!(
             AppPaths::models_cache_file(),
-            AppPaths::app_dir().join("models.cache.json")
+            AppPaths::app_dir().join("cache").join("models.json")
         );
         assert_eq!(AppPaths::notes_dir(), home().join("notes"));
         assert_eq!(AppPaths::legacy_notes_dir(), root.join("notes"));
@@ -570,5 +597,21 @@ mod tests {
         migrate_legacy_ai_data_at(root.path());
         assert!(!root.path().join("assistant").exists());
         assert!(!root.path().join("models.cache.json").exists());
+    }
+
+    #[test]
+    fn the_old_cache_files_move_into_the_cache_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = dir.path().join("station");
+        std::fs::create_dir_all(&app).unwrap();
+        std::fs::write(app.join("repos.cache.json"), "{\"Repos\":[]}").unwrap();
+        std::fs::write(app.join("models.cache.json"), "{}").unwrap();
+
+        migrate_cache_files_at(&app);
+
+        assert!(app.join("cache").join("repos.json").is_file());
+        assert!(app.join("cache").join("models.json").is_file());
+        assert!(!app.join("repos.cache.json").exists());
+        assert!(!app.join("models.cache.json").exists());
     }
 }

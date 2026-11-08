@@ -336,15 +336,15 @@ fn harness_model_and_variant_persist(cx: &mut TestAppContext) {
 
     let json = std::fs::read_to_string(&scratch).expect("saved settings");
     assert!(
-        json.contains("\"Harness\": \"dsh\""),
+        json.contains("\"harness\": \"dsh\""),
         "harness persisted: {json}"
     );
     assert!(
-        json.contains("\"DefaultModel\": \"deepseek-account/deepseek-flash\""),
+        json.contains("\"default_model\": \"deepseek-account/deepseek-flash\""),
         "model persisted: {json}"
     );
     assert!(
-        json.contains("\"Variant\": \"max\""),
+        json.contains("\"variant\": \"max\""),
         "variant persisted: {json}"
     );
     assert!(
@@ -728,7 +728,7 @@ fn group_repos_switch_toggles_and_persists(cx: &mut TestAppContext) {
 
     let json = std::fs::read_to_string(&scratch).expect("saved settings");
     assert!(
-        json.contains("\"GroupReposByRoot\": true"),
+        json.contains("\"group_repos_by_root\": true"),
         "the grouping toggle persisted (got {json})"
     );
 
@@ -803,7 +803,7 @@ fn group_depth_picker_renders_grouped_and_persists(cx: &mut TestAppContext) {
     // the pick commits itself — the page has no Save button
     let json = std::fs::read_to_string(&scratch).expect("saved settings");
     assert!(
-        json.contains("\"GroupRootDepth\": 2"),
+        json.contains("\"group_root_depth\": 2"),
         "the picked depth persisted (got {json})"
     );
 
@@ -917,11 +917,11 @@ fn code_search_rows_render_and_persist(cx: &mut TestAppContext) {
 
     let json = std::fs::read_to_string(&scratch).expect("saved settings");
     assert!(
-        json.contains("\"EnableCodeSearch\": false"),
+        json.contains("\"enable_code_search\": false"),
         "the opt-out persisted (got {json})"
     );
     assert!(
-        json.contains("\"CodeSearchExecutable\": \"rgz\""),
+        json.contains("\"code_search_executable\": \"rgz\""),
         "the executable persisted (got {json})"
     );
 

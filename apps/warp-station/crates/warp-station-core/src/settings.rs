@@ -1,16 +1,16 @@
-//! The settings store: schema byte-compatible with the settings.json already
-//! on disk (PascalCase keys, same defaults, enum-as-number sort mode) plus
-//! the single-owner service with the legacy-key migration and the atomic
-//! write.
+//! The settings store: a versioned snake_case `settings.json`, the one-time
+//! importer for the pre-versioning PascalCase file, and the single-owner
+//! service that persists the whole graph atomically.
 
-use crate::jsonio;
 use crate::paths::AppPaths;
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use warpui_kit_platform::config::{Store, rename_legacy_keys};
 
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
-#[serde(rename_all = "PascalCase")]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub struct AppSettings {
     #[serde(default)]
     pub nuget_local: NugetLocalSettings,
@@ -19,16 +19,16 @@ pub struct AppSettings {
     #[serde(default)]
     pub clipboard_password: ClipboardPasswordSettings,
     #[serde(default)]
-    pub snap_it: SnapItSettings,
+    pub snapit: SnapitSettings,
     #[serde(default)]
     pub keep_awake: KeepAwakeSettings,
-    #[serde(default, rename = "OpenCode")]
-    pub opencode: OpenCodeSettings,
-    #[serde(default, rename = "DeepSeek")]
-    pub deepseek: DeepSeekSettings,
-    #[serde(default, rename = "WarpAgent")]
+    #[serde(default)]
+    pub opencode: OpencodeSettings,
+    #[serde(default)]
+    pub deepseek: DeepseekSettings,
+    #[serde(default)]
     pub warp_agent: WarpAgentSettings,
-    #[serde(default, rename = "WarpNotes")]
+    #[serde(default)]
     pub warp_notes: WarpNotesSettings,
     #[serde(default)]
     pub general: GeneralSettings,
@@ -41,7 +41,7 @@ pub struct AppSettings {
 /// as every default: mirroring toasts while Warp Station is unfocused, with
 /// errors, action confirmations and fetch summaries all allowed.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "PascalCase", default)]
+#[serde(rename_all = "snake_case", default, deny_unknown_fields)]
 pub struct NotificationsSettings {
     /// The master switch: off silences the desktop channel entirely (the
     /// in-app toasts are unaffected).
@@ -72,7 +72,7 @@ impl Default for NotificationsSettings {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "PascalCase", default)]
+#[serde(rename_all = "snake_case", default, deny_unknown_fields)]
 pub struct NugetLocalSettings {
     pub enable_nuget: bool,
     pub watch_folder: Option<String>,
@@ -94,29 +94,30 @@ impl Default for NugetLocalSettings {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "PascalCase", default)]
+#[serde(rename_all = "snake_case", default, deny_unknown_fields)]
 pub struct ReposSettings {
     pub repo_scan_folders: Option<Vec<String>>,
+    /// User tags keyed by repo folder. The cache never carries them, so a
+    /// deleted cache cannot lose a favorite or an archived marker.
+    #[serde(default)]
+    pub repo_tags: BTreeMap<String, Vec<String>>,
     pub git_folder_pattern: String,
     pub solution_file_pattern: String,
     pub platform_folder_name: String,
-    #[serde(rename = "VSCodeExecutable")]
     pub vscode_executable: String,
-    #[serde(rename = "VSCodeProfile")]
     pub vscode_profile: String,
     pub terminal_executable: String,
     pub ide_executable: String,
     pub opencode_executable: String,
     pub deepseek_executable: String,
     pub enable_terminal: bool,
-    #[serde(rename = "EnableVSCode")]
     pub enable_vscode: bool,
     pub enable_visual_studio: bool,
-    pub enable_git_hub: bool,
-    pub git_hub_executable: String,
-    pub enable_azure_dev_ops: bool,
-    pub azure_dev_ops_pat: String,
-    pub azure_dev_ops_url: String,
+    pub enable_github: bool,
+    pub github_executable: String,
+    pub enable_azure_devops: bool,
+    pub azure_devops_pat: String,
+    pub azure_devops_url: String,
     pub excluded_folders: Option<Vec<String>>,
     pub sort_mode: RepoSortMode,
     /// None = the mode's own default (Name ascending, the rest best-first);
@@ -165,7 +166,7 @@ pub struct ReposSettings {
 /// detail tab it was left on. `tab` carries the WorkspaceTab label so the
 /// file stays readable.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "PascalCase")]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub struct RepoTabView {
     pub folder: String,
     pub tab: String,
@@ -175,6 +176,7 @@ impl Default for ReposSettings {
     fn default() -> Self {
         Self {
             repo_scan_folders: None,
+            repo_tags: BTreeMap::new(),
             git_folder_pattern: "*.git".into(),
             solution_file_pattern: "*.sln,*.slnx".into(),
             platform_folder_name: "platform".into(),
@@ -187,11 +189,11 @@ impl Default for ReposSettings {
             enable_terminal: true,
             enable_vscode: true,
             enable_visual_studio: true,
-            enable_git_hub: true,
-            git_hub_executable: "gh".into(),
-            enable_azure_dev_ops: true,
-            azure_dev_ops_pat: String::new(),
-            azure_dev_ops_url: String::new(),
+            enable_github: true,
+            github_executable: "gh".into(),
+            enable_azure_devops: true,
+            azure_devops_pat: String::new(),
+            azure_devops_url: String::new(),
             excluded_folders: None,
             sort_mode: RepoSortMode::Name,
             sort_ascending: None,
@@ -274,34 +276,31 @@ fn default_harness() -> String {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "PascalCase", default)]
+#[serde(rename_all = "snake_case", default, deny_unknown_fields)]
 #[derive(Default)]
-pub struct OpenCodeSettings {
-    #[serde(rename = "EnableOpenCode")]
+pub struct OpencodeSettings {
     pub enable_opencode: bool,
     /// The one model every AI run uses (the wands, commit messages and the
-    /// daily summary). The JSON key stays `DefaultModel` so existing files
-    /// load unchanged; the UI calls it "Model".
-    #[serde(rename = "DefaultModel")]
+    /// daily summary). The UI calls it "Model"; the file keeps the
+    /// `default_model` spelling.
+    #[serde(rename = "default_model")]
     pub model: String,
 }
 
 /// The DeepSeek CLI quick-launch: only arms the repo row's launch button —
 /// the runs themselves happen in warp-agent, never in the dsh binary.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "PascalCase", default)]
+#[serde(rename_all = "snake_case", default, deny_unknown_fields)]
 #[derive(Default)]
-pub struct DeepSeekSettings {
-    #[serde(rename = "EnableDeepSeek")]
+pub struct DeepseekSettings {
     pub enable_deepseek: bool,
 }
 
 /// The warp-agent integration: Warp Station' AI surface runs in warp-agent over
 /// its door, so these toggle the whole AI feature set and name its binary.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "PascalCase", default)]
+#[serde(rename_all = "snake_case", default, deny_unknown_fields)]
 pub struct WarpAgentSettings {
-    #[serde(rename = "EnableWarpAgent")]
     pub enable_warp_agent: bool,
     pub executable: String,
     /// The warp-agent harness id ("opencode", "dsh", …). The door owns the
@@ -340,9 +339,8 @@ impl Default for WarpAgentSettings {
 /// over the shared ~/notes store, so these toggle the feature set and
 /// name its binary.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "PascalCase", default)]
+#[serde(rename_all = "snake_case", default, deny_unknown_fields)]
 pub struct WarpNotesSettings {
-    #[serde(rename = "EnableWarpNotes")]
     pub enable_warp_notes: bool,
     pub executable: String,
 }
@@ -357,7 +355,7 @@ impl Default for WarpNotesSettings {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "PascalCase", default)]
+#[serde(rename_all = "snake_case", default, deny_unknown_fields)]
 #[derive(Default)]
 pub struct ClipboardPasswordSettings {
     pub encrypted_password: Option<String>,
@@ -365,9 +363,9 @@ pub struct ClipboardPasswordSettings {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "PascalCase", default)]
+#[serde(rename_all = "snake_case", default, deny_unknown_fields)]
 #[derive(Default)]
-pub struct SnapItSettings {
+pub struct SnapitSettings {
     /// Spawns the SnapIt companion at app launch.
     pub auto_start: bool,
     /// The companion binary to launch; empty = the packaged Tools.SnapIt.exe
@@ -377,7 +375,7 @@ pub struct SnapItSettings {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "PascalCase", default)]
+#[serde(rename_all = "snake_case", default, deny_unknown_fields)]
 #[derive(Default)]
 pub struct KeepAwakeSettings {
     /// Restores the keep-awake execution state at app launch.
@@ -385,14 +383,14 @@ pub struct KeepAwakeSettings {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "PascalCase", default)]
+#[serde(rename_all = "snake_case", default, deny_unknown_fields)]
 pub struct GeneralSettings {
     pub start_minimized: bool,
     pub start_at_boot: bool,
     pub notes_store_path: String,
     pub show_tooltips: bool,
     /// "compact" | "normal" | "large" text-size variant; None = normal.
-    pub font_scale: Option<String>,
+    pub text_size: Option<String>,
     /// Turns the family's motion off. The busy words stay.
     pub reduce_motion: bool,
 }
@@ -404,7 +402,7 @@ impl Default for GeneralSettings {
             start_at_boot: false,
             notes_store_path: String::new(),
             show_tooltips: true,
-            font_scale: None,
+            text_size: None,
             reduce_motion: false,
         }
     }
@@ -414,7 +412,7 @@ impl Default for GeneralSettings {
 /// serialized and persisted atomically. An unreadable file falls back to
 /// defaults instead of failing startup.
 pub struct SettingsService {
-    path: PathBuf,
+    store: Store<AppSettings>,
     state: Mutex<AppSettings>,
 }
 
@@ -435,19 +433,45 @@ impl SettingsService {
     }
 
     pub fn at(path: PathBuf) -> Self {
-        let settings = match std::fs::read_to_string(&path) {
-            Ok(json) => Self::parse(&json).unwrap_or_default(),
-            Err(_) => AppSettings::default(),
-        };
-        Self {
-            path,
-            state: Mutex::new(settings),
-        }
+        Self::load(path, true)
     }
 
-    fn parse(json: &str) -> anyhow::Result<AppSettings> {
-        let migrated = migrate_legacy_enable_keys(json);
-        Ok(serde_json::from_str(&migrated)?)
+    /// A read-only view for the net thread and the clipboard ping: it reads
+    /// the same file but never rewrites an unversioned one.
+    pub fn open_readonly() -> Self {
+        let service = Self::load(AppPaths::settings_file(), false);
+        let legacy = AppPaths::legacy_notes_dir().to_string_lossy().to_string();
+        let mut current = service.get();
+        if clear_legacy_notes_path(&mut current, &legacy) {
+            *service.state.lock().unwrap() = current;
+        }
+        service
+    }
+
+    pub fn at_readonly(path: PathBuf) -> Self {
+        Self::load(path, false)
+    }
+
+    fn load(path: PathBuf, persist_import: bool) -> Self {
+        let store = Store::<AppSettings>::new(path.clone());
+        let settings = match store.load() {
+            Ok(settings) => settings,
+            Err(err) if err.needs_import() => {
+                let imported = import_legacy(&path);
+                if persist_import && let Some(settings) = &imported {
+                    let _ = store.save(settings);
+                }
+                imported.unwrap_or_default()
+            }
+            Err(err) => {
+                tracing::warn!("could not read {}: {err}", path.display());
+                AppSettings::default()
+            }
+        };
+        Self {
+            store,
+            state: Mutex::new(settings),
+        }
     }
 
     pub fn get(&self) -> AppSettings {
@@ -458,15 +482,118 @@ impl SettingsService {
     /// graph as one transition, so concurrent section updates stack instead of
     /// racing.
     pub fn update(&self, mutate: impl FnOnce(&mut AppSettings)) -> anyhow::Result<AppSettings> {
-        let (updated, path) = {
+        let updated = {
             let mut guard = self.state.lock().unwrap();
             let mut next = guard.clone();
             mutate(&mut next);
             *guard = next.clone();
-            (next, self.path.clone())
+            next
         };
-        jsonio::write_json_atomically(&path, &updated)?;
+        self.store.save(&updated)?;
         Ok(updated)
+    }
+}
+
+/// The pre-versioning file: PascalCase keys, the old per-tool toggles, and a
+/// few fields the app has since retired. Translate once; the live type is
+/// strict.
+fn import_legacy(path: &Path) -> Option<AppSettings> {
+    import_legacy_json(&std::fs::read_to_string(path).ok()?)
+}
+
+fn import_legacy_json(text: &str) -> Option<AppSettings> {
+    let mut root: serde_json::Value = serde_json::from_str(text).ok()?;
+    rename_legacy_keys(&mut root, &[]).ok()?;
+
+    copy_section_bool(
+        &mut root,
+        "repos",
+        "show_github_column",
+        "enable_github",
+        false,
+    );
+    copy_section_bool(
+        &mut root,
+        "repos",
+        "show_azure_devops_column",
+        "enable_azure_devops",
+        false,
+    );
+    copy_section_bool(&mut root, "opencode", "enabled", "enable_opencode", false);
+    copy_section_bool(
+        &mut root,
+        "clipboard_password",
+        "hide_from_gui",
+        "enable_clipboard_password",
+        true,
+    );
+    move_section_key(&mut root, "general", "font_scale", "text_size");
+    remove_section_keys(
+        &mut root,
+        "repos",
+        &[
+            "auto_fetch_minutes",
+            "auto_fetch_only_focused",
+            "auto_refresh_minutes",
+            "sync_on_focus",
+        ],
+    );
+    remove_section_keys(&mut root, "opencode", &["commit_model"]);
+
+    serde_json::from_value(root).ok()
+}
+
+/// Copy a legacy bool to its new key unless the new key is already there,
+/// then remove the legacy spelling.
+fn copy_section_bool(
+    root: &mut serde_json::Value,
+    section: &str,
+    old: &str,
+    new: &str,
+    inverted: bool,
+) {
+    let Some(object) = root
+        .get_mut(section)
+        .and_then(serde_json::Value::as_object_mut)
+    else {
+        return;
+    };
+    let Some(value) = object.get(old).and_then(serde_json::Value::as_bool) else {
+        return;
+    };
+    if !object.contains_key(new) {
+        object.insert(
+            new.to_string(),
+            serde_json::Value::Bool(if inverted { !value } else { value }),
+        );
+    }
+    object.remove(old);
+}
+
+fn move_section_key(root: &mut serde_json::Value, section: &str, old: &str, new: &str) {
+    let Some(object) = root
+        .get_mut(section)
+        .and_then(serde_json::Value::as_object_mut)
+    else {
+        return;
+    };
+    let Some(value) = object.remove(old) else {
+        return;
+    };
+    if !object.contains_key(new) {
+        object.insert(new.to_string(), value);
+    }
+}
+
+fn remove_section_keys(root: &mut serde_json::Value, section: &str, keys: &[&str]) {
+    let Some(object) = root
+        .get_mut(section)
+        .and_then(serde_json::Value::as_object_mut)
+    else {
+        return;
+    };
+    for key in keys {
+        object.remove(*key);
     }
 }
 
@@ -482,65 +609,38 @@ fn clear_legacy_notes_path(settings: &mut AppSettings, legacy: &str) -> bool {
     }
 }
 
-/// Maps the legacy per-tool toggle keys to the uniform Enable<Tool> scheme,
-/// each only when the new key is absent: Repos.ShowGitHubColumn →
-/// Repos.EnableGitHub, Repos.ShowAzureDevOpsColumn → Repos.EnableAzureDevOps,
-/// OpenCode.Enabled → OpenCode.EnableOpenCode, and the INVERTED
-/// ClipboardPassword.HideFromGui → ClipboardPassword.EnableClipboardPassword.
-fn migrate_legacy_enable_keys(json: &str) -> String {
-    let Ok(mut root) = serde_json::from_str::<serde_json::Value>(json) else {
-        return json.to_string();
-    };
-    let mut changed = false;
-    let mut copy_bool = |section: &str, legacy: &str, new: &str, inverted: bool| {
-        let Some(obj) = root.get_mut(section).and_then(|v| v.as_object_mut()) else {
-            return;
-        };
-        let Some(legacy_value) = obj.get(legacy).and_then(|v| v.as_bool()) else {
-            return;
-        };
-        if obj.contains_key(new) {
-            return;
-        }
-        obj.insert(
-            new.to_string(),
-            serde_json::Value::Bool(if inverted {
-                !legacy_value
-            } else {
-                legacy_value
-            }),
-        );
-        changed = true;
-    };
-    copy_bool("Repos", "ShowGitHubColumn", "EnableGitHub", false);
-    copy_bool("Repos", "ShowAzureDevOpsColumn", "EnableAzureDevOps", false);
-    copy_bool("OpenCode", "Enabled", "EnableOpenCode", false);
-    copy_bool(
-        "ClipboardPassword",
-        "HideFromGui",
-        "EnableClipboardPassword",
-        true,
-    );
-    if changed {
-        root.to_string()
-    } else {
-        json.to_string()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    fn imported(json: &str) -> AppSettings {
+        import_legacy_json(json).expect("legacy settings import")
+    }
+
+    fn scratch(name: &str) -> PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let dir = std::env::temp_dir().join(format!(
+            "warp-station-settings-{name}-{}-{nanos}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir.join("settings.json")
+    }
+
     #[test]
     fn reads_the_legacy_file_shape() {
-        let json = r#"{
+        let s = imported(
+            r#"{
             "Repos": {"RepoScanFolders": ["/a", "/b"], "SortMode": 2, "MaxScanDepth": 5,
                       "EnableGitHub": true, "AzureDevOpsPat": "pat"},
             "General": {"ShowTooltips": false},
             "OpenCode": {"EnableOpenCode": true, "DefaultModel": "x", "CommitModel": "legacy"}
-        }"#;
-        let s: AppSettings = serde_json::from_str(json).unwrap();
+        }"#,
+        );
         assert_eq!(
             s.repos.repo_scan_folders.as_deref(),
             Some(&["/a".to_string(), "/b".to_string()][..])
@@ -552,7 +652,6 @@ mod tests {
         assert_eq!(s.opencode.model, "x");
         assert_eq!(s.warp_agent.selected_harness(), DEFAULT_HARNESS);
         assert_eq!(s.warp_agent.variant, None);
-        // defaults fill absent sections
         assert!(s.nuget_local.enable_nuget);
         assert!(!s.keep_awake.enabled);
         assert_eq!(s.repos.branch_name_prefix, "users/enginkirmaci");
@@ -560,16 +659,14 @@ mod tests {
 
     #[test]
     fn legacy_enable_keys_migrate_once() {
-        let json =
-            r#"{"OpenCode": {"Enabled": true}, "ClipboardPassword": {"HideFromGui": false}}"#;
-        let s: AppSettings = serde_json::from_str(&migrate_legacy_enable_keys(json)).unwrap();
+        let s = imported(
+            r#"{"OpenCode": {"Enabled": true}, "ClipboardPassword": {"HideFromGui": false}}"#,
+        );
         assert!(s.opencode.enable_opencode);
-        // inverted legacy key: HideFromGui=false → enabled
         assert!(s.clipboard_password.enable_clipboard_password);
-        // an explicit new key wins over the legacy one
-        let json2 = r#"{"OpenCode": {"Enabled": true, "EnableOpenCode": false}}"#;
-        let s2: AppSettings = serde_json::from_str(&migrate_legacy_enable_keys(json2)).unwrap();
-        assert!(!s2.opencode.enable_opencode);
+
+        let s = imported(r#"{"OpenCode": {"Enabled": true, "EnableOpenCode": false}}"#);
+        assert!(!s.opencode.enable_opencode, "the explicit new key wins");
     }
 
     #[test]
@@ -588,20 +685,18 @@ mod tests {
     }
 
     #[test]
-    fn round_trips_pascal_case() {
+    fn round_trips_snake_case() {
         let s = AppSettings::default();
         let json = serde_json::to_string_pretty(&s).unwrap();
-        assert!(json.contains("\"RepoScanFolders\""));
-        assert!(json.contains("\"MaxScanDepth\""));
+        assert!(json.contains("\"repo_scan_folders\""));
+        assert!(json.contains("\"max_scan_depth\""));
         let back: AppSettings = serde_json::from_str(&json).unwrap();
         assert_eq!(back.repos.sort_mode, s.repos.sort_mode);
     }
 
     #[test]
     fn retired_fetch_keys_load_and_are_not_written_back() {
-        // a settings file written before the periodic fetch removal still
-        // loads: unknown keys are ignored, and the next save drops them
-        let legacy: AppSettings = serde_json::from_str(
+        let legacy = imported(
             r#"{"Repos": {
                 "AutoFetchMinutes": 15,
                 "AutoFetchOnlyFocused": true,
@@ -609,15 +704,14 @@ mod tests {
                 "SyncOnFocus": true,
                 "BranchNamePrefix": "users/x"
             }}"#,
-        )
-        .unwrap();
+        );
         assert_eq!(legacy.repos.branch_name_prefix, "users/x");
         let json = serde_json::to_string_pretty(&legacy).unwrap();
         for key in [
-            "AutoFetchMinutes",
-            "AutoFetchOnlyFocused",
-            "AutoRefreshMinutes",
-            "SyncOnFocus",
+            "auto_fetch_minutes",
+            "auto_fetch_only_focused",
+            "auto_refresh_minutes",
+            "sync_on_focus",
         ] {
             assert!(!json.contains(key), "{key} must not be written back");
         }
@@ -625,14 +719,13 @@ mod tests {
 
     #[test]
     fn group_repos_keys_round_trip_and_absent_means_flat() {
-        // absence (legacy files) = flat list, nothing collapsed
         let legacy: AppSettings = serde_json::from_str("{}").unwrap();
         assert_eq!(legacy.repos.group_repos_by_root, None);
         assert_eq!(legacy.repos.group_root_depth, None);
         assert_eq!(legacy.repos.collapsed_groups, None);
-        // an explicit grouping toggle and collapsed keys persist and read back
+
         let on: AppSettings = serde_json::from_str(
-            r#"{"Repos": {"GroupReposByRoot": true, "GroupRootDepth": 2, "CollapsedGroups": ["/work/rust", "other"]}}"#,
+            r#"{"repos": {"group_repos_by_root": true, "group_root_depth": 2, "collapsed_groups": ["/work/rust", "other"]}}"#,
         )
         .unwrap();
         assert_eq!(on.repos.group_repos_by_root, Some(true));
@@ -642,104 +735,81 @@ mod tests {
             Some(vec!["/work/rust".to_string(), "other".to_string()])
         );
         let json = serde_json::to_string_pretty(&on).unwrap();
-        assert!(json.contains("\"GroupReposByRoot\": true"));
-        assert!(json.contains("\"GroupRootDepth\": 2"));
-        assert!(json.contains("\"CollapsedGroups\""));
+        assert!(json.contains("\"group_repos_by_root\": true"));
+        assert!(json.contains("\"group_root_depth\": 2"));
+        assert!(json.contains("\"collapsed_groups\""));
         let back: AppSettings = serde_json::from_str(&json).unwrap();
-        assert_eq!(back.repos.group_repos_by_root, Some(true));
-        assert_eq!(back.repos.group_root_depth, Some(2));
-        assert_eq!(back.repos.collapsed_groups, on.repos.collapsed_groups);
+        assert_eq!(back.repos, on.repos);
     }
 
     #[test]
     fn code_search_keys_round_trip_and_absent_means_enabled() {
-        // absence (legacy files) = the feature is on, through the default rg
         let legacy: AppSettings = serde_json::from_str("{}").unwrap();
         assert_eq!(legacy.repos.enable_code_search, None);
         assert_ne!(legacy.repos.enable_code_search, Some(false));
         assert_eq!(legacy.repos.code_search_executable.as_deref(), None);
-        assert_eq!(
-            legacy
-                .repos
-                .code_search_executable
-                .clone()
-                .unwrap_or_else(|| "rg".into()),
-            "rg"
-        );
-        // an explicit opt-out and a custom binary persist and read back
+
         let off: AppSettings = serde_json::from_str(
-            r#"{"Repos": {"EnableCodeSearch": false, "CodeSearchExecutable": "rgz"}}"#,
+            r#"{"repos": {"enable_code_search": false, "code_search_executable": "rgz"}}"#,
         )
         .unwrap();
         assert_eq!(off.repos.enable_code_search, Some(false));
         assert_eq!(off.repos.code_search_executable.as_deref(), Some("rgz"));
         let json = serde_json::to_string_pretty(&off).unwrap();
-        assert!(json.contains("\"EnableCodeSearch\": false"));
-        assert!(json.contains("\"CodeSearchExecutable\": \"rgz\""));
+        assert!(json.contains("\"enable_code_search\": false"));
+        assert!(json.contains("\"code_search_executable\": \"rgz\""));
         let back: AppSettings = serde_json::from_str(&json).unwrap();
         assert_eq!(back.repos.enable_code_search, Some(false));
         assert_eq!(back.repos.code_search_executable.as_deref(), Some("rgz"));
     }
 
     #[test]
-    fn snap_it_executable_round_trips_and_absent_means_packaged_companion() {
-        // absence (legacy files) = the packaged side-by-side companion
+    fn snapit_executable_round_trips_and_absent_means_packaged_companion() {
         let legacy: AppSettings = serde_json::from_str("{}").unwrap();
-        assert_eq!(legacy.snap_it.executable, "");
-        let custom: AppSettings =
-            serde_json::from_str(r#"{"SnapIt": {"Executable": "snapit"}}"#).unwrap();
-        assert_eq!(custom.snap_it.executable, "snapit");
+        assert_eq!(legacy.snapit.executable, "");
+        let custom = imported(r#"{"SnapIt": {"Executable": "snapit"}}"#);
+        assert_eq!(custom.snapit.executable, "snapit");
         let json = serde_json::to_string_pretty(&custom).unwrap();
-        assert!(json.contains("\"Executable\": \"snapit\""));
+        assert!(json.contains("\"snapit\""));
+        assert!(json.contains("\"executable\": \"snapit\""));
         let back: AppSettings = serde_json::from_str(&json).unwrap();
-        assert_eq!(back.snap_it.executable, "snapit");
+        assert_eq!(back.snapit.executable, "snapit");
     }
 
     #[test]
     fn deepseek_keys_round_trip_and_absent_means_off() {
-        // absence (legacy files) = the button is off, through the default binary
         let legacy: AppSettings = serde_json::from_str("{}").unwrap();
         assert!(!legacy.deepseek.enable_deepseek);
         assert_eq!(legacy.repos.deepseek_executable, "dsh");
-        let on: AppSettings = serde_json::from_str(
+        let on = imported(
             r#"{"DeepSeek": {"EnableDeepSeek": true}, "Repos": {"DeepseekExecutable": "dshz"}}"#,
-        )
-        .unwrap();
+        );
         assert!(on.deepseek.enable_deepseek);
         assert_eq!(on.repos.deepseek_executable, "dshz");
         let json = serde_json::to_string_pretty(&on).unwrap();
-        assert!(json.contains("\"EnableDeepSeek\": true"));
-        assert!(json.contains("\"DeepseekExecutable\": \"dshz\""));
-        let back: AppSettings = serde_json::from_str(&json).unwrap();
-        assert!(back.deepseek.enable_deepseek);
-        assert_eq!(back.repos.deepseek_executable, "dshz");
+        assert!(json.contains("\"enable_deepseek\": true"));
+        assert!(json.contains("\"deepseek_executable\": \"dshz\""));
     }
 
     #[test]
     fn warp_agent_defaults_on_with_executable() {
-        // absent section = enabled with the default binary name
         let s: AppSettings = serde_json::from_str("{}").unwrap();
         assert!(s.warp_agent.enable_warp_agent);
         assert_eq!(s.warp_agent.executable, "warp-agent");
         assert_eq!(s.warp_agent.selected_harness(), DEFAULT_HARNESS);
         assert_eq!(s.warp_agent.variant, None);
-        let configured: AppSettings =
-            serde_json::from_str(r#"{"WarpAgent": {"Harness": "dsh", "Variant": "max"}}"#).unwrap();
+
+        let configured = imported(r#"{"WarpAgent": {"Harness": "dsh", "Variant": "max"}}"#);
         assert_eq!(configured.warp_agent.selected_harness(), "dsh");
         assert_eq!(configured.warp_agent.variant.as_deref(), Some("max"));
-        // an explicit off round-trips
-        let off: AppSettings = serde_json::from_str(
-            r#"{"WarpAgent": {"EnableWarpAgent": false, "Executable": "wa"}}"#,
-        )
-        .unwrap();
+
+        let off = imported(r#"{"WarpAgent": {"EnableWarpAgent": false, "Executable": "wa"}}"#);
         assert!(!off.warp_agent.enable_warp_agent);
         assert_eq!(off.warp_agent.executable, "wa");
     }
 
     #[test]
     fn ui_state_keys_round_trip_and_absent_means_defaults() {
-        // legacy files predate every UI-state key: absence reads as the
-        // launch defaults (no archive toggle, first row, Repositories tab)
         let legacy: AppSettings = serde_json::from_str("{}").unwrap();
         assert_eq!(legacy.repos.show_archived, None);
         assert_eq!(legacy.repos.selected_repo, None);
@@ -747,7 +817,7 @@ mod tests {
         assert_eq!(legacy.repos.tab_views, None);
         assert_eq!(legacy.repos.home_view, None);
 
-        let arranged: AppSettings = serde_json::from_str(
+        let arranged = imported(
             r#"{
                 "Repos": {
                     "ShowArchived": true,
@@ -757,8 +827,7 @@ mod tests {
                     "HomeView": {"Folder": "/work/alpha", "Tab": "History"}
                 }
             }"#,
-        )
-        .unwrap();
+        );
         assert_eq!(arranged.repos.show_archived, Some(true));
         assert_eq!(arranged.repos.selected_repo.as_deref(), Some("/work/alpha"));
         assert_eq!(arranged.repos.open_tab.as_deref(), Some("/work/beta"));
@@ -768,21 +837,18 @@ mod tests {
             Some("History")
         );
 
-        // and the whole graph serializes back under the same PascalCase keys
         let json = serde_json::to_string_pretty(&arranged).unwrap();
-        assert!(json.contains("\"ShowArchived\": true"));
-        assert!(json.contains("\"SelectedRepo\": \"/work/alpha\""));
-        assert!(json.contains("\"OpenTab\""));
-        assert!(json.contains("\"TabViews\""));
-        assert!(json.contains("\"HomeView\""));
+        assert!(json.contains("\"show_archived\": true"));
+        assert!(json.contains("\"selected_repo\": \"/work/alpha\""));
+        assert!(json.contains("\"open_tab\""));
+        assert!(json.contains("\"tab_views\""));
+        assert!(json.contains("\"home_view\""));
         let back: AppSettings = serde_json::from_str(&json).unwrap();
         assert_eq!(back.repos, arranged.repos);
     }
 
     #[test]
     fn notifications_round_trip_and_absent_means_on_unfocused() {
-        // files before the section carry no key at all: absence reads as the
-        // defaults (mirroring on, unfocused-only, every category allowed)
         let legacy: AppSettings = serde_json::from_str("{}").unwrap();
         assert!(legacy.notifications.enabled);
         assert!(legacy.notifications.only_when_unfocused);
@@ -790,23 +856,19 @@ mod tests {
         assert!(legacy.notifications.action_confirmations);
         assert!(legacy.notifications.fetch_summaries);
 
-        let tuned: AppSettings = serde_json::from_str(
+        let tuned = imported(
             r#"{"Notifications": {"Enabled": false, "OnlyWhenUnfocused": false,
                 "Errors": false, "ActionConfirmations": false, "FetchSummaries": false}}"#,
-        )
-        .unwrap();
+        );
         assert!(!tuned.notifications.enabled);
         assert!(!tuned.notifications.only_when_unfocused);
         assert!(!tuned.notifications.errors);
         assert!(!tuned.notifications.action_confirmations);
         assert!(!tuned.notifications.fetch_summaries);
 
-        // and the whole section serializes back under the same PascalCase keys
         let json = serde_json::to_string_pretty(&tuned).unwrap();
-        assert!(json.contains("\"Notifications\""));
-        assert!(json.contains("\"OnlyWhenUnfocused\": false"));
-        let back: AppSettings = serde_json::from_str(&json).unwrap();
-        assert_eq!(back.notifications, tuned.notifications);
+        assert!(json.contains("\"notifications\""));
+        assert!(json.contains("\"only_when_unfocused\": false"));
     }
 
     #[test]
@@ -825,5 +887,32 @@ mod tests {
         custom.general.notes_store_path = "/data/notes".into();
         assert!(!clear_legacy_notes_path(&mut custom, legacy));
         assert_eq!(custom.general.notes_store_path, "/data/notes");
+    }
+
+    #[test]
+    fn the_service_imports_once_and_writes_a_versioned_file() {
+        let path = scratch("import");
+        std::fs::write(
+            &path,
+            r#"{"Repos": {"EnableGitHub": false, "GitHubExecutable": "gh-old"},
+                "General": {"FontScale": "large"},
+                "OpenCode": {"DefaultModel": "x"}}"#,
+        )
+        .unwrap();
+
+        let service = SettingsService::at(path.clone());
+        assert!(!service.get().repos.enable_github);
+        assert_eq!(service.get().repos.github_executable, "gh-old");
+        assert_eq!(service.get().general.text_size.as_deref(), Some("large"));
+        assert_eq!(service.get().opencode.model, "x");
+
+        let saved: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(saved["schema_version"], 1);
+        assert_eq!(saved["repos"]["enable_github"], false);
+        assert_eq!(saved["general"]["text_size"], "large");
+        assert!(saved.get("Repos").is_none());
+
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 }

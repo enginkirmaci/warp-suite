@@ -124,8 +124,8 @@ pub struct SettingsPage {
     enable_terminal: bool,
     enable_vscode: bool,
     enable_visual_studio: bool,
-    snap_it_auto_start: bool,
-    snap_it_executable: Entity<InputState>,
+    snapit_auto_start: bool,
+    snapit_executable: Entity<InputState>,
     // OpenCode CLI (the repo row's launch button)
     enable_opencode: bool,
     opencode_executable: Entity<InputState>,
@@ -188,11 +188,11 @@ fn save_effects(before: &AppSettings, after: &AppSettings) -> SaveEffects {
         || before.repos.solution_file_pattern != after.repos.solution_file_pattern
         || before.repos.platform_folder_name != after.repos.platform_folder_name
         || before.repos.max_scan_depth != after.repos.max_scan_depth;
-    let github = before.repos.enable_git_hub != after.repos.enable_git_hub
-        || before.repos.git_hub_executable != after.repos.git_hub_executable;
-    let azure = before.repos.enable_azure_dev_ops != after.repos.enable_azure_dev_ops
-        || before.repos.azure_dev_ops_pat != after.repos.azure_dev_ops_pat
-        || before.repos.azure_dev_ops_url != after.repos.azure_dev_ops_url;
+    let github = before.repos.enable_github != after.repos.enable_github
+        || before.repos.github_executable != after.repos.github_executable;
+    let azure = before.repos.enable_azure_devops != after.repos.enable_azure_devops
+        || before.repos.azure_devops_pat != after.repos.azure_devops_pat
+        || before.repos.azure_devops_url != after.repos.azure_devops_url;
     let models = before.warp_agent.enable_warp_agent != after.warp_agent.enable_warp_agent
         || before.warp_agent.executable != after.warp_agent.executable
         || before.warp_agent.harness != after.warp_agent.harness
@@ -317,8 +317,8 @@ impl SettingsPage {
             enable_terminal: repos.enable_terminal,
             enable_vscode: repos.enable_vscode,
             enable_visual_studio: repos.enable_visual_studio,
-            snap_it_auto_start: settings.snap_it.auto_start,
-            snap_it_executable: field(window, cx, &settings.snap_it.executable),
+            snapit_auto_start: settings.snapit.auto_start,
+            snapit_executable: field(window, cx, &settings.snapit.executable),
             enable_opencode: settings.opencode.enable_opencode,
             enable_deepseek: settings.deepseek.enable_deepseek,
             warp_enabled: settings.warp_agent.enable_warp_agent,
@@ -334,11 +334,11 @@ impl SettingsPage {
             template_editor_seeded: false,
             template_editor,
             reset_armed: None,
-            enable_github: repos.enable_git_hub,
-            github_executable: field(window, cx, &repos.git_hub_executable),
-            enable_azure: repos.enable_azure_dev_ops,
-            azure_pat: field(window, cx, &repos.azure_dev_ops_pat),
-            azure_url: field(window, cx, &repos.azure_dev_ops_url),
+            enable_github: repos.enable_github,
+            github_executable: field(window, cx, &repos.github_executable),
+            enable_azure: repos.enable_azure_devops,
+            azure_pat: field(window, cx, &repos.azure_devops_pat),
+            azure_url: field(window, cx, &repos.azure_devops_url),
             saved_note: None,
             commit_seq: 0,
             section: Section::General,
@@ -361,7 +361,7 @@ impl SettingsPage {
             &page.opencode_executable,
             &page.deepseek_executable,
             &page.code_search_executable,
-            &page.snap_it_executable,
+            &page.snapit_executable,
             &page.warp_executable,
             &page.model,
             &page.variant,
@@ -455,8 +455,8 @@ impl SettingsPage {
             self.notify_actions,
             self.notify_fetch,
         );
-        let snap_it_auto_start = self.snap_it_auto_start;
-        let snap_it_exe = Self::value(&self.snap_it_executable, cx);
+        let snapit_auto_start = self.snapit_auto_start;
+        let snapit_exe = Self::value(&self.snapit_executable, cx);
         let warp_enabled = self.warp_enabled;
         let warp_exe = Self::value(&self.warp_executable, cx);
         let variant = Self::value(&self.variant, cx);
@@ -519,13 +519,13 @@ impl SettingsPage {
                 s.warp_notes.enable_warp_notes = warp_notes_enabled;
                 s.warp_notes.executable = warp_notes_exe;
                 s.opencode.model = model;
-                s.repos.enable_git_hub = flags.7;
-                s.repos.git_hub_executable = github_exe;
-                s.repos.enable_azure_dev_ops = flags.8;
-                s.repos.azure_dev_ops_pat = azure_pat;
-                s.repos.azure_dev_ops_url = azure_url;
-                s.snap_it.auto_start = snap_it_auto_start;
-                s.snap_it.executable = snap_it_exe;
+                s.repos.enable_github = flags.7;
+                s.repos.github_executable = github_exe;
+                s.repos.enable_azure_devops = flags.8;
+                s.repos.azure_devops_pat = azure_pat;
+                s.repos.azure_devops_url = azure_url;
+                s.snapit.auto_start = snapit_auto_start;
+                s.snapit.executable = snapit_exe;
                 s.notifications.enabled = notifications.0;
                 s.notifications.only_when_unfocused = notifications.1;
                 s.notifications.errors = notifications.2;
@@ -1124,17 +1124,17 @@ impl SettingsPage {
                         "set-snapit",
                         "Start SnapIt automatically (Windows)",
                         "settings-row-Start SnapIt automatically (Windows)".to_string(),
-                        self.snap_it_auto_start,
+                        self.snapit_auto_start,
                         rows.is_empty(),
                         cx.listener(|this, _, _, cx| {
-                            this.snap_it_auto_start = !this.snap_it_auto_start;
+                            this.snapit_auto_start = !this.snapit_auto_start;
                             this.save(cx);
                             cx.notify();
                         }),
                     ));
                     rows.push(field_row(
                         "SnapIt executable",
-                        &self.snap_it_executable,
+                        &self.snapit_executable,
                         rows.is_empty(),
                         window,
                         cx,
@@ -2036,7 +2036,7 @@ mod tests {
         );
 
         let mut github = before.clone();
-        github.repos.git_hub_executable = "gh-custom".into();
+        github.repos.github_executable = "gh-custom".into();
         assert_eq!(
             save_effects(&before, &github),
             SaveEffects {
@@ -2046,7 +2046,7 @@ mod tests {
         );
 
         let mut azure = before.clone();
-        azure.repos.azure_dev_ops_pat = "token".into();
+        azure.repos.azure_devops_pat = "token".into();
         assert_eq!(
             save_effects(&before, &azure),
             SaveEffects {

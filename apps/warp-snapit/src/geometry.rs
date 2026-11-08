@@ -126,7 +126,7 @@ impl Rect {
 
 /// A line of a layout: a vertical or horizontal split.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
-#[serde(rename_all = "PascalCase")]
+#[serde(rename_all = "snake_case")]
 #[derive(Default)]
 pub enum SplitDirection {
     #[default]

@@ -10,12 +10,13 @@ cargo test           # unit + live git parity + headless UI probes
 ```
 
 User data lives under `~/.warp`: this app's own folder `~/.warp/station`
-(settings, repos cache, `models.cache.json` and `assistant/` with the prompt
-templates), the suite's shared `logs/`, the kit's `ui.json` and the SnapIt
-settings. The notes store is user content in `~/notes`. An old `opencode/`
-folder — or a stray `ai/` from a development build — is split on startup, a
-legacy `~/.devtools` root is absorbed into `~/.warp` on first launch, and the
-root files move into `~/.warp/station` once.
+(versioned `settings.json`, `cache/repos.json`, `cache/models.json` and
+`assistant/` with the prompt templates), the suite's shared `logs/`, the kit's
+`ui.json` and the SnapIt settings. Repo tags live in `settings.json`, so the
+cache is disposable. The notes store is user content in `~/notes`. An old
+`opencode/` folder — or a stray `ai/` from a development build — is split on
+startup, a legacy `~/.devtools` root is absorbed into `~/.warp` on first
+launch, and the root files move into `~/.warp/station` once.
 
 ## warp-agent integration
 
@@ -58,4 +59,4 @@ The Windows zone snapper lives in its own repo,
 [enginkirmaci/warp-snapit](https://github.com/enginkirmaci/warp-snapit), and
 reads the same `~/.warp/snapit` settings/layouts. `warp-snapit.exe` is
 distributed through [warp-suite](https://github.com/enginkirmaci/warp-suite)
-releases (`SnapIt.Executable` in the settings points Warp Station at the exe).
+releases (`snapit.executable` in the settings points Warp Station at the exe).

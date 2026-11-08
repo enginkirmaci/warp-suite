@@ -1401,8 +1401,8 @@ fn activity_passes_sweep_the_live_list_and_skip_archived(cx: &mut TestAppContext
     // an integration switched off sends nothing, even due
     cx.update_entity(&store, |s: &mut Store, _| {
         s.update_settings(|settings| {
-            settings.repos.enable_git_hub = false;
-            settings.repos.enable_azure_dev_ops = false;
+            settings.repos.enable_github = false;
+            settings.repos.enable_azure_devops = false;
         });
         s.next_activity_refresh =
             Some(std::time::Instant::now() - std::time::Duration::from_secs(1));
@@ -1499,8 +1499,8 @@ fn refresh_kicks_the_eager_github_and_azure_set_only(cx: &mut TestAppContext) {
     cx.update_entity(&store, |s: &mut Store, _| {
         s.scanning = false;
         s.update_settings(|settings| {
-            settings.repos.enable_git_hub = false;
-            settings.repos.enable_azure_dev_ops = false;
+            settings.repos.enable_github = false;
+            settings.repos.enable_azure_devops = false;
         });
     });
     cx.update_entity(&store, |s: &mut Store, cx| s.refresh(cx));

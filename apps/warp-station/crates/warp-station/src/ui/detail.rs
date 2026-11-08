@@ -158,7 +158,7 @@ pub fn render(
         )
         .child(crate::ui::repos_list::stats(
             repo,
-            settings.repos.enable_git_hub,
+            settings.repos.enable_github,
             None,
         ));
 

@@ -407,6 +407,42 @@ impl Store {
             code_search_generation: 0,
             code_searching: false,
         };
+
+        // User tags moved from the repo cache into settings. Lift the old
+        // cache's tags once, then let settings be the source of truth; the
+        // cache write below drops the duplicated tag list.
+        let cached_tags: std::collections::BTreeMap<String, Vec<String>> = store
+            .repos
+            .iter()
+            .filter(|repo| !repo.tags.is_empty())
+            .map(|repo| {
+                (
+                    repo.folder_path.to_string_lossy().to_string(),
+                    user_tags(&repo.tags),
+                )
+            })
+            .filter(|(_, tags)| !tags.is_empty())
+            .collect();
+        let settings_tags = store.settings.get().repos.repo_tags;
+        let mut lifted_cache_tags = false;
+        if settings_tags.is_empty() {
+            if !cached_tags.is_empty() {
+                let _ = store
+                    .settings
+                    .update(|settings| settings.repos.repo_tags = cached_tags);
+                lifted_cache_tags = true;
+            }
+        } else {
+            for repo in &mut store.repos {
+                repo.tags = settings_tags
+                    .get(&repo.folder_path.to_string_lossy().to_string())
+                    .cloned()
+                    .unwrap_or_default();
+            }
+        }
+        if lifted_cache_tags {
+            store.save_cache_now();
+        }
         store.pending_tabs = store.settings().repos.repo_tabs.unwrap_or_default();
         // the rest of the last run's arrangement waits for its repos to land:
         // each tab's resting view, the on-screen tab and the selected row
@@ -1157,14 +1193,14 @@ impl Store {
     /// resolves; a disabled column spawns no processes at all.
     pub fn kick_github_pass(&mut self, folders: &[std::path::PathBuf]) {
         let settings = self.settings();
-        if !settings.repos.enable_git_hub || folders.is_empty() {
+        if !settings.repos.enable_github || folders.is_empty() {
             return;
         }
-        let Some(gh_path) = warp_station_core::exe::locate(&settings.repos.git_hub_executable)
+        let Some(gh_path) = warp_station_core::exe::locate(&settings.repos.github_executable)
         else {
             tracing::warn!(
                 "GitHub column enabled but the gh CLI could not be located ({})",
-                settings.repos.git_hub_executable
+                settings.repos.github_executable
             );
             return;
         };
@@ -1178,10 +1214,10 @@ impl Store {
     /// resolves (settings or the environment fallbacks).
     pub fn kick_azure_pass(&mut self, folders: &[std::path::PathBuf]) {
         let settings = self.settings();
-        if !settings.repos.enable_azure_dev_ops || folders.is_empty() {
+        if !settings.repos.enable_azure_devops || folders.is_empty() {
             return;
         }
-        let Some(pat) = warp_station_core::azure::resolve_pat(&settings.repos.azure_dev_ops_pat)
+        let Some(pat) = warp_station_core::azure::resolve_pat(&settings.repos.azure_devops_pat)
         else {
             tracing::warn!(
                 "Azure DevOps column enabled but no personal access token is configured; set one in Repos settings (or the AZURE_DEVOPS_PAT environment variable)"
@@ -1191,7 +1227,7 @@ impl Store {
         let _ = self.net.send_blocking(NetCommand::AzurePass {
             folders: folders.to_vec(),
             pat,
-            custom_base: settings.repos.azure_dev_ops_url.clone(),
+            custom_base: settings.repos.azure_devops_url.clone(),
         });
     }
 
@@ -2089,8 +2125,8 @@ impl Store {
             folder: path.clone(),
         });
         let settings = self.settings();
-        if settings.repos.enable_git_hub
-            && let Some(gh) = warp_station_core::exe::locate(&settings.repos.git_hub_executable)
+        if settings.repos.enable_github
+            && let Some(gh) = warp_station_core::exe::locate(&settings.repos.github_executable)
         {
             let _ = self.net.send_blocking(NetCommand::GitHubDetails {
                 folder: path,
@@ -2130,10 +2166,10 @@ impl Store {
 
     fn gh_exe(&self) -> Option<String> {
         let settings = self.settings();
-        if !settings.repos.enable_git_hub {
+        if !settings.repos.enable_github {
             return None;
         }
-        warp_station_core::exe::locate(&settings.repos.git_hub_executable)
+        warp_station_core::exe::locate(&settings.repos.github_executable)
             .map(|gh| gh.to_string_lossy().to_string())
     }
 
@@ -2269,7 +2305,7 @@ impl Store {
     /// is off takes its tabs along, and Pipelines needs an Azure project.
     pub fn detail_tabs(&self) -> Vec<WorkspaceTab> {
         let settings = self.settings();
-        let azure = settings.repos.enable_azure_dev_ops
+        let azure = settings.repos.enable_azure_devops
             && self
                 .selected_repo
                 .as_ref()
@@ -2278,7 +2314,7 @@ impl Store {
         WorkspaceTab::ALL
             .into_iter()
             .filter(|tab| match tab {
-                WorkspaceTab::PullRequests | WorkspaceTab::Issues => settings.repos.enable_git_hub,
+                WorkspaceTab::PullRequests | WorkspaceTab::Issues => settings.repos.enable_github,
                 WorkspaceTab::Pipelines => azure,
                 WorkspaceTab::Overview | WorkspaceTab::Changes | WorkspaceTab::History => true,
             })
@@ -2877,15 +2913,14 @@ impl Store {
         self.cache_generation += 1;
         let generation = self.cache_generation;
         let repos = self.repos.clone();
+        let settings = self.settings.clone();
         cx.spawn(async move |this, cx| {
             cx.background_executor()
                 .timer(std::time::Duration::from_millis(400))
                 .await;
             let _ = this.update(cx, |store: &mut Store, _| {
                 if store.cache_generation == generation {
-                    if let Err(err) = repo_store::save_cache(&repo_store::cache_path(), &repos) {
-                        tracing::warn!("could not save repo cache: {err}");
-                    }
+                    persist_repo_state(&settings, &repos);
                     store.cache_generation = 0;
                 }
             });
@@ -2900,9 +2935,7 @@ impl Store {
     /// list over this one.
     fn save_cache_now(&mut self) {
         self.cache_generation += 1;
-        if let Err(err) = repo_store::save_cache(&repo_store::cache_path(), &self.repos) {
-            tracing::warn!("could not save repo cache: {err}");
-        }
+        persist_repo_state(&self.settings, &self.repos);
     }
 
     /// The toolbar's Archive chip: flips whether archived rows join the
@@ -3205,6 +3238,37 @@ fn ai_enabled(settings: &AppSettings) -> bool {
     settings.warp_agent.enable_warp_agent
 }
 
+/// Persist the repo list's user tags and regenerable status as one step:
+/// settings owns the tags, the cache owns the status.
+fn persist_repo_state(settings: &SettingsService, repos: &[RepoEntry]) {
+    let tags: std::collections::BTreeMap<String, Vec<String>> = repos
+        .iter()
+        .filter(|repo| !repo.tags.is_empty())
+        .map(|repo| {
+            (
+                repo.folder_path.to_string_lossy().to_string(),
+                user_tags(&repo.tags),
+            )
+        })
+        .filter(|(_, tags)| !tags.is_empty())
+        .collect();
+    if settings.get().repos.repo_tags != tags
+        && let Err(err) = settings.update(|settings| settings.repos.repo_tags = tags)
+    {
+        tracing::warn!("could not save repo tags: {err}");
+    }
+    if let Err(err) = repo_store::save_cache(&repo_store::cache_path(), repos) {
+        tracing::warn!("could not save repo cache: {err}");
+    }
+}
+
+fn user_tags(tags: &[String]) -> Vec<String> {
+    tags.iter()
+        .filter(|tag| !tag.eq_ignore_ascii_case(warp_station_core::scan::PLATFORM_TAG))
+        .cloned()
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3226,6 +3290,14 @@ mod tests {
         assert!(
             !ai_enabled(&settings),
             "warp-agent off turns the AI surface off"
+        );
+    }
+
+    #[test]
+    fn the_scan_platform_tag_never_reaches_settings() {
+        assert_eq!(
+            user_tags(&["platform".into(), "favorites".into(), "work".into()]),
+            vec!["favorites".to_string(), "work".to_string()]
         );
     }
 

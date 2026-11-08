@@ -74,9 +74,12 @@ Keep this order; several steps depend on the previous one:
   `warpui-kit-core`; the app stores neither. This app still pins the Copper
   accent (see `../../docs/agents/design-system.md`); do not copy that signature
   into a new app.
-- **Layout.** Everything lives under `~/.warp/station`, except the shared
-  `~/.warp/ui.json`, `~/.warp/logs`, the SnapIt settings at `~/.warp/snapit`
-  and the notes content at `~/notes`.
+- **Layout.** Everything lives under `~/.warp/station` (versioned
+  `settings.json` plus the disposable `cache/repos.json` and
+  `cache/models.json`), except the shared `~/.warp/ui.json`, `~/.warp/logs`,
+  the SnapIt settings at `~/.warp/snapit` and the notes content at `~/notes`.
+- **Settings.** Repo tags live in `settings.json` (`repos.repo_tags`), not in
+  the cache. The contract is `../../docs/agents/settings-schema.md`.
 
 ## Tests
 

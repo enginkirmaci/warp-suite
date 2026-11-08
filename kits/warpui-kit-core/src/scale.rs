@@ -6,7 +6,6 @@
 //! re-runs its kit theme: [`follow_ui_scale`] takes that callback.
 //! [`text_size_control`] is the one picker every app shows.
 
-use std::fs;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -17,6 +16,7 @@ use gpui::{App, FontWeight, Global, SharedString, div, px};
 
 use crate::a11y::A11y as _;
 use crate::{fonts, palette};
+use warpui_kit_platform::config::SharedDoc;
 
 /// How often the main thread looks for a change the monitor heard: this gpui
 /// rev does not service cross-thread channel wakeups on foreground tasks, so
@@ -59,62 +59,21 @@ fn shared_file() -> Option<PathBuf> {
 }
 
 fn read_text_size(file: &Path) -> Option<&'static str> {
-    let text = fs::read_to_string(file).ok()?;
-    let doc: serde_json::Value = serde_json::from_str(&text).ok()?;
+    let doc = SharedDoc::new(file).load().ok()?;
     let size = doc.get(TEXT_SIZE_KEY)?.as_str()?;
     Some(fonts::normalize_font_scale(Some(size)))
-}
-
-/// Serialize the read-modify-write across processes: the text size and the
-/// palette are separate keys of one shared file, and each app writes only its
-/// own key, so without the lock the later writer's read drops the earlier
-/// key. The lock lives beside the file (a sidecar, because Windows cannot
-/// rename over a file it holds open) and is best effort: a filesystem that
-/// refuses it still gets the old unlocked write.
-fn with_settings_lock<T>(
-    file: &Path,
-    write: impl FnOnce() -> std::io::Result<T>,
-) -> std::io::Result<T> {
-    let lock_path = file.with_extension("json.lock");
-    if let Some(dir) = lock_path.parent() {
-        fs::create_dir_all(dir)?;
-    }
-    let lock = match fs::OpenOptions::new()
-        .create(true)
-        .truncate(false)
-        .read(true)
-        .write(true)
-        .open(&lock_path)
-    {
-        Ok(lock) => lock,
-        Err(_) => return write(),
-    };
-    // blocking is fine: the critical section is one small JSON read + write
-    let _ = lock.lock();
-    let out = write();
-    let _ = lock.unlock();
-    out
 }
 
 /// Keeps whatever else the file holds. Goes through a rename: another app
 /// reading it concurrently must never see it half-written, and the lock keeps
 /// two apps' read-modify-write from dropping each other's key (audit C1).
 fn write_setting(file: &Path, key: &str, value: &str) -> std::io::Result<()> {
-    with_settings_lock(file, || {
-        let mut doc: serde_json::Map<String, serde_json::Value> = fs::read_to_string(file)
-            .ok()
-            .and_then(|text| serde_json::from_str(&text).ok())
-            .unwrap_or_default();
-        doc.insert(key.to_string(), value.into());
-        if let Some(dir) = file.parent() {
-            fs::create_dir_all(dir)?;
-        }
-        let json = serde_json::to_string_pretty(&doc)?;
-        // the platform kit's unique temp + rename (the copy this file used to
-        // carry was pid-named and could collide between two writes)
-        warpui_kit_platform::io::write_atomically(file, &json)
-            .map_err(|err| std::io::Error::other(err.to_string()))
-    })
+    SharedDoc::new(file)
+        .update_repairing(|doc| {
+            doc.insert(key.to_string(), value.into());
+        })
+        .map(|_| ())
+        .map_err(|err| std::io::Error::other(err.to_string()))
 }
 
 fn write_text_size(file: &Path, size: &str) -> std::io::Result<()> {
@@ -122,6 +81,9 @@ fn write_text_size(file: &Path, size: &str) -> std::io::Result<()> {
 }
 
 fn adopt_from(file: Option<&Path>, legacy: Option<&str>) {
+    if let Some(file) = file {
+        let _ = SharedDoc::new(file).ensure_version();
+    }
     let saved = file.and_then(read_text_size);
     let size = saved.or(legacy.map(|size| fonts::normalize_font_scale(Some(size))));
     if let (None, Some(file), Some(size)) = (saved, file, size)
@@ -387,6 +349,7 @@ mod tests {
     use super::*;
     use crate::fonts::factor_lock::serial;
     use std::cell::Cell;
+    use std::fs;
 
     fn scratch_file(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("warp-scale-{}-{name}", std::process::id()));
@@ -491,6 +454,16 @@ mod tests {
     }
 
     #[test]
+    fn the_shared_file_is_versioned() {
+        let file = scratch_file("versioned");
+        write_text_size(&file, fonts::FONT_LARGE).unwrap();
+        let doc: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&file).unwrap()).unwrap();
+        assert_eq!(doc["schema_version"], 1);
+        assert_eq!(doc[TEXT_SIZE_KEY], fonts::FONT_LARGE);
+    }
+
+    #[test]
     fn no_old_setting_writes_nothing() {
         let _turn = serial();
         let file = scratch_file("nothing");
@@ -542,8 +515,7 @@ mod tests {
 const PALETTE_KEY: &str = "palette";
 
 fn read_palette(file: &Path) -> Option<&'static str> {
-    let text = fs::read_to_string(file).ok()?;
-    let doc: serde_json::Value = serde_json::from_str(&text).ok()?;
+    let doc = SharedDoc::new(file).load().ok()?;
     let key = doc.get(PALETTE_KEY)?.as_str()?;
     Some(palette::normalize_ramp(Some(key)).key)
 }
@@ -558,6 +530,7 @@ pub fn adopt_palette(legacy: Option<&str>) {
         }
         return;
     };
+    let _ = SharedDoc::new(&file).ensure_version();
     let saved = read_palette(&file);
     let key = saved.or_else(|| legacy.map(|k| palette::normalize_ramp(Some(k)).key));
     if let (None, Some(key)) = (saved, key)

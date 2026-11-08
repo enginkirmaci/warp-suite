@@ -91,9 +91,10 @@ lives in `scripts/`, so a local build and CI run the same code.
 ## Agent instructions
 
 Agents start at [`AGENTS.md`](AGENTS.md) for the suite-wide rules, then the
-matching `apps/<name>/AGENTS.md`; the deep guides are in `docs/agents/`. Design
-plans and proposals go in [`plans/`](plans/), one file per topic, and are
-deleted once the work lands.
+matching `apps/<name>/AGENTS.md`; the deep guides are in `docs/agents/`,
+including [`settings-schema.md`](docs/agents/settings-schema.md). Design plans
+and proposals go in [`plans/`](plans/), one file per topic, and are deleted
+once the work lands.
 
 ## Cross-app contracts
 
@@ -116,11 +117,12 @@ together. When one changes, update the other side in the **same** commit.
   Station is the client — a missing warp-agent binary turns Warp Station's AI
   features off, a closed one is launched on demand.
 - **SnapIt settings**: [warp-snapit](https://github.com/enginkirmaci/warp-snapit)
-  and Warp Station read the same `~/.warp/snapit` settings/layouts
-  (string-typed numbers, `"x,y"` points, the misspelled `DeactivedScreens`
-  field). Warp Station's `SnapIt.Executable` setting points at the Rust
-  `warp-snapit.exe`, which is a portable-zip deliverable (no installer) and
-  skipped in the Linux bundle (`linux_skip = true` in `apps.toml`).
+  and Warp Station read the same versioned snake_case `~/.warp/snapit`
+  `settings.json`/layouts. The old .NET-shaped files are importer input only;
+  `"x,y"` points and `"#AARRGGBB"` colours stay. Warp Station's
+  `snapit.executable` setting points at the Rust `warp-snapit.exe`, which is a
+  portable-zip deliverable (no installer) and skipped in the Linux bundle
+  (`linux_skip = true` in `apps.toml`).
 - **Shared notes store** (`~/notes`, one folder per repo):
   [warp-notes](https://github.com/enginkirmaci/warp-notes) always gets
   `--store` (Warp Station's resolved `notes_store_path`) and an explicit
@@ -134,15 +136,21 @@ together. When one changes, update the other side in the **same** commit.
 - **Per-user layout** (`~/.warp`): every app's own data sits in its own
   folder — `station/`, `agent/`, `notes/` — beside the SnapIt settings in
   `snapit/`, the shared `ui.json` at the root and one `logs/` for every
-  app's rolling file. The notes store is user content, not app data, so it
-  stays outside at `~/notes`. `warpui_kit_platform::paths` owns the tree and
-  the startup migrations that adopt the older folders.
+  app's rolling file. Station and agent keep regenerable caches in
+  `<app>/cache/`; deleting one loses no user setting or repo tag. The notes
+  store is user content, not app data, so it stays outside at `~/notes`.
+  `warpui_kit_platform::paths` owns the tree and the startup migrations that
+  adopt the older folders.
+- **Settings and caches**: suite-owned JSON is versioned snake_case; the
+  contract and the importer rules are in
+  [`docs/agents/settings-schema.md`](docs/agents/settings-schema.md). Every app,
+  SnapIt included, imports its pre-versioning files once at the edge.
 - **Shared text size and palette** (`~/.warp/ui.json`: `text_size` is `small`,
   `normal`, `large` or `larger` — the old `compact` spelling reads as normal —
   and `palette` is `copper`, `plum`, `pine` or `blue`): `warpui-kit-core` owns
   the file and the one control that writes each key. A click applies in that
   app at once; the other apps read the value when they next start. The apps'
-  old `font_scale` settings only seed the file on its first run, so every app
+  old per-app `text_size`/`font_scale` settings only seed the file on its first run, so every app
   must be on the same `warpui-kit-core`. Both keys are additive: a file that
   lacks one keeps the other.
 

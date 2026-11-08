@@ -1,32 +1,33 @@
-//! The tracked-repo store: file-backed repo list (repos.cache.json —
-//! PascalCase layout read with `default`, so unknown fields are ignored on
-//! read and missing keys fall back to defaults, keeping older cache files
-//! loadable) plus the tag-merge rules that carry user tags across rescans.
+//! The tracked-repo store: the versioned status cache (`cache/repos.json`)
+//! plus the tag-merge rules that carry user tags across rescans. User tags
+//! live in `settings.json`; the cache only carries what a scan can regenerate.
 
-use crate::jsonio;
 use crate::paths::AppPaths;
 use crate::scan::{self, ScannedRepo};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use warpui_kit_platform::config::{Store, rename_legacy_keys};
 
 pub const FAVORITES_TAG: &str = "favorites";
 
 /// Marks a repo as archived: it leaves the table and every background pass
-/// until restored. A plain tag, so cache persistence and merge_scan survival
-/// come free (no new persisted field).
+/// until restored. A plain tag, so settings persistence and merge_scan
+/// survival come free (no new persisted field).
 pub const ARCHIVED_TAG: &str = "archived";
 
-/// What the cache file serializes per repo. On-disk files from older builds
-/// carry dozens of runtime/computed fields; unknown fields are ignored on
-/// read and not rewritten, and missing keys deserialize as defaults.
+/// What the cache file serializes per repo. Older files carry dozens of
+/// runtime/computed fields; unknown fields are ignored on read, and missing
+/// keys deserialize as defaults.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "PascalCase", default)]
+#[serde(rename_all = "snake_case", default)]
 #[derive(Default)]
 pub struct CachedRepo {
     pub name: String,
     pub folder_path: String,
-    #[serde(rename = "SolutionPath")]
     pub solution_path: Option<String>,
+    /// Read from pre-D4 cache files so the importer can lift user tags into
+    /// settings; never written again.
+    #[serde(default, skip_serializing)]
     pub tags: Vec<CachedTag>,
     /// The last known row status, so a launch paints the counts the previous
     /// session left instead of a blank row until the scan's probe lands. Not
@@ -48,13 +49,13 @@ pub struct CachedRepo {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "PascalCase")]
+#[serde(rename_all = "snake_case")]
 pub struct CachedTag {
     pub name: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
-#[serde(rename_all = "PascalCase")]
+#[serde(rename_all = "snake_case")]
 pub struct RepoCacheFile {
     pub repos: Vec<CachedRepo>,
 }
@@ -96,9 +97,18 @@ impl RepoEntry {
 }
 
 pub fn load_cache(path: &std::path::Path) -> Option<RepoCacheFile> {
-    let json = jsonio::read_json(path)?;
-    match serde_json::from_str::<RepoCacheFile>(&json) {
+    let store = Store::<RepoCacheFile>::new(path.to_path_buf());
+    match store.load() {
         Ok(cache) => Some(cache),
+        Err(err) if err.needs_import() => {
+            let text = std::fs::read_to_string(path).ok()?;
+            let mut value: serde_json::Value = serde_json::from_str(&text).ok()?;
+            if let Err(err) = rename_legacy_keys(&mut value, &[]) {
+                tracing::warn!("could not migrate {}: {err}", path.display());
+                return None;
+            }
+            serde_json::from_value(value).ok()
+        }
         Err(err) => {
             tracing::warn!("could not parse {}: {err}", path.display());
             None
@@ -110,7 +120,9 @@ pub fn save_cache(path: &std::path::Path, repos: &[RepoEntry]) -> anyhow::Result
     let file = RepoCacheFile {
         repos: repos.iter().map(cache_from_entry).collect(),
     };
-    jsonio::write_json_atomically(path, &file)
+    Store::<RepoCacheFile>::new(path.to_path_buf())
+        .save(&file)
+        .map_err(|err| anyhow::anyhow!("{err}"))
 }
 
 fn cache_from_entry(repo: &RepoEntry) -> CachedRepo {
@@ -118,11 +130,7 @@ fn cache_from_entry(repo: &RepoEntry) -> CachedRepo {
         name: repo.name.clone(),
         folder_path: repo.folder_path.to_string_lossy().to_string(),
         solution_path: repo.solution_path.clone(),
-        tags: repo
-            .tags
-            .iter()
-            .map(|t| CachedTag { name: t.clone() })
-            .collect(),
+        tags: Vec::new(),
         git_branch_name: repo.git_branch_name.clone(),
         git_modified_count: repo.git_modified_count,
         git_to_push_count: repo.git_to_push_count,
@@ -289,6 +297,12 @@ pub fn cache_path() -> PathBuf {
 mod tests {
     use super::*;
 
+    fn imported(json: &str) -> RepoCacheFile {
+        let mut value: serde_json::Value = serde_json::from_str(json).unwrap();
+        rename_legacy_keys(&mut value, &[]).unwrap();
+        serde_json::from_value(value).unwrap()
+    }
+
     #[test]
     fn merge_carries_user_tags_and_status_but_not_platform() {
         let prev = RepoEntry {
@@ -365,7 +379,7 @@ mod tests {
         let json = r#"{"Repos":[{"Name":"r","FolderPath":"/x/r","SolutionPath":"/x/r/a.sln",
             "Tags":[{"Name":"favorites"}],"GitBranchName":"main","GitModifiedCount":7,
             "IsFavorite":true,"FavoriteTooltip":"x","GitLastActivity":"2w ago"}]}"#;
-        let file: RepoCacheFile = serde_json::from_str(json).unwrap();
+        let file = imported(json);
         assert_eq!(file.repos.len(), 1);
         let entry = entry_from_cache(&file.repos[0]);
         assert_eq!(entry.name, "r");
@@ -374,7 +388,8 @@ mod tests {
             repos: vec![cache_from_entry(&entry)],
         })
         .unwrap();
-        assert!(out.contains("\"FolderPath\""));
+        assert!(out.contains("\"folder_path\""));
+        assert!(!out.contains("\"tags\""), "tags live in settings now");
     }
 
     /// The cache carries the last known row status so a launch paints the
@@ -387,7 +402,7 @@ mod tests {
             "GitModifiedCount":7,"GitToPushCount":2,"GitToPullCount":1,
             "GitHasRemote":true,"GitBranchPublished":true,"GitStatusLoaded":true,
             "GithubPrCount":3,"GithubIssueCount":4}]}"#;
-        let file: RepoCacheFile = serde_json::from_str(json).unwrap();
+        let file = imported(json);
         let entry = entry_from_cache(&file.repos[0]);
         assert_eq!(entry.git_branch_name.as_deref(), Some("main"));
         assert_eq!(entry.git_modified_count, 7);
@@ -414,8 +429,7 @@ mod tests {
 
     #[test]
     fn an_older_cache_without_counts_loads_blank() {
-        let file: RepoCacheFile =
-            serde_json::from_str(r#"{"Repos":[{"Name":"r","FolderPath":"/x/r"}]}"#).unwrap();
+        let file = imported(r#"{"Repos":[{"Name":"r","FolderPath":"/x/r"}]}"#);
         let entry = entry_from_cache(&file.repos[0]);
         assert_eq!(entry.git_modified_count, 0);
         assert_eq!(entry.github_pr_count, 0);

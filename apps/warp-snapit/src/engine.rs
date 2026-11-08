@@ -88,7 +88,7 @@ impl Engine {
         let mut engine = Self {
             hwnd,
             runtime,
-            settings: SettingsStore::at(settings::snapit_root().join("Settings.json"), settings),
+            settings: SettingsStore::at(settings::settings_file(), settings),
             layouts,
             excluded: excluded_applications,
             overlays: Vec::new(),

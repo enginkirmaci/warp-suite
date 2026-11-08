@@ -330,6 +330,9 @@ Settings are serde JSON loaded from `AppPaths::settings_file()`. warp-agent's
 `Store` owns them, notes' `UiPrefs` owns its `settings.json`, and Warp Station's
 `Store` wraps an `Arc<SettingsService>` from `warp-station-core`; KwmSwitcher
 (outside the suite) shares an `Arc<RwLock<AppConfig>>` across its threads.
+New settings use `warpui_kit_platform::config::Store` and the versioned
+snake_case contract in [`settings-schema.md`](settings-schema.md); the store
+adds `schema_version` and the importer, the app owns the typed document.
 
 Once a layout has shipped, a moved folder gets a startup migration. The
 platform's `paths` module carries the primitives (`adopt_legacy_dir`,

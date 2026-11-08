@@ -37,22 +37,25 @@ warp-snapit [--parent <PID>] [--dump-zones] [-h|--help] [-V|--version]
 
 ## Shared configuration
 
-Reads the same files as the .NET app and Warp Station:
+Reads the versioned snake_case files; Warp Station reads the same layouts:
 
 ```text
-%USERPROFILE%\.warp\snapit\Settings.json
-%USERPROFILE%\.warp\snapit\ExcludedApplicationSettings.json
+%USERPROFILE%\.warp\snapit\settings.json
+%USERPROFILE%\.warp\snapit\excluded_applications.json
 %USERPROFILE%\.warp\snapit\layouts\*.json
 ```
 
-Keep every .NET quirk: numbers may be strings, points/sizes are `"x,y"`,
-colors are `"#AARRGGBB"`, `AreaPadding`/`BorderThickness` may be a number or
-a thickness string, and `DeactivedScreens` stays misspelled. Missing user files
-are seeded from `<exe dir>\settings\snapit`. `scripts/build.ps1` stages the
-default seed next to the exe.
+The old .NET-shaped `Settings.json`, `ExcludedApplicationSettings.json` and
+PascalCase layouts are importer input only: they are read once, rewritten
+native, then retired. Keep the value quirks the importer tolerates: numbers may
+be strings, points/sizes are `"x,y"`, colours are `"#AARRGGBB"`, and
+`AreaPadding`/`BorderThickness` may be a number or a thickness string. Missing
+user files are seeded from `<exe dir>\settings\snapit`; `scripts/build.ps1`
+stages the default seed next to the exe.
 
 Changing a field, a file name or the settings location is a cross-app contract
-change: update Warp Station in the same commit.
+change: update Warp Station in the same commit. The schema contract is
+[`../../docs/agents/settings-schema.md`](../../docs/agents/settings-schema.md).
 
 ## Engine notes
 
@@ -66,8 +69,8 @@ change: update Warp Station in the same commit.
   the window crosses monitors with different DPI, matching
   `SnapManager.MoveWindow`.
 - The process holds the mutex `Local\DevTools.SnapIt.Rust`. The .NET companion
-  uses `Local\DevTools.Tools.SnapIt.Companion`, so both can run for comparison
-  — but two global hooks at once are not recommended.
+  used `Local\DevTools.Tools.SnapIt.Companion`; it cannot read the native
+  files, so its old files are importer input, not a live format.
 - DPI awareness is per-monitor v2; the startup path also handles
   `SetConsoleCtrlHandler` and the parent watcher.
 
@@ -95,8 +98,9 @@ and no installer.
 
 - Make a neutral module depend on `windows` or `tiny-skia` in a way that
   breaks its Linux unit tests.
-- Change the settings field names, the `"x,y"` encoding or the
-  `DeactivedScreens` spelling.
+- Reintroduce the PascalCase field names; the old spelling belongs in the
+  importer fixture only.
+- Change the `"x,y"` encoding.
 - Add a desktop entry or an installer; this app is a Windows portable zip.
 - Hide the console in the release binary; the log and `--dump-zones` are
   diagnostic surfaces.

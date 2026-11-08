@@ -1028,7 +1028,7 @@ fn needs_you_section(
         .as_ref()
         .map(|(unstaged, staged)| (unstaged.len(), staged.len()))
         .unwrap_or((0, 0));
-    let github = settings.repos.enable_git_hub;
+    let github = settings.repos.enable_github;
     let snapshot = github
         .then(|| store.github_by_folder.get(folder.as_ref()))
         .flatten();

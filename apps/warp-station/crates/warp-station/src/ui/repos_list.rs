@@ -125,7 +125,7 @@ pub fn render(store: &Store, store_entity: &Entity<Store>) -> gpui::AnyElement {
                     let azure = store
                         .azure_by_folder
                         .get(folder.as_ref())
-                        .filter(|_| settings.repos.enable_azure_dev_ops)
+                        .filter(|_| settings.repos.enable_azure_devops)
                         .map(|snapshot| snapshot.as_ref());
                     let warp_titles = store
                         .warp_running
@@ -133,7 +133,7 @@ pub fn render(store: &Store, store_entity: &Entity<Store>) -> gpui::AnyElement {
                         .filter(|status| !status.running.is_empty())
                         .map(|status| status.running.join(", "));
                     let facts = RowFacts {
-                        github: settings.repos.enable_git_hub,
+                        github: settings.repos.enable_github,
                         azure,
                         warp_titles,
                         show_tooltips: settings.general.show_tooltips,

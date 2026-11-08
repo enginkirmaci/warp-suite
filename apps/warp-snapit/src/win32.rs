@@ -63,7 +63,7 @@ pub struct Monitor {
 }
 
 impl Monitor {
-    /// Identifiers checked against `ScreensLayouts` / `DeactivedScreens`.
+    /// Identifiers checked against `screens_layouts` / `deactivated_screens`.
     ///
     /// The .NET app stores `Display.DevicePath` when available and only falls
     /// back to `DisplayName`, so the interface path is checked first here too.

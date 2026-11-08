@@ -1,10 +1,10 @@
 //! SnapIt settings and layout files.
 //!
-//! These types mirror the JSON written by the .NET app
-//! (`%USERPROFILE%\.warp\snapit`), including its quirks:
-//! numbers may be written as strings, points/sizes are `"x,y"` strings,
-//! colours are `"#AARRGGBB"`, and `AreaPadding`/`BorderThickness` may be a
-//! number or a `Thickness`-style string.
+//! The native files are versioned snake_case. The importer still accepts the
+//! old .NET shape (`%USERPROFILE%\.warp\snapit\Settings.json`) with its
+//! quirks: numbers may be strings, points/sizes are `"x,y"` strings, colours
+//! are `"#AARRGGBB"`, and `AreaPadding`/`BorderThickness` may be a number or a
+//! `Thickness`-style string.
 
 use std::collections::HashMap;
 use std::fmt;
@@ -14,6 +14,7 @@ use std::path::{Path, PathBuf};
 use serde::de::{self, Error as _, MapAccess, SeqAccess, Visitor};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
+use crate::config;
 use crate::geometry::{Point, Size, SplitDirection};
 use crate::log;
 
@@ -22,7 +23,7 @@ use crate::log;
 // ---------------------------------------------------------------------------
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
-#[serde(rename_all = "PascalCase")]
+#[serde(rename_all = "snake_case")]
 pub enum MouseButton {
     #[default]
     Left,
@@ -33,7 +34,7 @@ pub enum MouseButton {
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
-#[serde(rename_all = "PascalCase")]
+#[serde(rename_all = "snake_case")]
 pub enum HoldKey {
     #[default]
     Control,
@@ -43,7 +44,7 @@ pub enum HoldKey {
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
-#[serde(rename_all = "PascalCase")]
+#[serde(rename_all = "snake_case")]
 pub enum HoldKeyBehaviour {
     #[default]
     HoldToEnable,
@@ -51,7 +52,7 @@ pub enum HoldKeyBehaviour {
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
-#[serde(rename_all = "PascalCase")]
+#[serde(rename_all = "snake_case")]
 pub enum MatchRule {
     #[default]
     Contains,
@@ -319,7 +320,7 @@ fn de_thickness<'de, D: Deserializer<'de>>(deserializer: D) -> Result<f64, D::Er
 
 /// `SnapAreaTheme` from the .NET app.
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
-#[serde(default, rename_all = "PascalCase")]
+#[serde(default, rename_all = "snake_case")]
 pub struct Theme {
     pub highlight_color: Color,
     pub overlay_color: Color,
@@ -343,9 +344,9 @@ impl Default for Theme {
     }
 }
 
-/// `Settings.json`.
+/// `settings.json`.
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(default, rename_all = "PascalCase")]
+#[serde(default, rename_all = "snake_case")]
 pub struct Settings {
     pub enable_mouse: bool,
     pub drag_by_title: bool,
@@ -358,9 +359,11 @@ pub struct Settings {
     pub disable_for_fullscreen: bool,
     pub disable_for_modal: bool,
     pub enable_automatic_window_cornering: bool,
+    /// Kept for the old .NET setting and for a faithful round trip; the Rust
+    /// engine reads it but the elevation prompt itself is the OS's.
+    pub run_as_admin: bool,
     pub screens_layouts: HashMap<String, String>,
-    /// The .NET field is misspelled; keep the on-disk name for compatibility.
-    pub deactived_screens: Vec<String>,
+    pub deactivated_screens: Vec<String>,
     pub mouse_hover_animation: bool,
     pub theme: Theme,
 }
@@ -378,8 +381,9 @@ impl Default for Settings {
             disable_for_fullscreen: true,
             disable_for_modal: true,
             enable_automatic_window_cornering: false,
+            run_as_admin: false,
             screens_layouts: HashMap::new(),
-            deactived_screens: Vec::new(),
+            deactivated_screens: Vec::new(),
             mouse_hover_animation: false,
             theme: Theme::default(),
         }
@@ -392,7 +396,7 @@ impl Default for Settings {
 
 /// A `LayoutLines` entry.
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(default, rename_all = "PascalCase")]
+#[serde(default, rename_all = "snake_case")]
 pub struct LayoutLine {
     pub point: Point,
     pub size: Size,
@@ -412,7 +416,7 @@ impl Default for LayoutLine {
 /// A `LayoutOverlays` entry; `mini_overlay` is where the normal-state preview
 /// is drawn, while `point`/`size` describe the merged zone itself.
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
-#[serde(default, rename_all = "PascalCase")]
+#[serde(default, rename_all = "snake_case")]
 pub struct LayoutOverlay {
     pub point: Point,
     pub size: Size,
@@ -420,7 +424,7 @@ pub struct LayoutOverlay {
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
-#[serde(default, rename_all = "PascalCase")]
+#[serde(default, rename_all = "snake_case")]
 pub struct MiniOverlay {
     pub point: Point,
     pub size: Size,
@@ -428,7 +432,7 @@ pub struct MiniOverlay {
 
 /// A layout file from `layouts/*.json`.
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
-#[serde(default, rename_all = "PascalCase")]
+#[serde(default, rename_all = "snake_case")]
 pub struct Layout {
     pub guid: String,
     pub name: String,
@@ -460,7 +464,7 @@ impl Layout {
 // ---------------------------------------------------------------------------
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
-#[serde(default, rename_all = "PascalCase")]
+#[serde(default, rename_all = "snake_case")]
 pub struct ExcludedApplication {
     pub keyword: String,
     pub match_rule: MatchRule,
@@ -536,7 +540,7 @@ pub fn wildcard_match(pattern: &str, input: &str) -> bool {
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
-#[serde(default, rename_all = "PascalCase")]
+#[serde(default, rename_all = "snake_case")]
 pub struct ExcludedApplicationSettings {
     pub applications: Vec<ExcludedApplication>,
 }
@@ -557,6 +561,38 @@ pub fn user_data_root() -> PathBuf {
 /// `%USERPROFILE%\.warp\snapit` — shared with Warp Station.
 pub fn snapit_root() -> PathBuf {
     user_data_root().join("snapit")
+}
+
+/// The native files this build writes.
+pub fn settings_file() -> PathBuf {
+    snapit_root().join("settings.json")
+}
+
+pub fn excluded_applications_file() -> PathBuf {
+    snapit_root().join("excluded_applications.json")
+}
+
+pub fn layouts_dir() -> PathBuf {
+    snapit_root().join("layouts")
+}
+
+/// The .NET-shaped files an upgrade imports once.
+fn legacy_settings_file() -> PathBuf {
+    snapit_root().join("Settings.json")
+}
+
+fn legacy_excluded_applications_file() -> PathBuf {
+    snapit_root().join("ExcludedApplicationSettings.json")
+}
+
+fn same_file(left: &Path, right: &Path) -> bool {
+    left.exists() && right.exists() && fs::canonicalize(left).ok() == fs::canonicalize(right).ok()
+}
+
+fn retire_legacy(legacy: &Path, current: &Path) {
+    if legacy.exists() && !same_file(legacy, current) {
+        let _ = fs::remove_file(legacy);
+    }
 }
 
 /// `<exe dir>\settings\snapit` — shipped defaults used to seed the user folder.
@@ -597,6 +633,16 @@ pub fn seed_from_install_defaults() {
             if path.extension().is_some_and(|ext| ext == "json")
                 && let Some(name) = path.file_name()
             {
+                // A .NET file is the user's real settings; the importer must
+                // see it instead of a freshly seeded native default.
+                let legacy = match name.to_str() {
+                    Some("settings.json") => Some(legacy_settings_file()),
+                    Some("excluded_applications.json") => Some(legacy_excluded_applications_file()),
+                    _ => None,
+                };
+                if legacy.is_some_and(|path| path.exists()) {
+                    continue;
+                }
                 copy_missing(&path, &snapit_root().join(name));
             }
         }
@@ -615,23 +661,85 @@ pub fn seed_from_install_defaults() {
     }
 }
 
-fn read_json<T: for<'de> Deserialize<'de>>(path: &Path) -> Option<T> {
-    let text = match fs::read_to_string(path) {
-        Ok(text) => text,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return None,
-        Err(err) => {
-            log::line(&format!("could not read {}: {err}", path.display()));
-            return None;
-        }
-    };
+fn read_legacy_value(path: &Path) -> Option<serde_json::Value> {
+    let text = fs::read_to_string(path).ok()?;
+    serde_json::from_str(&text).ok()
+}
 
-    match serde_json::from_str(&text) {
-        Ok(value) => Some(value),
-        Err(err) => {
-            log::line(&format!("could not parse {}: {err}", path.display()));
-            None
+fn import_settings(path: &Path) -> Option<Settings> {
+    let mut value = read_legacy_value(path)?;
+    config::rename_keys(&mut value, &["screens_layouts"]).ok()?;
+    config::move_key(&mut value, "deactived_screens", "deactivated_screens");
+    config::map_value(
+        &mut value,
+        "mouse_button",
+        &[
+            ("Left", "left"),
+            ("Right", "right"),
+            ("Middle", "middle"),
+            ("XButton1", "x_button1"),
+            ("XButton2", "x_button2"),
+        ],
+    );
+    config::map_value(
+        &mut value,
+        "hold_key",
+        &[
+            ("Control", "control"),
+            ("Alt", "alt"),
+            ("Shift", "shift"),
+            ("Win", "win"),
+        ],
+    );
+    config::map_value(
+        &mut value,
+        "hold_key_behaviour",
+        &[
+            ("HoldToEnable", "hold_to_enable"),
+            ("HoldToDisable", "hold_to_disable"),
+        ],
+    );
+    serde_json::from_value(value).ok()
+}
+
+fn import_excluded(path: &Path) -> Option<ExcludedApplicationSettings> {
+    let mut value = read_legacy_value(path)?;
+    config::rename_keys(&mut value, &[]).ok()?;
+    if let Some(applications) = value
+        .get_mut("applications")
+        .and_then(serde_json::Value::as_array_mut)
+    {
+        for application in applications {
+            config::map_value(
+                application,
+                "match_rule",
+                &[
+                    ("Contains", "contains"),
+                    ("Exact", "exact"),
+                    ("Wildcard", "wildcard"),
+                ],
+            );
         }
     }
+    serde_json::from_value(value).ok()
+}
+
+fn import_layout(path: &Path) -> Option<Layout> {
+    let mut value = read_legacy_value(path)?;
+    config::rename_keys(&mut value, &[]).ok()?;
+    if let Some(lines) = value
+        .get_mut("layout_lines")
+        .and_then(serde_json::Value::as_array_mut)
+    {
+        for line in lines {
+            config::map_value(
+                line,
+                "split_direction",
+                &[("Vertical", "vertical"), ("Horizontal", "horizontal")],
+            );
+        }
+    }
+    serde_json::from_value(value).ok()
 }
 
 /// Replace `path` with `contents` atomically: a uniquely named temp file next
@@ -667,18 +775,7 @@ pub fn write_atomically(path: &Path, contents: &str) -> std::io::Result<()> {
     Ok(())
 }
 
-fn write_json_atomically<T: Serialize>(path: &Path, value: &T) {
-    match serde_json::to_string_pretty(value) {
-        Ok(json) => {
-            if let Err(err) = write_atomically(path, &json) {
-                log::line(&format!("could not write {}: {err}", path.display()));
-            }
-        }
-        Err(err) => log::line(&format!("could not serialize {}: {err}", path.display())),
-    }
-}
-
-/// The engine's one live copy of Settings.json. Reads deref to [`Settings`];
+/// The engine's one live copy of `settings.json`. Reads deref to [`Settings`];
 /// mutations go through [`update`](Self::update), which applies and persists
 /// as one step — a mutation cannot forget its write, and a crash mid-write
 /// cannot truncate the file both implementations read. The settings change
@@ -703,7 +800,9 @@ impl SettingsStore {
     /// the failure in the log: the engine keeps working this session.
     pub fn update(&mut self, mutate: impl FnOnce(&mut Settings)) {
         mutate(&mut self.settings);
-        write_json_atomically(&self.path, &self.settings);
+        if let Err(err) = config::Store::<Settings>::new(self.path.clone()).save(&self.settings) {
+            log::line(&format!("could not write {}: {err}", self.path.display()));
+        }
     }
 }
 
@@ -715,34 +814,107 @@ impl std::ops::Deref for SettingsStore {
     }
 }
 
-/// Reads `Settings.json`; a missing file gets the .NET app's defaults written
-/// so both implementations start from the same state.
+/// Reads `settings.json`; an old `Settings.json` is imported once, then
+/// retired. A missing file gets the defaults written.
 pub fn load_settings() -> Settings {
-    let path = snapit_root().join("Settings.json");
-    if let Some(settings) = read_json::<Settings>(&path) {
+    let path = settings_file();
+    let legacy = legacy_settings_file();
+    let store = config::Store::<Settings>::new(path.clone());
+
+    if !path.exists() {
+        if legacy.exists() {
+            if let Some(settings) = import_settings(&legacy)
+                && store.save(&settings).is_ok()
+            {
+                retire_legacy(&legacy, &path);
+                return settings;
+            }
+            log::line(&format!(
+                "could not import {}; keeping it for a manual pass",
+                legacy.display()
+            ));
+            return Settings::default();
+        }
+        let settings = Settings::default();
+        let _ = store.save(&settings);
         return settings;
     }
 
-    let settings = Settings::default();
-    if !path.exists() {
-        write_json_atomically(&path, &settings);
+    match store.load() {
+        Ok(settings) => settings,
+        Err(err) if err.needs_import() => {
+            let source = if legacy.exists() && !same_file(&legacy, &path) {
+                legacy.clone()
+            } else {
+                path.clone()
+            };
+            let Some(settings) = import_settings(&source) else {
+                log::line(&format!(
+                    "could not import {}; keeping it for a manual pass",
+                    source.display()
+                ));
+                return Settings::default();
+            };
+            if store.save(&settings).is_ok() {
+                retire_legacy(&legacy, &path);
+            }
+            settings
+        }
+        Err(err) => {
+            log::line(&format!("could not read {}: {err}", path.display()));
+            Settings::default()
+        }
     }
-    settings
 }
 
 pub fn load_excluded_applications() -> Vec<ExcludedApplication> {
-    let path = snapit_root().join("ExcludedApplicationSettings.json");
-    let mut applications = match read_json::<ExcludedApplicationSettings>(&path) {
-        Some(settings) => settings.applications,
-        None => {
-            // The .NET FileOperationService writes an empty default when the
-            // file is missing; do the same so both apps share one file.
-            if !path.exists() {
-                write_json_atomically(&path, &ExcludedApplicationSettings::default());
+    let path = excluded_applications_file();
+    let legacy = legacy_excluded_applications_file();
+    let store = config::Store::<ExcludedApplicationSettings>::new(path.clone());
+
+    if !path.exists() {
+        if legacy.exists() {
+            match import_excluded(&legacy) {
+                Some(settings) if store.save(&settings).is_ok() => {
+                    retire_legacy(&legacy, &path);
+                }
+                _ => log::line(&format!(
+                    "could not import {}; keeping it for a manual pass",
+                    legacy.display()
+                )),
             }
-            Vec::new()
+        } else {
+            let _ = store.save(&ExcludedApplicationSettings::default());
         }
-    };
+    } else {
+        match store.load() {
+            Ok(_) => {}
+            Err(err) if err.needs_import() => {
+                let source = if legacy.exists() && !same_file(&legacy, &path) {
+                    legacy.clone()
+                } else {
+                    path.clone()
+                };
+                match import_excluded(&source) {
+                    Some(settings) => {
+                        if store.save(&settings).is_ok() {
+                            retire_legacy(&legacy, &path);
+                        }
+                    }
+                    None => log::line(&format!(
+                        "could not import {}; keeping it for a manual pass",
+                        source.display()
+                    )),
+                }
+            }
+            Err(err) => log::line(&format!("could not read {}: {err}", path.display())),
+        }
+    }
+
+    let mut applications = store
+        .load()
+        .map(|settings| settings.applications)
+        .unwrap_or_default();
 
     // Match the .NET SettingService: always exclude the desktop shell.
     if !applications
@@ -759,9 +931,10 @@ pub fn load_excluded_applications() -> Vec<ExcludedApplication> {
     applications
 }
 
-/// Loads every parseable `layouts/*.json`, sorted by name like the .NET app.
+/// Loads every parseable `layouts/*.json`, sorted by name. An old
+/// PascalCase layout is imported in place and rewritten versioned.
 pub fn load_layouts() -> Vec<Layout> {
-    let folder = snapit_root().join("layouts");
+    let folder = layouts_dir();
     let mut layouts = Vec::new();
 
     if let Ok(entries) = fs::read_dir(folder) {
@@ -770,8 +943,18 @@ pub fn load_layouts() -> Vec<Layout> {
             if path.extension().is_none_or(|ext| ext != "json") {
                 continue;
             }
-            if let Some(layout) = read_json::<Layout>(&path) {
-                layouts.push(layout);
+            let store = config::Store::<Layout>::new(path.clone());
+            match store.load() {
+                Ok(layout) => layouts.push(layout),
+                Err(err) if err.needs_import() => {
+                    let Some(layout) = import_layout(&path) else {
+                        log::line(&format!("could not import {}", path.display()));
+                        continue;
+                    };
+                    let _ = store.save(&layout);
+                    layouts.push(layout);
+                }
+                Err(err) => log::line(&format!("could not read {}: {err}", path.display())),
             }
         }
     }
@@ -845,7 +1028,7 @@ pub fn is_deactivated(settings: &Settings, keys: &[String]) -> bool {
 
 impl Settings {
     fn settings_deactivated(&self, keys: &[String]) -> bool {
-        self.deactived_screens.iter().any(|screen| {
+        self.deactivated_screens.iter().any(|screen| {
             keys.iter()
                 .any(|key| screen.eq_ignore_ascii_case(key.trim()))
         })
@@ -878,7 +1061,7 @@ mod tests {
 
     #[test]
     fn parses_shipped_settings() {
-        let text = include_str!("../packaging/windows/settings/snapit/Settings.json");
+        let text = include_str!("../packaging/windows/settings/snapit/settings.json");
         let settings: Settings = serde_json::from_str(text).expect("settings parse");
         assert!(settings.enable_mouse);
         assert!(!settings.drag_by_title);
@@ -911,9 +1094,9 @@ mod tests {
     fn writes_numbers_as_numbers_and_colours_as_hex() {
         let settings = Settings::default();
         let json = serde_json::to_string(&settings).expect("serialize");
-        assert!(json.contains("\"MouseDragDelay\":20"));
-        assert!(json.contains("\"BorderThickness\":1.0"));
-        assert!(json.contains("\"HighlightColor\":\"#C8000000\""));
+        assert!(json.contains("\"mouse_drag_delay\":20"));
+        assert!(json.contains("\"border_thickness\":1.0"));
+        assert!(json.contains("\"highlight_color\":\"#C8000000\""));
     }
 
     #[test]
@@ -1024,7 +1207,7 @@ mod tests {
     fn deactivated_screens_match_case_insensitively() {
         let mut settings = Settings::default();
         settings
-            .deactived_screens
+            .deactivated_screens
             .push("\\\\.\\DISPLAY2".to_string());
 
         assert!(is_deactivated(&settings, &["\\\\.\\display2".to_string()]));
@@ -1057,7 +1240,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("snapit-store-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("Settings.json");
+        let path = dir.join("settings.json");
 
         let mut store = SettingsStore::at(path.clone(), Settings::default());
         assert!(store.enable_mouse, "the store reads like the settings");
@@ -1066,13 +1249,87 @@ mod tests {
             settings.mouse_button = MouseButton::Middle;
         });
 
-        // the mutation is on disk before update returns, as PascalCase JSON
-        // the .NET app also reads
+        // the mutation is on disk before update returns, as versioned
+        // snake_case JSON
         let text = fs::read_to_string(&path).unwrap();
-        assert!(text.contains("\"EnableMouse\": false"), "{text}");
+        assert!(text.contains("\"enable_mouse\": false"), "{text}");
+        assert!(text.contains("\"schema_version\": 1"), "{text}");
         let reread = SettingsStore::at(path, serde_json::from_str(&text).unwrap());
         assert!(!reread.enable_mouse);
         assert_eq!(reread.mouse_button, MouseButton::Middle);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_old_settings_file_imports_once() {
+        let dir = std::env::temp_dir().join(format!("snapit-import-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("Settings.json");
+        fs::write(
+            &path,
+            r##"{
+                "EnableMouse": false,
+                "MouseButton": "XButton1",
+                "ScreensLayouts": {"\\\\.\\DISPLAY1": "guid"},
+                "DeactivedScreens": ["\\\\.\\DISPLAY2"],
+                "RunAsAdmin": true,
+                "Theme": {"HighlightColor": "#C8000000", "BorderThickness": "1"}
+            }"##,
+        )
+        .unwrap();
+
+        let settings = import_settings(&path).expect("imports");
+        assert!(!settings.enable_mouse);
+        assert_eq!(settings.mouse_button, MouseButton::XButton1);
+        assert_eq!(
+            settings.screens_layouts.get("\\\\.\\DISPLAY1"),
+            Some(&"guid".to_string())
+        );
+        assert_eq!(settings.deactivated_screens, vec!["\\\\.\\DISPLAY2"]);
+        assert!(settings.run_as_admin);
+        assert_eq!(settings.theme.border_thickness, 1.0);
+
+        let json = serde_json::to_string(&settings).unwrap();
+        assert!(json.contains("\"deactivated_screens\""));
+        assert!(json.contains("\"x_button1\""));
+        assert!(!json.contains("DeactivedScreens"));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_old_layout_and_exclusions_import() {
+        let dir = std::env::temp_dir().join(format!("snapit-import-layout-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let layout_path = dir.join("layout.json");
+        fs::write(
+            &layout_path,
+            r#"{"Name": "x", "Size": "100,100",
+                "LayoutLines": [{"Point": "1,2", "Size": "0,3", "SplitDirection": "Vertical"}]}"#,
+        )
+        .unwrap();
+        let layout = import_layout(&layout_path).expect("layout imports");
+        assert_eq!(layout.name, "x");
+        assert_eq!(
+            layout.layout_lines[0].split_direction,
+            SplitDirection::Vertical
+        );
+        let json = serde_json::to_string(&layout).unwrap();
+        assert!(json.contains("\"layout_lines\""));
+        assert!(json.contains("\"vertical\""));
+
+        let excluded_path = dir.join("excluded.json");
+        fs::write(
+            &excluded_path,
+            r#"{"Applications": [{"Keyword": "chrome", "MatchRule": "Contains", "Mouse": true}]}"#,
+        )
+        .unwrap();
+        let excluded = import_excluded(&excluded_path).expect("exclusions import");
+        assert_eq!(excluded.applications[0].match_rule, MatchRule::Contains);
+        let json = serde_json::to_string(&excluded).unwrap();
+        assert!(json.contains("\"applications\""));
+        assert!(json.contains("\"contains\""));
         let _ = fs::remove_dir_all(&dir);
     }
 }

@@ -9,7 +9,7 @@
 /// disk directly (it has no store entity), which matches what the store
 /// persists on every save.
 fn stored_password_from_settings() -> Option<String> {
-    crate::settings::SettingsService::open()
+    crate::settings::SettingsService::open_readonly()
         .get()
         .clipboard_password
         .encrypted_password

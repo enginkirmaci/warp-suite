@@ -515,7 +515,7 @@ pub fn spawn_net_thread() -> (
 /// The in-window shortcut in MainWindow stays as the fallback for sessions
 /// where neither grab lands.
 fn setup_clipboard_hotkey(evt_tx: Sender<UiEvent>) {
-    let enabled = warp_station_core::settings::SettingsService::open()
+    let enabled = warp_station_core::settings::SettingsService::open_readonly()
         .get()
         .clipboard_password
         .enable_clipboard_password;
@@ -1397,7 +1397,7 @@ fn build_wand_prompt(kind: WandKind, folder: &Path) -> String {
 async fn warp_status_loop(evt_tx: Sender<UiEvent>) {
     let mut announced = false;
     loop {
-        if !warp_station_core::settings::SettingsService::open()
+        if !warp_station_core::settings::SettingsService::open_readonly()
             .get()
             .warp_agent
             .enable_warp_agent

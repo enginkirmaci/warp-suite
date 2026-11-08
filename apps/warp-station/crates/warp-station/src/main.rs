@@ -55,7 +55,7 @@ fn main() {
             let (text_size, reduce_motion) = {
                 let s = store.read(cx);
                 (
-                    s.settings().general.font_scale.clone(),
+                    s.settings().general.text_size.clone(),
                     s.settings().general.reduce_motion,
                 )
             };
@@ -71,9 +71,9 @@ fn main() {
             // the companion watches this process (--parent) and exits when Warp Station dies
             #[cfg(windows)]
             {
-                let snap_it = store.read(cx).settings().snap_it;
-                if snap_it.auto_start {
-                    if let Err(err) = warp_station_core::snapit::start(&snap_it.executable) {
+                let snapit = store.read(cx).settings().snapit;
+                if snapit.auto_start {
+                    if let Err(err) = warp_station_core::snapit::start(&snapit.executable) {
                         tracing::warn!("SnapIt auto-start failed: {err}");
                     }
                 }

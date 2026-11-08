@@ -199,11 +199,12 @@ pieces mean.
   wake foreground tasks from other threads. Only Linux with gsettings gets it,
   and elsewhere the desktop factor stays 1.0.
 
-`~/.warp/ui.json` holds `text_size` and `palette` as separate keys. Both are
-additive: a file that lacks one keeps the other, and a writer must not drop the
-key it does not own. Writes take a sidecar lock and go through an atomic
-rename, so two apps saving at once do not lose each other's key. Reduced motion
-is **not** in this file; each app stores its own switch.
+`~/.warp/ui.json` holds `schema_version`, `text_size` and `palette`. Both
+settings are additive: a file that lacks one keeps the other, and a writer
+must not drop the key it does not own. Writes go through the platform kit's
+`SharedDoc` (sidecar lock, atomic rename), so two apps saving at once do not
+lose each other's key. Reduced motion is **not** in this file; each app stores
+its own switch.
 
 ## Startup
 

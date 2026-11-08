@@ -6,6 +6,7 @@
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::time::Duration;
+use warpui_kit_platform::config::Store;
 
 /// Hard cap for one wand run.
 pub const RUN_CAP: Duration = Duration::from_secs(150);
@@ -425,10 +426,33 @@ pub fn default_harnesses() -> Vec<CatalogHarness> {
 /// answers.
 pub fn cached_catalog() -> ModelCatalog {
     let path = models_cache_path();
-    let Ok(json) = std::fs::read_to_string(path) else {
-        return ModelCatalog::default();
-    };
-    parse_cached_catalog(&json)
+    let store = Store::<ModelCatalog>::new(path.clone());
+    match store.load() {
+        Ok(mut catalog) => {
+            normalize_catalog(&mut catalog);
+            catalog
+        }
+        Err(err) if err.needs_import() => {
+            let catalog = std::fs::read_to_string(&path)
+                .ok()
+                .map(|json| parse_cached_catalog(&json))
+                .unwrap_or_default();
+            let _ = store.save(&catalog);
+            catalog
+        }
+        Err(_) => ModelCatalog::default(),
+    }
+}
+
+fn normalize_catalog(catalog: &mut ModelCatalog) {
+    if catalog.harnesses.is_empty() {
+        catalog.harnesses = default_harnesses();
+    }
+    for model in &mut catalog.models {
+        if model.harness.trim().is_empty() {
+            model.harness = "opencode".into();
+        }
+    }
 }
 
 /// The cached slice for one harness, used when the door is closed.
@@ -471,13 +495,7 @@ pub fn store_harness_catalog(harness: &str, incoming: &ModelCatalog) {
         };
         catalog.models.push(entry);
     }
-    let path = models_cache_path();
-    if let Some(dir) = path.parent() {
-        let _ = std::fs::create_dir_all(dir);
-    }
-    if let Ok(json) = serde_json::to_string_pretty(&catalog) {
-        let _ = std::fs::write(&path, json);
-    }
+    let _ = Store::<ModelCatalog>::new(models_cache_path()).save(&catalog);
 }
 
 /// Reads the current object shape, or the released flat `["provider/model"]`
@@ -485,14 +503,7 @@ pub fn store_harness_catalog(harness: &str, incoming: &ModelCatalog) {
 /// pickers.
 fn parse_cached_catalog(json: &str) -> ModelCatalog {
     if let Ok(mut catalog) = serde_json::from_str::<ModelCatalog>(json) {
-        if catalog.harnesses.is_empty() {
-            catalog.harnesses = default_harnesses();
-        }
-        for model in &mut catalog.models {
-            if model.harness.trim().is_empty() {
-                model.harness = "opencode".into();
-            }
-        }
+        normalize_catalog(&mut catalog);
         return catalog;
     }
     match serde_json::from_str::<Vec<String>>(json) {

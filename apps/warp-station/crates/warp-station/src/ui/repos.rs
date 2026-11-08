@@ -1028,7 +1028,7 @@ impl ReposPage {
             (
                 store.sort_mode,
                 store.sort_ascending,
-                store.settings().repos.enable_git_hub,
+                store.settings().repos.enable_github,
             )
         };
         let mut menu = div()

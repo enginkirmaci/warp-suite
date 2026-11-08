@@ -10,6 +10,7 @@
 //! (`default-features = false`) so headless service crates can take the
 //! io/logging halves.
 
+pub mod config;
 pub mod door;
 pub mod io;
 pub mod logging;

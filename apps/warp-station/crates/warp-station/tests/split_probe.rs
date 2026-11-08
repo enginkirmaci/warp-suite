@@ -984,7 +984,7 @@ fn the_sort_menu_reorders_the_list_and_persists(cx: &mut TestAppContext) {
 fn the_sort_menu_follows_the_github_switch(cx: &mut TestAppContext) {
     let (store, _net_rx) = scratch_store(cx, "sort-github", vec![entry("alpha", "/probe/alpha")]);
     cx.read_entity(&store, |s, _| {
-        s.update_settings(|settings| settings.repos.enable_git_hub = false);
+        s.update_settings(|settings| settings.repos.enable_github = false);
     });
     let cx = open_window(&store, cx);
 
@@ -1107,7 +1107,7 @@ fn the_github_switch_takes_its_counts_off_the_row(cx: &mut TestAppContext) {
     repo.github_pr_count = 1;
     let (store, _net_rx) = scratch_store(cx, "row-github", vec![repo]);
     cx.read_entity(&store, |s, _| {
-        s.update_settings(|settings| settings.repos.enable_git_hub = false);
+        s.update_settings(|settings| settings.repos.enable_github = false);
     });
     let cx = open_window(&store, cx);
 
@@ -1131,7 +1131,7 @@ fn a_row_shows_its_azure_state_while_azure_is_on(cx: &mut TestAppContext) {
     assert!(cx.debug_bounds("repo-azure-0").is_some());
 
     cx.update_entity(&store, |s: &mut Store, cx| {
-        s.update_settings(|settings| settings.repos.enable_azure_dev_ops = false);
+        s.update_settings(|settings| settings.repos.enable_azure_devops = false);
         cx.notify();
     });
     draw(cx);
@@ -1404,7 +1404,7 @@ fn selecting_a_row_asks_github_for_its_details(cx: &mut TestAppContext) {
     let exe = std::env::current_exe().expect("test binary path");
     cx.read_entity(&store, |s, _| {
         s.update_settings(|settings| {
-            settings.repos.git_hub_executable = exe.display().to_string();
+            settings.repos.github_executable = exe.display().to_string();
         });
     });
     let cx = open_window(&store, cx);
@@ -1520,8 +1520,8 @@ fn ready_pull(number: u64) -> warp_station_core::github::GitHubPull {
 fn use_a_located_gh(store: &gpui::Entity<Store>, cx: &mut TestAppContext) {
     cx.update_entity(store, |s: &mut Store, _| {
         s.update_settings(|settings| {
-            settings.repos.enable_git_hub = true;
-            settings.repos.git_hub_executable = std::env::current_exe()
+            settings.repos.enable_github = true;
+            settings.repos.github_executable = std::env::current_exe()
                 .unwrap()
                 .to_string_lossy()
                 .to_string();
@@ -2045,8 +2045,8 @@ fn the_integration_switches_take_their_tabs_along(cx: &mut TestAppContext) {
     seed_github(&store, "/probe/alpha", 1, 1, cx);
     cx.read_entity(&store, |s, _| {
         s.update_settings(|settings| {
-            settings.repos.enable_git_hub = false;
-            settings.repos.enable_azure_dev_ops = false;
+            settings.repos.enable_github = false;
+            settings.repos.enable_azure_devops = false;
         });
     });
     let cx = open_window(&store, cx);

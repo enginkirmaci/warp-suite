@@ -37,7 +37,7 @@ impl SnapItPage {
     }
 
     fn toggle(&mut self, cx: &mut Context<Self>) {
-        let executable = self.store.read(cx).settings().snap_it.executable;
+        let executable = self.store.read(cx).settings().snapit.executable;
         let result = if snapit::is_running() {
             snapit::stop()
         } else {

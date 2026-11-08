@@ -8694,6 +8694,7 @@ dependencies = [
  "gpui-pre",
  "gpui-pre-platform",
  "rust-embed",
+ "serde",
  "serde_json",
  "tracing",
  "tracing-appender",

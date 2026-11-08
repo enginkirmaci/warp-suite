@@ -128,20 +128,24 @@ fn pair(value: Option<&serde_json::Value>) -> Option<(f32, f32)> {
     Some((first.trim().parse().ok()?, second.trim().parse().ok()?))
 }
 
+fn field<'a>(value: &'a serde_json::Value, names: &[&str]) -> Option<&'a serde_json::Value> {
+    names.iter().find_map(|name| value.get(*name))
+}
+
 /// The file's shape belongs to warp-snapit, and a line it can't read is skipped
-/// rather than losing the layout. The .NET app wrote these with a BOM.
+/// rather than losing the layout. It reads the native snake case and the old
+/// .NET PascalCase shape; the .NET app wrote these with a BOM.
 fn parse_layout(json: &str) -> Option<SnapLayout> {
     let value: serde_json::Value =
         serde_json::from_str(json.trim_start_matches('\u{feff}')).ok()?;
-    let (width, height) = pair(value.get("Size"))?;
-    let lines = value
-        .get("LayoutLines")
+    let (width, height) = pair(field(&value, &["size", "Size"]))?;
+    let lines = field(&value, &["layout_lines", "LayoutLines"])
         .and_then(|lines| lines.as_array())
         .into_iter()
         .flatten()
         .filter_map(|line| {
-            let (x, y) = pair(line.get("Point"))?;
-            let (width, height) = pair(line.get("Size"))?;
+            let (x, y) = pair(field(line, &["point", "Point"]))?;
+            let (width, height) = pair(field(line, &["size", "Size"]))?;
             Some(SnapLine {
                 x,
                 y,
@@ -151,7 +155,7 @@ fn parse_layout(json: &str) -> Option<SnapLayout> {
         })
         .collect();
     Some(SnapLayout {
-        name: value.get("Name")?.as_str()?.to_string(),
+        name: field(&value, &["name", "Name"])?.as_str()?.to_string(),
         width,
         height,
         lines,
@@ -202,6 +206,25 @@ mod tests {
         assert_eq!(layout.name, "3 Part Horizontal");
         assert_eq!((layout.width, layout.height), (2752.0, 1104.0));
         assert_eq!(layout.lines.len(), 1, "the unreadable line is skipped");
+        assert_eq!(layout.lines[0].x, 917.5);
+    }
+
+    #[test]
+    fn a_native_snake_layout_reads_too() {
+        let layout = parse_layout(
+            r#"{
+                "schema_version": 1,
+                "name": "3 Part Horizontal",
+                "size": "2752,1104",
+                "layout_lines": [
+                    {"point": "917.5,0", "size": "0,1104", "split_direction": "vertical"}
+                ]
+            }"#,
+        )
+        .expect("a layout");
+        assert_eq!(layout.name, "3 Part Horizontal");
+        assert_eq!((layout.width, layout.height), (2752.0, 1104.0));
+        assert_eq!(layout.lines.len(), 1);
         assert_eq!(layout.lines[0].x, 917.5);
     }
 

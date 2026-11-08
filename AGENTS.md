@@ -133,25 +133,31 @@ when one side changes, update the other side in the **same commit**.
   protocol; Warp Station is the client. A missing warp-agent binary disables
   Warp Station's AI surface; a closed one is launched on demand.
 - **SnapIt settings** (`~/.warp/snapit`): warp-snapit and Warp Station read
-  the same settings/layouts. Keep the .NET quirks: numbers may be strings,
-  points are `"x,y"`, colors are `"#AARRGGBB"`, and the misspelled
-  `DeactivedScreens` field stays. Warp Station's `SnapIt.Executable` setting
-  must point at the Rust `warp-snapit.exe` (its default still names the retired
-  .NET exe); the Rust port ships as a portable zip (`linux_skip = true`), not
-  an installer.
+  the same versioned snake_case `settings.json`/layouts. The old .NET-shaped
+  `Settings.json`, `ExcludedApplicationSettings.json` and PascalCase layouts
+  are importer input only. Points stay `"x,y"` and colours `"#AARRGGBB"`.
+  Warp Station's `snapit.executable` setting must point at the Rust
+  `warp-snapit.exe`; the Rust port ships as a portable zip
+  (`linux_skip = true`), not an installer.
 - **Notes store** (`~/notes`, one folder per repo): Warp Station launches
   warp-notes with `--store` (its resolved `notes_store_path`) and an explicit
   scope: `--root` from the titlebar and the cross-repo surfaces (the whole
   store), `--repo` from a repo's launcher (that folder); a hit also passes
-  `--note`. A standalone launch roots at the shared store. A store an
-  older release kept in `~/.warp/notes` (or older `~/.devtools/notes`) moves on
+  `--note`. A standalone launch roots at the shared store. A store an older
+  release kept in `~/.warp/notes` (or older `~/.devtools/notes`) moves on
   whichever app runs first. A missing warp-notes binary makes the notes
   surfaces fail with a toast; nothing else breaks.
 - **Per-user layout** (`~/.warp`): each app has its own folder (`station/`,
   `agent/`, `notes/`) beside `snapit/`, the shared `ui.json` at the root and
-  one shared `logs/`. The notes content stays outside at `~/notes`.
+  one shared `logs/`. Regenerable station/agent caches live under
+  `<app>/cache/`; deleting one loses no user setting or repo tag. The notes
+  content stays outside at `~/notes`.
   `warpui_kit_platform::paths` owns the tree and the startup migrations that
   adopt the older folders.
+- **Settings and caches**: suite-owned JSON is versioned snake_case with a
+  top-level `schema_version`; `docs/agents/settings-schema.md` is the contract.
+  Station, agent, notes and SnapIt import their pre-versioning files once; the
+  live store never normalizes keys.
 - **Shared text size and palette** (`~/.warp/ui.json`): `text_size` is `small`,
   `normal`, `large` or `larger` (the old `compact` reads as normal); `palette`
   is `copper`, `plum`, `pine` or `blue`. `warpui-kit-core` owns the file and
@@ -300,6 +306,8 @@ when one side changes, update the other side in the **same commit**.
   annotated skeleton for a new GPUI app in this suite.
 - [`docs/agents/testing-and-captures.md`](docs/agents/testing-and-captures.md)
   — probes, env hooks and the hidden-window capture recipe.
+- [`docs/agents/settings-schema.md`](docs/agents/settings-schema.md) — the
+  versioned snake_case settings/cache contract.
 - [`plans/`](plans/) — working design plans and proposals, one file per topic;
   delete a plan once its work lands.
 - [`kits/README.md`](kits/README.md) — what each kit crate provides and where a

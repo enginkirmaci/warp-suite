@@ -569,8 +569,8 @@ mod tests {
     fn model_choice_carries_the_one_harness_model_and_variant() {
         let settings: AppSettings = serde_json::from_str(
             r#"{
-                "OpenCode": {"DefaultModel": "zai/glm"},
-                "WarpAgent": {"Harness": "dsh", "Variant": "max"}
+                "opencode": {"default_model": "zai/glm"},
+                "warp_agent": {"harness": "dsh", "variant": "max"}
             }"#,
         )
         .unwrap();

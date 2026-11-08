@@ -8,6 +8,7 @@
 //! gated behind `cfg(windows)`.
 
 pub mod cli;
+pub mod config;
 pub mod geometry;
 pub mod log;
 pub mod render;

@@ -24,20 +24,24 @@ releases (Windows-only; the suite skips it on Linux).
 
 ## Shared configuration
 
-The port reads the same files as Warp Station:
+The port reads the versioned snake_case files; Warp Station reads the same
+layouts:
 
 ```
-%USERPROFILE%\.warp\snapit\Settings.json
-%USERPROFILE%\.warp\snapit\ExcludedApplicationSettings.json
+%USERPROFILE%\.warp\snapit\settings.json
+%USERPROFILE%\.warp\snapit\excluded_applications.json
 %USERPROFILE%\.warp\snapit\layouts\*.json
 ```
 
-That includes the .NET quirks: numbers may be strings, points/sizes are
-`"x,y"`, colours are `"#AARRGGBB"`, `AreaPadding`/`BorderThickness` may be a
-number or a thickness string, and the misspelled `DeactivedScreens` field is
-kept as-is. Missing user files are seeded from `<exe dir>\settings\snapit`,
-just like the .NET companion (`scripts/build.ps1` in warp-suite stages the
-default seed next to the exe).
+The old .NET-shaped `Settings.json`, `ExcludedApplicationSettings.json` and
+PascalCase layouts are imported once, rewritten native, then retired. The
+readable value quirks stay: numbers may be strings, points/sizes are `"x,y"`,
+colours are `"#AARRGGBB"`, and `AreaPadding`/`BorderThickness` may be a number
+or a thickness string. The schema contract is
+[`../../docs/agents/settings-schema.md`](../../docs/agents/settings-schema.md).
+Missing user files are seeded from `<exe dir>\settings\snapit`, just like the
+.NET companion (`scripts/build.ps1` in warp-suite stages the default seed next
+to the exe).
 
 ## Build and run
 
@@ -53,10 +57,10 @@ target\release\warp-snapit.exe --parent <warp-station pid>
 target\release\warp-snapit.exe --dump-zones
 ```
 
-`warp-snapit.exe` uses the mutex `Local\DevTools.SnapIt.Rust`, while the .NET
-companion uses `Local\DevTools.Tools.SnapIt.Companion`. Both can therefore be
-started for comparison, but running both at once installs two global hooks and
-is not recommended.
+`warp-snapit.exe` uses the mutex `Local\DevTools.SnapIt.Rust`. The .NET
+companion used a different mutex, but it cannot read the native settings; its
+old files are importer input only, and two global hooks at once are not
+recommended.
 
 ## Implementation notes
 
