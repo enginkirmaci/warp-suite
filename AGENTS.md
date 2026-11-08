@@ -176,7 +176,9 @@ when one side changes, update the other side in the **same commit**.
   `--note`. A standalone launch roots at the shared store. A store an older
   release kept in `~/.warp/notes` (or older `~/.devtools/notes`) moves on
   whichever app runs first. A missing warp-notes binary makes the notes
-  surfaces fail with a toast; nothing else breaks.
+  surfaces fail with a toast; nothing else breaks. The hidden
+  `<store>/.warp-notes/` folder is warp-notes' own (Trash, later templates);
+  it is not a note folder and every walker skips dot directories.
 - **Per-user layout** (`~/.warp`): each app has its own folder (`station/`,
   `agent/`, `notes/`) beside `snapit/`, the shared `ui.json` at the root and
   one shared `logs/`. Regenerable station/agent caches live under

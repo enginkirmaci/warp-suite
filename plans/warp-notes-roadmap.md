@@ -231,12 +231,11 @@ own field; they are never global.
 - Duplicate creates `<stem> copy.md`, then `<stem> copy 2.md`; it returns the
   new path and never touches the original.
 - Trash layout is deliberately bare:
-  `<store>/.warp-notes/trash/<deleted-epoch-ms>-<4hex>/<store-relative path>`.
-  The id is the timestamp plus entropy (retry on collision), and the payload
-  path is the original path, so restore strips the id component. There is no
-  manifest, no schema to keep in sync and no missing-payload state: a deleted
-  file that is not there is simply gone. Paths use forward slashes in the
-  stored tree and are joined per platform on restore, like the prefs paths.
+  `<store>/.warp-notes/trash/<deleted-epoch-ms>-<4hex>/` with a `path` text
+  file (the store-relative original, forward slashes) and a `payload` entry
+  (the moved file or folder). The id is the timestamp plus entropy (retry on
+  collision). There is no JSON manifest or schema to keep in sync; a missing
+  payload is not listed rather than guessed at.
 - Restore returns to the original relative path; if something is already
   there, restore as `<stem> (restored).md` (or `folder (restored)`) and say
   so. Missing parent folders are recreated.
@@ -639,12 +638,13 @@ other global-state probes.
   layout fields; tabs are not, which avoids making that worse. A
   session-restore feature can come later with per-window IDs.
 - **D2 — Trash lives inside the store** at
-  `<store>/.warp-notes/trash/<deleted-epoch-ms>-<4hex>/<store-relative path>`,
-  30-day purge. No manifest: the id and the path are the record. It travels
-  with the vault and is invisible to the tree, the shared search and
-  Obsidian's own `.trash`. The alternative (`~/.warp/notes/trash`) was
-  rejected because a store on another machine would lose its restores; a bare
-  `<store>/.trash` was rejected because Obsidian owns that name.
+  `<store>/.warp-notes/trash/<deleted-epoch-ms>-<4hex>/{path,payload}`,
+  30-day purge. No JSON manifest: the id is the deletion time and `path` is
+  the original. It travels with the vault and is invisible to the tree, the
+  shared search and Obsidian's own `.trash`. The alternative
+  (`~/.warp/notes/trash`) was rejected because a store on another machine
+  would lose its restores; a bare `<store>/.trash` was rejected because
+  Obsidian owns that name.
 - **D3 — Delete is immediate + Undo, not a confirmation dialog.** The note
   goes to Trash, the toast offers Undo for eight seconds, and the Trash
   dialog is the recovery surface. The old two-click arm disappears.
