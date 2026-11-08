@@ -131,8 +131,9 @@ The released flat `["provider/model"]` list is importer input only.
 ## warp-notes settings
 
 `schema_version`, `list_width`, `reduce_motion`, `list_visible`, `section`,
-`settings_section`, `open_note`, `expanded`, `notes_scope`. Paths are relative
-to the notes store root.
+`settings_section`, `open_note`, `expanded`, `recent`, `pinned`, `notes_scope`.
+Paths are relative to the notes store root; `recent` is newest-first and
+`pinned` is the quick-open/tree pin list.
 
 ## Shared `ui.json`
 
