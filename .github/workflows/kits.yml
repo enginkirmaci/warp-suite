@@ -142,7 +142,7 @@ jobs:
           cache-on-failure: true
 
       # warp-snapit is Windows-only (its engine is cfg(windows)-gated) but its
-      # platform-neutral modules test on Linux; its package is `snapit`.
+      # platform-neutral modules test on Linux; its package is `warp-snapit`.
       # Every app is a member of the root workspace, so -p selects it.
       # The kit job only lints kits/; app-code warnings (this audit found
       # several by hand) used to reach main unchecked.
@@ -150,7 +150,7 @@ jobs:
         run: |
           cargo clippy --locked --all-targets \
             -p warp-station-core -p warp-station \
-            -p warp-agent -p warp-notes -p snapit \
+            -p warp-agent -p warp-notes -p warp-snapit \
             -- -D warnings
 
       - name: Test apps
@@ -158,4 +158,4 @@ jobs:
           set -euo pipefail
           cargo test --locked \
             -p warp-station-core -p warp-station \
-            -p warp-agent -p warp-notes -p snapit
+            -p warp-agent -p warp-notes -p warp-snapit

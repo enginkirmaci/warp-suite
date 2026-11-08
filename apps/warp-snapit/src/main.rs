@@ -1,9 +1,9 @@
 use std::process::ExitCode;
 
-use snapit::cli::{Action, USAGE};
+use warp_snapit::cli::{Action, USAGE};
 
 fn main() -> ExitCode {
-    let action = match snapit::cli::parse(std::env::args_os().skip(1)) {
+    let action = match warp_snapit::cli::parse(std::env::args_os().skip(1)) {
         Ok(action) => action,
         Err(error) => {
             eprintln!("warp-snapit: {error}\n\n{USAGE}");
@@ -25,8 +25,8 @@ fn main() -> ExitCode {
 }
 
 #[cfg(windows)]
-fn run(cli: snapit::cli::Cli) -> ExitCode {
-    match snapit::run(cli) {
+fn run(cli: warp_snapit::cli::Cli) -> ExitCode {
+    match warp_snapit::run(cli) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             eprintln!("warp-snapit: {error:#}");
@@ -36,7 +36,7 @@ fn run(cli: snapit::cli::Cli) -> ExitCode {
 }
 
 #[cfg(not(windows))]
-fn run(_cli: snapit::cli::Cli) -> ExitCode {
+fn run(_cli: warp_snapit::cli::Cli) -> ExitCode {
     eprintln!("warp-snapit: the SnapIt engine is Windows-only.");
     ExitCode::FAILURE
 }

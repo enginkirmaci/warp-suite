@@ -4,14 +4,9 @@ This is the entry point for any agent working in this repo. Read it first, then
 the app's own `AGENTS.md` when the work is in one app, then the deep guides in
 `docs/agents/`.
 
-## Language
-
-- Write English only: replies, plans, commit messages, code comments, docs,
-  TODO notes and questions.
-
 ## What this repo is
 
-warp-suite is the monorepo for Engin's connected desktop apps. The apps live
+warp-suite is the monorepo for desktop apps. The apps live
 under `apps/<name>/`, imported with `git subtree` so each keeps its history;
 the shared `warpui-kit-*` crates live under `kits/`; one Cargo workspace builds
 all of it and one release pipeline publishes it.
@@ -20,12 +15,8 @@ all of it and one release pipeline publishes it.
 |---|---|---|---|
 | warp-station | `warp-station` + `warp-station-core` | `apps/warp-station/` | Repository workbench (Rust/GPUI) |
 | warp-agent | `warp-agent` | `apps/warp-agent/` | Chat client over `opencode serve` and `dsh web` (Rust/GPUI) |
-| warp-snapit | `snapit` | `apps/warp-snapit/` | Windows-only zone snapper (Win32, no GPUI/kit) |
+| warp-snapit | `warp-snapit` | `apps/warp-snapit/` | Windows-only zone snapper (Win32, no GPUI/kit) |
 | warp-notes | `warp-notes` | `apps/warp-notes/` | Per-repo markdown notes with a live editor (Rust/GPUI) |
-
-The C#/.NET SnapIt repo stays excluded; the Rust `warp-snapit` port is the
-suite's zone snapper. For the user-facing description, see
-[`README.md`](README.md).
 
 ## Before you edit
 
@@ -99,7 +90,7 @@ The clippy selectors are:
 cargo clippy --locked --all-targets \
   -p warpui-kit-core -p warpui-kit-diff -p warpui-kit-markdown \
   -p warpui-kit-picker -p warpui-kit-platform \
-  -p warp-station-core -p warp-station -p warp-agent -p warp-notes -p snapit \
+  -p warp-station-core -p warp-station -p warp-agent -p warp-notes -p warp-snapit \
   -- -D warnings
 ```
 

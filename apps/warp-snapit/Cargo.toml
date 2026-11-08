@@ -1,16 +1,10 @@
 [package]
-name = "snapit"
+name = "warp-snapit"
 version.workspace = true
 edition.workspace = true
 description = "SnapIt — Windows zone snapper (Rust port of Warp Station's Tools.SnapIt companion)"
 license.workspace = true
 publish = false
-
-# the package is `snapit`; the artifact is `warp-snapit` (scripts/build.* reads
-# the bin target through cargo metadata)
-[[bin]]
-name = "warp-snapit"
-path = "src/main.rs"
 
 [dependencies]
 anyhow = { workspace = true }

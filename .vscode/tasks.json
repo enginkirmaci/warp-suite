@@ -3,8 +3,7 @@
     // the suite is one workspace (a bare `cargo build` at the root builds every
     // member, apps included). warp-snapit is Windows-only (apps.toml:
     // linux_skip = true), so its task exists only for the cppvsdbg launch
-    // configs; the package is `snapit` and the binary it builds is
-    // `warp-snapit`.
+    // configs; its package and binary are both `warp-snapit`.
     "version": "2.0.0",
     "tasks": [
         {
@@ -35,10 +34,10 @@
             "problemMatcher": "$rustc"
         },
         {
-            "label": "cargo build (snapit)",
+            "label": "cargo build (warp-snapit)",
             "type": "shell",
             "command": "cargo",
-            "args": ["build", "-p", "snapit"],
+            "args": ["build", "-p", "warp-snapit"],
             "options": { "cwd": "${workspaceFolder}" },
             "group": "build",
             "problemMatcher": "$rustc"

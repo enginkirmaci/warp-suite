@@ -84,7 +84,7 @@ while read -r app; do
     fi
 
     app_dir="$root/apps/$app"
-    # The cargo package name; differs from the directory for warp-snapit.
+    # The cargo package name; defaults to the app name.
     package="$(python3 "$here/manifest.py" get "$app" package 2>/dev/null || echo "$app")"
     build_args="$(python3 "$here/manifest.py" get "$app" linux_build 2>/dev/null || true)"
     icon_prefix="$(python3 "$here/manifest.py" get "$app" icon_prefix 2>/dev/null || echo "$app")"
@@ -101,7 +101,7 @@ while read -r app; do
 
     meta="$(cd "$root" && cargo metadata --no-deps --format-version 1)"
     target_dir="$(jq -r '.target_directory' <<<"$meta")"
-    # The bin target is not always the package name (snapit -> warp-snapit).
+    # The bin target may differ from the package name.
     bin_name="$(jq -r --arg pkg "$package" \
         '[.packages[] | select(.name == $pkg) | .targets[]
           | select(.kind | index("bin")) | .name] | .[0]' <<<"$meta")"

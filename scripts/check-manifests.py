@@ -114,10 +114,10 @@ def main() -> int:
         if not isinstance(description, str) or not description.strip():
             errors.append(f"{where}: package.description is missing")
         if "lib" in doc or "bin" in doc:
-            if package.get("name") != "snapit" or "lib" in doc:
-                errors.append(
-                    f"{where}: only snapit keeps a target table ([[bin]] with its path)"
-                )
+            errors.append(
+                f"{where}: a target table is redundant; cargo names the lib and "
+                "bin from the package"
+            )
 
         if member.startswith("kits/"):
             if "publish" in package:

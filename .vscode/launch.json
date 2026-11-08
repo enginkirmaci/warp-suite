@@ -8,7 +8,7 @@
     // the NVIDIA Vulkan ICD dlopen under its solib handler), Windows uses the
     // C/C++ extension's cppvsdbg. F5 reuses the last-selected config per
     // machine, so each machine only ever sees its own entry after the first
-    // pick. snapit is the exception: it is Windows-only (apps.toml
+    // pick. warp-snapit is the exception: it is Windows-only (apps.toml
     // linux_skip = true; the engine is cfg(windows)), so it has a cppvsdbg
     // config and no gdb one — on Linux the binary is a stub that only reports
     // the engine is Windows-only.
@@ -70,13 +70,13 @@
             "preLaunchTask": "cargo build (warp-notes)"
         },
         {
-            "name": "Rust: snapit (Windows — cppvsdbg)",
+            "name": "Rust: warp-snapit (Windows — cppvsdbg)",
             "type": "cppvsdbg",
             "request": "launch",
             "program": "${workspaceFolder}/.build/target/debug/warp-snapit.exe",
             "cwd": "${workspaceFolder}",
             "console": "integratedTerminal",
-            "preLaunchTask": "cargo build (snapit)"
+            "preLaunchTask": "cargo build (warp-snapit)"
         }
     ]
 }

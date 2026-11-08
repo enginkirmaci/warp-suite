@@ -67,7 +67,7 @@ $revisions = @()
 
 foreach ($name in $appNames) {
     $dir = Get-Item (Join-Path (Join-Path $root 'apps') $name)
-    # The cargo package name; differs from the directory for warp-snapit.
+    # The cargo package name; defaults to the app name.
     # A missing key exits non-zero with a message on stderr, which the next
     # line absorbs by falling back to the app name - but under
     # $ErrorActionPreference = 'Stop' PS 5.1 promotes redirected native
@@ -84,7 +84,7 @@ foreach ($name in $appNames) {
     if (-not $pkg) { throw "$name (package $package) is not a workspace member" }
     $bins = @($pkg.targets | Where-Object { $_.kind -contains 'bin' } | ForEach-Object { $_.name })
     if ($bins.Count -eq 0) { throw "$name has no bin target" }
-    # The bin target is not always the package name (snapit -> warp-snapit).
+    # The bin target may differ from the package name.
     $bin = if ($bins -contains $package) { $package } else { $bins[0] }
 
     $stage = Join-Path $dist $name

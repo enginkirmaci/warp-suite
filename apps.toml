@@ -7,8 +7,8 @@
 #
 # Per-app build knobs (all optional):
 #   package       cargo package name to build and to read the bin target from
-#                 (defaults to the app name; warp-snapit -> "snapit").
-#                 Required whenever the directory name is not the package name.
+#                 (defaults to the app name). Required whenever the directory
+#                 name is not the package name.
 #   linux_build   extra args for `cargo build --release`, beyond the
 #                 `-p <package>` build.sh always passes
 #   linux_skip    true = Windows-only app; build.sh skips it entirely
@@ -45,7 +45,6 @@ cross-app contract change: update Warp Station in the same commit.
 """
 
 [apps.warp-snapit]
-package = "snapit"
 linux_skip = true
 icon_prefix = "snapit"
 scalable_svg = "packaging/linux/icons/snapit.svg"

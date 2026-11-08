@@ -79,9 +79,8 @@ Notes:
 - Add `warpui-kit-diff`, `-markdown` or `-picker` when the app shows diffs,
   edits markdown or needs a filtered picker; the language features hang off
   the kit (`features = ["all-languages", "mermaid"]`), not off `gpui-kit`.
-- `apps/warp-snapit` is the exception: it keeps
-  `[[bin]] name = "warp-snapit"` with `path = "src/main.rs"` because its
-  package is `snapit`.
+- No `[lib]` or `[[bin]]` table: cargo names the library and the binary after
+  `[package] name`, and `src/lib.rs` / `src/main.rs` are the default paths.
 
 ## 2. lib.rs and main.rs — bootstrap order
 

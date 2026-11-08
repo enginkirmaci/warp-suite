@@ -7,9 +7,8 @@ app-specific facts. The user-facing description is in
 ## Shape
 
 warp-snapit is a standalone Rust port of the .NET `Tools.SnapIt` companion.
-It is **Windows-only**: the package is `snapit` (the directory is
-`apps/warp-snapit/`) and the binary is `warp-snapit`. It does not link GPUI or
-the `warpui-kit-*` crates.
+It is **Windows-only**: the package, the binary and the directory are all
+`warp-snapit`. It does not link GPUI or the `warpui-kit-*` crates.
 
 The platform-neutral modules compile and test on Linux. The engine is gated:
 
@@ -20,7 +19,7 @@ parent_watch, win32                              # #[cfg(windows)]
 ```
 
 `src/lib.rs` is the module list; `src/main.rs` parses the CLI and dispatches to
-`snapit::run` on Windows.
+`warp_snapit::run` on Windows.
 
 ## CLI
 
@@ -77,8 +76,8 @@ change: update Warp Station in the same commit. The schema contract is
 ## Tests and builds
 
 ```sh
-cargo test -p snapit          # Linux: cli, geometry, render, settings, zones
-cargo build -p snapit         # only on Windows
+cargo test -p warp-snapit     # Linux: cli, geometry, render, settings, zones
+cargo build -p warp-snapit    # only on Windows
 ```
 
 The unit tests live beside the neutral modules (`cli`, `geometry`, `render`,
