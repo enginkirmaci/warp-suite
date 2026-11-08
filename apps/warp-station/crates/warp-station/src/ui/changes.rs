@@ -95,9 +95,6 @@ pub struct ChangesView {
     /// with the picker's closures.
     branch_ui: Rc<RefCell<BranchUi>>,
     commit_message: Entity<TextareaState>,
-    /// Set when the user pressed "Generate & Commit" with an empty box: the
-    /// wand's draft lands here first, then commits automatically.
-    auto_commit_after_draft: bool,
     history_open: bool,
     /// Hash of the drilled-in commit (None = the list view).
     drilled_commit: Option<String>,
@@ -150,7 +147,6 @@ impl ChangesView {
             branch_picker,
             branch_ui,
             commit_message,
-            auto_commit_after_draft: false,
             history_open: false,
             drilled_commit: None,
             detail_armed: None,
@@ -190,7 +186,6 @@ impl ChangesView {
             .update(cx, |picker, cx| picker.clear_filter(window, cx));
         self.commit_message
             .update(cx, |f, cx| f.set_value("", window, cx));
-        self.auto_commit_after_draft = false;
         self.history_open = false;
         self.drilled_commit = None;
         self.detail_armed = None;
@@ -361,7 +356,6 @@ impl Render for ChangesView {
             self.commit_message
                 .update(cx, |state, cx| state.set_value("", window, cx));
         }
-        let mut auto_commit_text: Option<String> = None;
         if let Some(draft) = self
             .store
             .update(cx, |store, _| store.commit_message_draft.take())
@@ -369,39 +363,6 @@ impl Render for ChangesView {
             let draft = draft.trim().to_string();
             self.commit_message
                 .update(cx, |state, cx| state.set_value(draft.as_str(), window, cx));
-            if self.auto_commit_after_draft && !draft.is_empty() {
-                self.auto_commit_after_draft = false;
-                // the user may have unstaged everything while the run was in
-                // flight: keep the message, but do not fire a commit that can
-                // only fail
-                let staged = self
-                    .store
-                    .read(cx)
-                    .changes()
-                    .is_some_and(|snapshot| !snapshot.staged_files.is_empty());
-                if staged {
-                    auto_commit_text = Some(draft);
-                }
-            }
-        }
-        if let Some(message) = auto_commit_text {
-            self.store.update(cx, |store, cx| {
-                store.run_git(GitAction::Commit(message), cx)
-            });
-        }
-        // a generate-and-commit click stays armed only while this repo's run
-        // is actually in flight: a failed or cancelled wand, a run kicked for
-        // another repo, or a run that never started must not leave a commit
-        // armed for some later draft to fire
-        if self.auto_commit_after_draft {
-            let generating_here = {
-                let store = self.store.read(cx);
-                store.wand_busy == Some(crate::net::WandKind::Commit)
-                    && store.wand_repo == store.selected_repo
-            };
-            if !generating_here {
-                self.auto_commit_after_draft = false;
-            }
         }
         if let Some((key, patch)) = self
             .store
@@ -1455,18 +1416,23 @@ impl ChangesView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> gpui::AnyElement {
-        let (wand_active, wand_busy_elsewhere) = {
+        let (wand_active, wand_queued_here, wand_live) = {
             let state = self.store.read(cx);
+            let here = state.selected_repo.as_deref();
             let active = state.wand_busy == Some(crate::net::WandKind::Commit)
-                && state.wand_repo.as_deref() == state.selected_repo.as_deref();
-            (active, state.wand_busy.is_some() && !active)
+                && state.wand_repo.as_deref() == here;
+            let queued =
+                here.is_some_and(|folder| state.wand_queued(crate::net::WandKind::Commit, folder));
+            (active, queued, state.wand_busy.is_some())
         };
         let wand_on = self.store.read(cx).wand_available();
         let message_empty = self.commit_message.read(cx).value().trim().is_empty();
-        // a run already going for another repo owns the one wand slot: this
-        // box must not promise a generation that would be refused
-        let can_generate = wand_on && !wand_busy_elsewhere;
-        let generate_and_commit = message_empty && can_generate;
+        // one run owns the slot at a time; a request made while it is busy
+        // queues for this repo and starts when the live run ends
+        let can_generate = wand_on && !wand_active && !wand_queued_here;
+        let generate_now = message_empty && can_generate && !wand_live;
+        let queue_generation = message_empty && can_generate && wand_live;
+        let generate_and_commit = generate_now;
 
         let mut card = div()
             .w_full()
@@ -1520,7 +1486,7 @@ impl ChangesView {
                         .focus(|s| s.border_color(theme::hairline())),
                     )
                     // the corner wand: overlay inside the message box
-                    .when(wand_on && !wand_busy_elsewhere, |box_area| {
+                    .when(can_generate, |box_area| {
                         let store = self.store.clone();
                         box_area.child(
                             div()
@@ -1536,7 +1502,7 @@ impl ChangesView {
                                 .hover(|s| s.bg(theme::hover_bg()))
                                 .on_click(move |_, _, cx| {
                                     store.update(cx, |s, cx| {
-                                        s.run_wand(crate::net::WandKind::Commit, cx)
+                                        s.run_wand(crate::net::WandKind::Commit, false, cx)
                                     });
                                 })
                                 .child(icon(
@@ -1552,7 +1518,6 @@ impl ChangesView {
         button_row = button_row.child({
             let store = self.store.clone();
             let message = self.commit_message.clone();
-            let this = cx.entity();
             let (generating, committing) = (
                 wand_active,
                 self.store.read(cx).running_job() == Some("commit"),
@@ -1562,8 +1527,12 @@ impl ChangesView {
                 "Generating…"
             } else if committing {
                 "Committing…"
+            } else if message_empty && wand_queued_here {
+                "Queued…"
             } else if generate_and_commit {
                 "Generate & Commit"
+            } else if queue_generation {
+                "Queue & Commit"
             } else {
                 "Commit"
             };
@@ -1605,21 +1574,17 @@ impl ChangesView {
                     }
                     let text = message.read(cx).value().to_string();
                     if text.trim().is_empty() {
-                        // no wand, or another repo's run owns the slot: there
-                        // is nothing this click could start
+                        // no wand, or this repo's request is already live or
+                        // queued: there is nothing this click could start
                         if !can_generate {
                             return;
                         }
-                        // empty box: generate first; the drained draft
-                        // lands in the textarea and then commits itself
-                        let wand_busy = store.read(cx).wand_busy.is_some();
-                        this.update(cx, |this, cx| {
-                            this.auto_commit_after_draft = true;
-                            cx.notify();
+                        // empty box: generate, then commit in this repo once
+                        // the run lands — even if another repo is on screen
+                        // by then; the store owns that follow-up
+                        store.update(cx, |s, cx| {
+                            s.run_wand(crate::net::WandKind::Commit, true, cx)
                         });
-                        if !wand_busy {
-                            store.update(cx, |s, cx| s.run_wand(crate::net::WandKind::Commit, cx));
-                        }
                         return;
                     }
                     store.update(cx, |s, cx| s.run_git(GitAction::Commit(text.clone()), cx));
@@ -1634,7 +1599,10 @@ impl ChangesView {
                 })
                 .when(!working, |b| {
                     b.child(icon(
-                        if generate_and_commit {
+                        if generate_and_commit
+                            || queue_generation
+                            || (message_empty && wand_queued_here)
+                        {
                             "icons/icon-wand.svg"
                         } else {
                             "icons/icon-check.svg"
@@ -1680,6 +1648,49 @@ impl ChangesView {
                             .text_color(theme::text_dim())
                             .hover(|s| s.bg(theme::hover_bg()).text_color(theme::text()))
                             .on_click(move |_, _, cx| store.update(cx, |s, cx| s.cancel_wand(cx)))
+                            .child("Cancel"),
+                    ),
+            );
+        }
+        if wand_queued_here {
+            let store = self.store.clone();
+            let folder = self
+                .store
+                .read(cx)
+                .selected_repo
+                .clone()
+                .unwrap_or_default();
+            button_row = button_row.child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_1()
+                    .text_size(px(theme::font_body()))
+                    .text_color(theme::text_dim())
+                    .child(icon(
+                        "icons/icon-wand.svg",
+                        px(theme::icon_small() - 1.),
+                        theme::text_dim(),
+                    ))
+                    .child("queued…")
+                    // the request waits for the slot: pulling it back must
+                    // not stop the run that is live now
+                    .child(
+                        div()
+                            .id("wand-dequeue")
+                            .debug_selector(|| "wand-dequeue".into())
+                            .a11y_button("Cancel queued generation")
+                            .cursor_pointer()
+                            .ml_2()
+                            .px_1p5()
+                            .rounded(px(4.))
+                            .text_color(theme::text_dim())
+                            .hover(|s| s.bg(theme::hover_bg()).text_color(theme::text()))
+                            .on_click(move |_, _, cx| {
+                                store.update(cx, |s, cx| {
+                                    s.dequeue_wand(crate::net::WandKind::Commit, &folder, cx)
+                                })
+                            })
                             .child("Cancel"),
                     ),
             );

@@ -527,8 +527,9 @@ fn warp_status_tracks_running_workspaces(cx: &mut TestAppContext) {
 }
 
 /// Switching repos resets the whole per-repo workspace: snapshot, branches,
-/// history, drafts, wand state and the busy flags — the rail never shows the
-/// previous repo's detail.
+/// history, drafts, errors and the busy flags — the rail never shows the
+/// previous repo's detail. The live wand run keeps its repo so the title bar
+/// can name it and a return can still collect its draft.
 #[gpui::test]
 fn switching_repos_resets_the_workspace(cx: &mut TestAppContext) {
     use warp_station_core::model::{GitBranchKind, GitBranchRef};
@@ -576,16 +577,17 @@ fn switching_repos_resets_the_workspace(cx: &mut TestAppContext) {
         assert!(s.readme_draft.is_none(), "readme draft reset");
         assert!(s.wand_error.is_none(), "wand error reset");
         assert!(!s.git_busy(), "the new repo is free");
-        // the in-flight run keeps its busy flag but loses its repo: it can
-        // no longer land a draft on beta
-        assert_eq!(s.wand_repo, None);
+        // the in-flight run keeps its repo: the title bar names it and
+        // returning to alpha can still collect the draft
+        assert_eq!(s.wand_repo.as_deref(), Some("/probe/alpha"));
+        assert_eq!(s.wand_busy, Some(warp_station::net::WandKind::Commit));
     });
 }
 
-/// A wand run kicked for repo A never lands its draft once repo B is
-/// selected — the run ends, but beta's commit box stays empty.
+/// A wand run kicked for repo A never lands its draft in repo B's box: the
+/// draft waits for A and is there when the user comes back.
 #[gpui::test]
-fn wand_done_for_a_switched_away_repo_lands_nothing(cx: &mut TestAppContext) {
+fn wand_done_for_a_switched_away_repo_lands_when_it_returns(cx: &mut TestAppContext) {
     use warp_station::net::{UiEvent, WandKind};
 
     cx.update(gpui_kit::init);
@@ -595,18 +597,24 @@ fn wand_done_for_a_switched_away_repo_lands_nothing(cx: &mut TestAppContext) {
     let store = cx.new(|cx| Store::new(cx, net_tx));
 
     cx.update_entity(&store, |s: &mut Store, cx| {
+        s.repos = vec![
+            entry("alpha", "/probe/alpha", &[]),
+            entry("beta", "/probe/beta", &[]),
+        ];
+        s.scanning = false;
         s.select_repo("/probe/alpha", cx);
-    });
-    // the run was kicked for alpha, the user has since moved to beta
-    cx.update_entity(&store, |s, _| {
         s.wand_busy = Some(WandKind::Commit);
         s.wand_repo = Some("/probe/alpha".into());
     });
+    // the user moves to beta while the run is still live
     cx.update_entity(&store, |s: &mut Store, cx| {
         s.select_repo("/probe/beta", cx);
-        s.wand_busy = Some(WandKind::Commit);
-        s.wand_repo = Some("/probe/alpha".into());
     });
+    // the title bar still names the run's repo, from beta's screen
+    assert_eq!(
+        cx.read_entity(&store, |s, _| s.activity()),
+        Some("Generating alpha".to_string())
+    );
     cx.update_entity(&store, |s: &mut Store, cx| {
         s.on_net_event(
             UiEvent::WandDone {
@@ -620,9 +628,15 @@ fn wand_done_for_a_switched_away_repo_lands_nothing(cx: &mut TestAppContext) {
 
     cx.read_entity(&store, |s, _| {
         assert!(s.wand_busy.is_none(), "the run ended");
+        assert_eq!(s.wand_repo, None);
         assert!(
             s.commit_message_draft.is_none(),
             "alpha's draft never lands in beta's commit box"
+        );
+        assert_eq!(
+            s.wand_drafts.get("/probe/alpha").map(|d| d.text.as_str()),
+            Some("A's generated message"),
+            "the draft waits for its repo"
         );
     });
 
@@ -644,6 +658,241 @@ fn wand_done_for_a_switched_away_repo_lands_nothing(cx: &mut TestAppContext) {
             s.commit_message_draft.as_deref(),
             Some("B's generated message")
         );
+    });
+
+    // selecting alpha drains the kept draft into its commit box
+    cx.update_entity(&store, |s: &mut Store, cx| {
+        s.select_repo("/probe/alpha", cx);
+    });
+    cx.read_entity(&store, |s, _| {
+        assert_eq!(
+            s.commit_message_draft.as_deref(),
+            Some("A's generated message")
+        );
+        assert!(s.wand_drafts.is_empty(), "drained exactly once");
+    });
+}
+
+/// A request made while the slot is busy waits for its own repo and starts
+/// when the live run ends; asking twice does not queue it twice.
+#[gpui::test]
+fn a_second_wand_waits_for_the_live_run(cx: &mut TestAppContext) {
+    use warp_station::net::{NetCommand, UiEvent, WandKind};
+
+    cx.update(gpui_kit::init);
+    scratch_home();
+
+    // `git` is a real executable on PATH, so the queued start passes the
+    // gate without a warp-agent install in the test environment
+    let settings = std::env::temp_dir().join(format!(
+        "warp-station-probe-wand-queue-{}.json",
+        std::process::id()
+    ));
+    std::fs::write(
+        &settings,
+        r#"{"WarpAgent":{"EnableWarpAgent":true,"Executable":"git"},"OpenCode":{"DefaultModel":"probe/model"}}"#,
+    )
+    .expect("scratch settings");
+
+    let (net_tx, net_rx) = async_channel::unbounded();
+    let store = cx.new(|_cx| {
+        let mut store = Store::with_settings(
+            net_tx,
+            std::sync::Arc::new(warp_station_core::settings::SettingsService::at(
+                settings.clone(),
+            )),
+        );
+        store.replace_repos(vec![
+            entry("alpha", "/probe/alpha", &[]),
+            entry("beta", "/probe/beta", &[]),
+        ]);
+        store.scanning = false;
+        store
+    });
+    cx.update_entity(&store, |s: &mut Store, cx| {
+        s.select_repo("/probe/alpha", cx);
+        // a run for alpha already owns the slot
+        s.wand_busy = Some(WandKind::Commit);
+        s.wand_repo = Some("/probe/alpha".into());
+        s.wand_id = Some("wand-live".into());
+    });
+    cx.update_entity(&store, |s: &mut Store, cx| {
+        s.select_repo("/probe/beta", cx);
+        s.run_wand(WandKind::Commit, false, cx);
+        s.run_wand(WandKind::Commit, false, cx);
+    });
+    cx.read_entity(&store, |s, _| {
+        assert_eq!(s.wand_queue.len(), 1, "the repeat was deduped");
+        assert!(s.wand_queued(WandKind::Commit, "/probe/beta"));
+        assert_eq!(s.activity(), Some("Generating alpha".to_string()));
+    });
+
+    // the live run ends: beta's request takes the slot
+    cx.update_entity(&store, |s: &mut Store, cx| {
+        s.on_net_event(
+            UiEvent::WandDone {
+                wand_id: "wand-live".into(),
+                kind: WandKind::Commit,
+                result: Ok("alpha's draft".into()),
+            },
+            cx,
+        );
+    });
+    cx.read_entity(&store, |s, _| {
+        assert!(s.wand_queue.is_empty(), "the request left the queue");
+        assert_eq!(s.wand_busy, Some(WandKind::Commit));
+        assert_eq!(s.wand_repo.as_deref(), Some("/probe/beta"));
+        assert!(s.wand_id.is_some());
+    });
+    let mut started = None;
+    while let Ok(command) = net_rx.try_recv() {
+        if let NetCommand::Wand { folder, .. } = command {
+            started = Some(folder);
+        }
+    }
+    assert_eq!(
+        started.as_deref(),
+        Some(std::path::Path::new("/probe/beta")),
+        "the queued repo's run starts by itself"
+    );
+}
+
+/// A Generate & Commit run commits in its own repo when it lands, even with
+/// another repo selected; a failed commit hands the message back as that
+/// repo's draft instead of losing it.
+#[gpui::test]
+fn a_generate_and_commit_run_commits_its_repo(cx: &mut TestAppContext) {
+    use warp_station::net::{GitAction, NetCommand, UiEvent, WandKind};
+
+    cx.update(gpui_kit::init);
+    scratch_home();
+
+    let settings = std::env::temp_dir().join(format!(
+        "warp-station-probe-autocommit-{}.json",
+        std::process::id()
+    ));
+    std::fs::write(
+        &settings,
+        r#"{"WarpAgent":{"EnableWarpAgent":true,"Executable":"git"},"OpenCode":{"DefaultModel":"probe/model"}}"#,
+    )
+    .expect("scratch settings");
+
+    let (net_tx, net_rx) = async_channel::unbounded();
+    let store = cx.new(|_cx| {
+        let mut store = Store::with_settings(
+            net_tx,
+            std::sync::Arc::new(warp_station_core::settings::SettingsService::at(
+                settings.clone(),
+            )),
+        );
+        store.replace_repos(vec![
+            entry("alpha", "/probe/alpha", &[]),
+            entry("beta", "/probe/beta", &[]),
+        ]);
+        store.scanning = false;
+        store
+    });
+    cx.update_entity(&store, |s: &mut Store, cx| {
+        s.select_repo("/probe/alpha", cx);
+        s.run_wand(WandKind::Commit, true, cx);
+        // the user moves on while the run is still drafting
+        s.select_repo("/probe/beta", cx);
+    });
+    cx.update_entity(&store, |s: &mut Store, cx| {
+        s.on_net_event(
+            UiEvent::WandDone {
+                wand_id: "w".into(),
+                kind: WandKind::Commit,
+                result: Ok("first message".into()),
+            },
+            cx,
+        );
+    });
+    let mut commit = None;
+    while let Ok(command) = net_rx.try_recv() {
+        if let NetCommand::Git {
+            folder,
+            action: GitAction::Commit(message),
+        } = command
+        {
+            commit = Some((folder, message));
+        }
+    }
+    assert_eq!(
+        commit,
+        Some((
+            std::path::PathBuf::from("/probe/alpha"),
+            "first message".to_string()
+        )),
+        "the message is committed in the repo that asked for it"
+    );
+    cx.read_entity(&store, |s, _| {
+        assert_eq!(s.git_jobs.get("/probe/alpha").copied(), Some("commit"));
+        assert!(
+            s.wand_drafts.is_empty(),
+            "an auto-commit does not leave a draft behind"
+        );
+        assert!(s.commit_message_draft.is_none());
+    });
+
+    // the commit fails (say the index no longer has staged files): the
+    // message must survive as alpha's draft
+    cx.update_entity(&store, |s: &mut Store, cx| {
+        s.on_net_event(
+            UiEvent::GitDone {
+                folder: "/probe/alpha".into(),
+                label: "commit",
+                error: Some("nothing to commit".into()),
+                commit_hash: None,
+                detail: None,
+            },
+            cx,
+        );
+    });
+    cx.read_entity(&store, |s, _| {
+        assert_eq!(
+            s.wand_drafts.get("/probe/alpha").map(|d| d.text.as_str()),
+            Some("first message"),
+            "a failed commit hands the message back"
+        );
+    });
+    cx.update_entity(&store, |s: &mut Store, cx| {
+        s.select_repo("/probe/alpha", cx);
+    });
+    cx.read_entity(&store, |s, _| {
+        assert_eq!(s.commit_message_draft.as_deref(), Some("first message"));
+        assert!(s.wand_drafts.is_empty());
+    });
+
+    // a successful commit consumes the message: no draft, and the box is not
+    // told to clear (the view never held this text)
+    cx.update_entity(&store, |s: &mut Store, cx| {
+        s.select_repo("/probe/beta", cx);
+        s.run_wand(WandKind::Commit, true, cx);
+        s.select_repo("/probe/alpha", cx);
+        s.on_net_event(
+            UiEvent::WandDone {
+                wand_id: "w2".into(),
+                kind: WandKind::Commit,
+                result: Ok("second message".into()),
+            },
+            cx,
+        );
+        s.on_net_event(
+            UiEvent::GitDone {
+                folder: "/probe/beta".into(),
+                label: "commit",
+                error: None,
+                commit_hash: Some("abc1234".into()),
+                detail: None,
+            },
+            cx,
+        );
+    });
+    cx.read_entity(&store, |s, _| {
+        assert!(s.git_jobs.is_empty());
+        assert!(s.wand_drafts.is_empty(), "a landed commit keeps no draft");
+        assert!(!s.commit_message_clear, "the box was never holding it");
     });
 }
 

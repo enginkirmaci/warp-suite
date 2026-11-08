@@ -59,6 +59,9 @@ pub struct MainWindow {
     /// A left press landed on the titlebar background; the first move turns
     /// it into a window drag (Linux/macOS — Windows uses the HTCAPTION path).
     titlebar_should_move: bool,
+    /// The title-bar queue panel is open: the ordered list of wand requests
+    /// waiting for the one slot.
+    wand_queue_open: bool,
     /// Window-level focus for the app shortcuts. The window body is not made
     /// of text fields, so without this root handle Escape/Ctrl+K only fire
     /// after an input has been clicked.
@@ -135,6 +138,7 @@ impl MainWindow {
             snapit_page: None,
             keep_awake_page: None,
             titlebar_should_move: false,
+            wand_queue_open: false,
             focus_handle,
             window_handle,
         };
@@ -180,6 +184,10 @@ impl Render for MainWindow {
                 cx.listener(|this, _, _, cx| {
                     gpui_kit::base::GlobalState::suppress_text_selection(cx);
                     this.repos_page.update(cx, |page, cx| page.close_popups(cx));
+                    if this.wand_queue_open {
+                        this.wand_queue_open = false;
+                        cx.notify();
+                    }
                 }),
             )
             // Ctrl+K and Ctrl+F focus the global-search field; Ctrl+Shift+V
@@ -217,6 +225,12 @@ impl Render for MainWindow {
                     return;
                 }
                 if key == "escape" {
+                    if this.wand_queue_open {
+                        this.wand_queue_open = false;
+                        cx.notify();
+                        cx.stop_propagation();
+                        return;
+                    }
                     if this.section == Section::Repos
                         && this
                             .repos_page
@@ -301,6 +315,9 @@ impl Render for MainWindow {
         if let Some(popup) = self.render_search_popup(window, cx) {
             root = root.child(popup);
         }
+        if let Some(panel) = self.render_wand_queue(cx) {
+            root = root.child(panel);
+        }
         if let Some(toasts) = self.render_toasts(cx) {
             root = root.child(toasts);
         }
@@ -309,6 +326,144 @@ impl Render for MainWindow {
 }
 
 impl MainWindow {
+    /// The wand queue panel, hanging under the title bar's activity chip: the
+    /// requests waiting for the one slot, in the order they will run, each
+    /// with its own remove control. Closed by a press outside, Escape, or the
+    /// queue emptying.
+    fn render_wand_queue(&mut self, cx: &mut Context<Self>) -> Option<gpui::AnyElement> {
+        if !self.wand_queue_open {
+            return None;
+        }
+        let queue = self.store.read(cx).wand_queue.clone();
+        if queue.is_empty() {
+            // the last request left while the panel was open: close instead
+            // of flashing an empty card
+            self.wand_queue_open = false;
+            return None;
+        }
+        let mut panel = div()
+            .id("wand-queue-panel")
+            .debug_selector(|| "wand-queue-panel".into())
+            .absolute()
+            .top(px(theme::TITLEBAR_H))
+            .right(px(12.))
+            .w(px(360.))
+            .occlude()
+            .rounded_lg()
+            .border_1()
+            .border_color(theme::hairline())
+            .bg(theme::popup())
+            .shadow_lg()
+            .p_2()
+            .flex()
+            .flex_col()
+            .gap_1()
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .child(
+                        div()
+                            .text_size(px(theme::font_body()))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(theme::text())
+                            .child("Generation queue"),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(theme::font_meta()))
+                            .text_color(theme::text_faint())
+                            .child(format!("{} waiting", queue.len())),
+                    ),
+            )
+            .child(
+                div()
+                    .text_size(px(theme::font_meta()))
+                    .text_color(theme::text_faint())
+                    .child("Runs one at a time, in this order."),
+            );
+        for (ix, request) in queue.iter().enumerate() {
+            let store = self.store.clone();
+            let name = self.store.read(cx).repo_name(&request.folder);
+            let kind = request.kind;
+            let auto_commit = request.auto_commit;
+            let folder = request.folder.clone();
+            let what = match kind {
+                crate::net::WandKind::Commit => "commit message",
+                crate::net::WandKind::Readme => "README",
+            };
+            panel = panel.child(
+                div()
+                    .id(("wand-queue-row", ix))
+                    .debug_selector(move || format!("wand-queue-row-{ix}"))
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .rounded(px(4.))
+                    .px_1()
+                    .py_1()
+                    .hover(|s| s.bg(theme::hover_bg()))
+                    .child(
+                        div()
+                            .w(px(16.))
+                            .flex_shrink_0()
+                            .text_size(px(theme::font_meta()))
+                            .text_color(theme::text_faint())
+                            .child(format!("{}", ix + 1)),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .flex()
+                            .flex_col()
+                            .gap_0p5()
+                            .child(
+                                div()
+                                    .min_w_0()
+                                    .overflow_hidden()
+                                    .whitespace_nowrap()
+                                    .text_size(px(theme::font_body()))
+                                    .text_color(theme::text())
+                                    .child(name),
+                            )
+                            .child(
+                                div()
+                                    .text_size(px(theme::font_meta()))
+                                    .text_color(theme::text_faint())
+                                    .child(if auto_commit {
+                                        format!("{what} · then commit")
+                                    } else {
+                                        what.to_string()
+                                    }),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .id(("wand-queue-cancel", ix))
+                            .debug_selector(move || format!("wand-queue-cancel-{ix}"))
+                            .a11y_button("Remove from the generation queue")
+                            .cursor_pointer()
+                            .flex_shrink_0()
+                            .rounded(px(4.))
+                            .p_1()
+                            .hover(|s| s.bg(theme::raised()))
+                            .on_click(move |_, _, cx| {
+                                store.update(cx, |s, cx| s.dequeue_wand(kind, &folder, cx))
+                            })
+                            .child(icon(
+                                "icons/icon-close.svg",
+                                px(theme::icon_small() - 4.),
+                                theme::text_faint(),
+                            )),
+                    ),
+            );
+        }
+        Some(panel.into_any_element())
+    }
+
     /// The toast stack, bottom-right: severity glyph + full text + a close
     /// button. Painted last so it rides above pages and menus; each card
     /// occludes so a click dismisses instead of falling through to whatever
@@ -970,7 +1125,18 @@ impl MainWindow {
     fn render_titlebar(&mut self, window: &Window, cx: &mut Context<Self>) -> gpui::AnyElement {
         let settings = self.store.read(cx).settings();
         let show_tooltips = settings.general.show_tooltips;
-        let activity = self.store.read(cx).activity();
+        // the wand's Cancel rides the title bar: a run keeps going when the
+        // repo it was kicked for leaves the screen, so its stop control must
+        // be reachable from every repo and every section
+        let queue_open = self.wand_queue_open;
+        let (activity, wand_live, queued) = {
+            let store = self.store.read(cx);
+            (
+                store.activity(),
+                store.wand_busy.is_some(),
+                store.wand_queue.len(),
+            )
+        };
 
         let right = div()
             .debug_selector(|| "titlebar-right".into())
@@ -1005,7 +1171,59 @@ impl MainWindow {
                             px(theme::icon_tiny()),
                             theme::BEHIND,
                         ))
-                        .child(label),
+                        .child(label)
+                        .when(queued > 0, |chip| {
+                            chip.child(
+                                div()
+                                    .id("wand-queue-toggle")
+                                    .debug_selector(|| "wand-queue-toggle".into())
+                                    .a11y_button("Show the generation queue")
+                                    .cursor_pointer()
+                                    .occlude()
+                                    .flex_shrink_0()
+                                    .ml_1p5()
+                                    .px_1p5()
+                                    .rounded(px(4.))
+                                    .text_color(if queue_open {
+                                        theme::text()
+                                    } else {
+                                        theme::text_dim()
+                                    })
+                                    .hover(|s| s.bg(theme::hover_bg()).text_color(theme::text()))
+                                    .on_mouse_down(MouseButton::Left, |_, _, cx| {
+                                        cx.stop_propagation()
+                                    })
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.wand_queue_open = !this.wand_queue_open;
+                                        cx.notify();
+                                    }))
+                                    .child(format!("{queued} queued")),
+                            )
+                        })
+                        .when(wand_live, |chip| {
+                            chip.child(
+                                div()
+                                    .id("activity-cancel")
+                                    .debug_selector(|| "activity-cancel".into())
+                                    .a11y_button("Stop generation and clear the queue")
+                                    .cursor_pointer()
+                                    .occlude()
+                                    .flex_shrink_0()
+                                    .ml_1p5()
+                                    .pl_2()
+                                    .border_l_1()
+                                    .border_color(theme::hairline())
+                                    .text_color(theme::text_dim())
+                                    .hover(|s| s.text_color(theme::text()).bg(theme::hover_bg()))
+                                    .on_mouse_down(MouseButton::Left, |_, _, cx| {
+                                        cx.stop_propagation()
+                                    })
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.store.update(cx, |s, cx| s.cancel_all_wands(cx));
+                                    }))
+                                    .child("Cancel"),
+                            )
+                        }),
                 )
             })
             .when(self.section == Section::Repos, |row| {

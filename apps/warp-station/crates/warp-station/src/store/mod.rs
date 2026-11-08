@@ -25,6 +25,35 @@ const ACTIVITY_REFRESH_SECS: u64 = 15 * 60;
 /// How long a repo's GitHub/Azure snapshot stays trusted: opening the repo
 /// or a refresh's eager set re-asks once the snapshot is older.
 const ACTIVITY_TTL: std::time::Duration = std::time::Duration::from_secs(10 * 60);
+/// How many wand requests may wait behind the one live run.
+const WAND_QUEUE_CAP: usize = 8;
+
+/// A wand draft that finished while its repo was off screen; the next
+/// selection of that repo drains it into the live draft slot.
+#[derive(Clone, Debug)]
+pub struct WandDraft {
+    pub kind: WandKind,
+    pub text: String,
+}
+
+/// One queued wand request. The folder is captured at the click, so a
+/// selection change while it waits never redirects it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WandRequest {
+    pub kind: WandKind,
+    pub folder: String,
+    /// A Generate & Commit request: the run's message is committed when it
+    /// lands, even if another repo is on screen by then.
+    pub auto_commit: bool,
+}
+
+/// One wand's user-facing subject, for the queue and ready notices.
+fn wand_noun(kind: WandKind) -> &'static str {
+    match kind {
+        WandKind::Commit => "Commit message",
+        WandKind::Readme => "README",
+    }
+}
 
 pub struct Store {
     pub net: async_channel::Sender<NetCommand>,
@@ -116,8 +145,15 @@ pub struct Store {
     pub wand_busy: Option<WandKind>,
     /// The live run's id, for the progress chip's Cancel.
     pub wand_id: Option<String>,
-    /// The repo the running wand was kicked for — its result may only land
-    /// while that repo is still selected.
+    /// The live run commits its draft when it lands (Generate & Commit).
+    wand_auto_commit: bool,
+    /// Auto-committed messages by folder, kept until each commit lands so a
+    /// failed commit hands the message back as a draft.
+    wand_commits: std::collections::HashMap<String, String>,
+    /// The repo the running wand was kicked for. A selection change keeps it
+    /// so the title bar can name the run and Cancel stays reachable; its
+    /// draft lands live only while that repo is selected and is otherwise
+    /// kept in [`Self::wand_drafts`].
     pub wand_repo: Option<String>,
     pub wand_error: Option<String>,
     /// The commit-message wand's draft, drained into the Changes commit box.
@@ -127,6 +163,12 @@ pub struct Store {
     /// The README wand's draft, rendered by the Overview's README card with
     /// Save/Discard.
     pub readme_draft: Option<String>,
+    /// Finished drafts whose repo was off screen, keyed by folder: selecting
+    /// the repo drains its entry into the live draft.
+    pub wand_drafts: std::collections::HashMap<String, WandDraft>,
+    /// Requests waiting for the one wand slot, oldest first; the live run's
+    /// end starts the next.
+    pub wand_queue: std::collections::VecDeque<WandRequest>,
     /// warp-agent's harness options; the door is the source, with a built-in
     /// fallback until its first answer or a cache exists.
     pub harnesses: Vec<warp_station_core::opencode::CatalogHarness>,
@@ -309,11 +351,15 @@ impl Store {
             closed_failed: std::collections::HashSet::new(),
             wand_busy: None,
             wand_id: None,
+            wand_auto_commit: false,
+            wand_commits: std::collections::HashMap::new(),
             wand_repo: None,
             wand_error: None,
             commit_message_draft: None,
             commit_message_clear: false,
             readme_draft: None,
+            wand_drafts: std::collections::HashMap::new(),
+            wand_queue: std::collections::VecDeque::new(),
             harnesses,
             catalog,
             template_loaded: None,
@@ -928,22 +974,36 @@ impl Store {
                 cx.notify();
             }
             UiEvent::WandDone { kind, result, .. } => {
-                // a run kicked for repo A must never land its draft once
-                // another repo is selected
-                let for_selected = self.wand_repo.as_deref() == self.selected_repo.as_deref();
+                // a run kicked for repo A must never land its draft in
+                // another repo's box: the repo keeps it until it is selected
+                let repo = self.wand_repo.clone();
+                let for_selected = repo.as_deref() == self.selected_repo.as_deref();
+                let name = repo.as_deref().map(|folder| self.repo_name(folder));
+                let noun = wand_noun(kind);
+                let for_name = name
+                    .as_deref()
+                    .map(|name| format!(" for {name}"))
+                    .unwrap_or_default();
                 self.wand_busy = None;
                 self.wand_id = None;
                 self.wand_repo = None;
                 let cancelled = matches!(&result, Err(err) if err == "cancelled");
+                // an auto-commit consumes the message: it never lands in a box
+                let auto_commit = std::mem::take(&mut self.wand_auto_commit);
                 match (&result, kind) {
-                    (Ok(text), WandKind::Commit) => {
-                        if for_selected {
-                            self.commit_message_draft = Some(text.trim().to_string());
-                        }
-                    }
-                    (Ok(text), WandKind::Readme) => {
-                        if for_selected {
-                            self.readme_draft = Some(text.trim().to_string());
+                    (Ok(text), kind) => {
+                        let text = text.trim().to_string();
+                        if auto_commit && kind == WandKind::Commit && !text.is_empty() {
+                            if let Some(folder) = repo {
+                                self.commit_wand_message(folder, text);
+                            }
+                        } else if for_selected {
+                            self.set_wand_draft(kind, text);
+                        } else if let (Some(folder), Some(name)) = (repo, name) {
+                            self.wand_drafts.insert(folder, WandDraft { kind, text });
+                            // the repo is off screen, so the box the draft
+                            // waits for cannot show it: say it is ready
+                            self.notify_info(format!("{noun} ready for {name}"));
                         }
                     }
                     (Err(err), WandKind::Commit) => {
@@ -954,7 +1014,9 @@ impl Store {
                             if for_selected {
                                 self.wand_error = Some(err.clone());
                             }
-                            self.notify_error("Could not generate a commit message");
+                            self.notify_error(format!(
+                                "Could not generate a commit message{for_name}"
+                            ));
                         }
                     }
                     (Err(err), WandKind::Readme) => {
@@ -965,11 +1027,14 @@ impl Store {
                             if for_selected {
                                 self.wand_error = Some(err.clone());
                             }
-                            self.notify_error("Could not generate a README");
+                            self.notify_error(format!("Could not generate a README{for_name}"));
                         }
                     }
                 }
                 cx.notify();
+                // the slot is free: a request that waited behind this run
+                // starts now
+                self.start_next_wand(cx);
             }
             UiEvent::CommitDetailsLoaded { folder, details } => {
                 if self.selected_repo.as_deref() == Some(folder.as_str()) {
@@ -996,6 +1061,13 @@ impl Store {
                 detail,
             } => {
                 self.git_jobs.remove(&folder);
+                // the commit a Generate & Commit run fired, if this is its
+                // answer: its message must not be counted as a typed one
+                let wand_message = if label == "commit" {
+                    self.wand_commits.remove(&folder)
+                } else {
+                    None
+                };
                 if error.is_none() {
                     self.show_finished(folder.clone(), label, cx);
                 }
@@ -1012,6 +1084,23 @@ impl Store {
                         capitalized_label(label),
                         name
                     ));
+                    // nothing was committed: keep the generated message for
+                    // its repo instead of losing it
+                    if let Some(message) = wand_message {
+                        if self.selected_repo.as_deref() == Some(folder.as_str()) {
+                            // the box is on screen: hand it straight back
+                            self.commit_message_draft = Some(message);
+                        } else {
+                            self.wand_drafts.insert(
+                                folder.clone(),
+                                WandDraft {
+                                    kind: WandKind::Commit,
+                                    text: message,
+                                },
+                            );
+                        }
+                        self.notify_info(format!("Commit message ready for {name}"));
+                    }
                 } else {
                     self.notify_success(match (label, commit_hash.as_deref()) {
                         ("commit", Some(hash)) => format!("Committed {hash} to {name}"),
@@ -1039,8 +1128,24 @@ impl Store {
                     if let Some(hash) = commit_hash {
                         tracing::info!("committed {hash} in {folder}");
                     }
-                    if label == "commit" && self.selected_repo.as_deref() == Some(folder.as_str()) {
-                        self.commit_message_clear = true;
+                    if label == "commit" {
+                        // a store-fired commit never filled the box, so it
+                        // must not empty a draft the user typed meanwhile
+                        if wand_message.is_none()
+                            && self.selected_repo.as_deref() == Some(folder.as_str())
+                        {
+                            self.commit_message_clear = true;
+                        }
+                        // the commit used the message: an older kept draft
+                        // for the same repo is stale
+                        if wand_message.is_some()
+                            && self
+                                .wand_drafts
+                                .get(&folder)
+                                .is_some_and(|draft| draft.kind == WandKind::Commit)
+                        {
+                            self.wand_drafts.remove(&folder);
+                        }
                     }
                 }
                 cx.notify();
@@ -1329,30 +1434,166 @@ impl Store {
 
     /// Kicks one wand run for the selected repo on the selected
     /// harness/model/variant — commit generation included; there is no
-    /// separate commit model.
-    pub fn run_wand(&mut self, kind: WandKind, cx: &mut Context<Self>) {
-        if self.wand_busy.is_some() {
-            return;
-        }
+    /// separate commit model. While another run is live the request queues
+    /// for its repo and starts when the slot frees. `auto_commit` commits the
+    /// drafted message when the run lands (Generate & Commit).
+    pub fn run_wand(&mut self, kind: WandKind, auto_commit: bool, cx: &mut Context<Self>) {
         let Some(folder) = self.selected_repo.clone() else {
             return;
         };
-        let settings = self.settings();
-        if !settings.warp_agent.enable_warp_agent {
-            self.notify_error(
-                "Could not generate — warp-agent integration is disabled in settings",
-            );
-            cx.notify();
+        let auto_commit = auto_commit && kind == WandKind::Commit;
+        // the gate is checked at the click so a disabled or missing
+        // warp-agent reports now; a queued run re-checks when it starts
+        let (exe, choice) = match self.wand_launch() {
+            Ok(launch) => launch,
+            Err(message) => {
+                self.notify_error(message);
+                cx.notify();
+                return;
+            }
+        };
+        if self.wand_busy.is_some() {
+            self.enqueue_wand(kind, folder, auto_commit);
+        } else {
+            self.start_wand(kind, folder, exe, choice, auto_commit);
+        }
+        cx.notify();
+    }
+
+    /// Whether this repo's request of `kind` is waiting for the slot.
+    pub fn wand_queued(&self, kind: WandKind, folder: &str) -> bool {
+        self.wand_queue
+            .iter()
+            .any(|queued| queued.kind == kind && queued.folder == folder)
+    }
+
+    /// Queues one request for its repo; the live run's end starts it.
+    fn enqueue_wand(&mut self, kind: WandKind, folder: String, auto_commit: bool) {
+        if self.wand_busy == Some(kind) && self.wand_repo.as_deref() == Some(folder.as_str()) {
+            // this exact run is already live; the click would repeat it
             return;
         }
-        let Some(exe) = warp_station_core::exe::locate(&settings.warp_agent.executable) else {
-            self.notify_error("Could not generate — warp-agent executable not found");
-            cx.notify();
+        if self
+            .wand_queue
+            .iter()
+            .any(|queued| queued.kind == kind && queued.folder == folder)
+        {
+            return;
+        }
+        if self.wand_queue.len() >= WAND_QUEUE_CAP {
+            self.notify_info(format!(
+                "The generation queue is full ({WAND_QUEUE_CAP}); wait for one to finish"
+            ));
+            return;
+        }
+        let name = self.repo_name(&folder);
+        self.wand_queue.push_back(WandRequest {
+            kind,
+            folder,
+            auto_commit,
+        });
+        self.notify_info(format!("{} queued for {name}", wand_noun(kind)));
+    }
+
+    /// Drops one queued request (the queued chip's Cancel).
+    pub fn dequeue_wand(&mut self, kind: WandKind, folder: &str, cx: &mut Context<Self>) {
+        let before = self.wand_queue.len();
+        self.wand_queue
+            .retain(|queued| !(queued.kind == kind && queued.folder == folder));
+        if self.wand_queue.len() != before {
+            self.notify_info("Queued generation cancelled");
+        }
+        cx.notify();
+    }
+
+    /// Stops everything: the live run and every queued request (the title
+    /// bar's stop). The per-item Cancel drops one queue entry instead.
+    pub fn cancel_all_wands(&mut self, cx: &mut Context<Self>) {
+        let queued = self.wand_queue.len();
+        self.wand_queue.clear();
+        self.cancel_wand(cx);
+        if queued > 0 {
+            self.notify_info(match queued {
+                1 => "1 queued generation cleared".to_string(),
+                count => format!("{count} queued generations cleared"),
+            });
+        }
+        cx.notify();
+    }
+
+    /// Stops the live wand run; a request queued behind it starts next. The
+    /// run still answers with WandDone, so the busy state clears through the
+    /// one path and a late draft can never land.
+    pub fn cancel_wand(&mut self, cx: &mut Context<Self>) {
+        let Some(id) = self.wand_id.clone() else {
             return;
         };
-        let choice = warp_station_core::warp::ModelChoice::from_settings(&settings);
+        let _ = self.net.send_blocking(NetCommand::CancelWand { id });
+        cx.notify();
+    }
+
+    /// Starts queued requests until one takes the slot (or none is left);
+    /// a request whose repo left the list is dropped.
+    fn start_next_wand(&mut self, cx: &mut Context<Self>) {
+        while self.wand_busy.is_none() {
+            let Some(next) = self.wand_queue.pop_front() else {
+                break;
+            };
+            if !self
+                .repos
+                .iter()
+                .any(|repo| repo.folder_path.to_string_lossy() == next.folder)
+            {
+                continue;
+            }
+            match self.wand_launch() {
+                Ok((exe, choice)) => {
+                    self.start_wand(next.kind, next.folder, exe, choice, next.auto_commit)
+                }
+                Err(message) => {
+                    // the same gate blocks every request behind this one:
+                    // report once instead of once per entry
+                    self.notify_error(message);
+                    self.wand_queue.clear();
+                    break;
+                }
+            }
+        }
+        cx.notify();
+    }
+
+    /// What a run needs, or why it cannot start. Checked at the click and
+    /// again when a queued request takes the slot.
+    fn wand_launch(
+        &self,
+    ) -> Result<(std::path::PathBuf, warp_station_core::warp::ModelChoice), String> {
+        let settings = self.settings();
+        if !settings.warp_agent.enable_warp_agent {
+            return Err(
+                "Could not generate — warp-agent integration is disabled in settings".to_string(),
+            );
+        }
+        let Some(exe) = warp_station_core::exe::locate(&settings.warp_agent.executable) else {
+            return Err("Could not generate — warp-agent executable not found".to_string());
+        };
+        Ok((
+            exe,
+            warp_station_core::warp::ModelChoice::from_settings(&settings),
+        ))
+    }
+
+    /// Takes the slot for one run; the caller checked the gate.
+    fn start_wand(
+        &mut self,
+        kind: WandKind,
+        folder: String,
+        exe: std::path::PathBuf,
+        choice: warp_station_core::warp::ModelChoice,
+        auto_commit: bool,
+    ) {
         self.wand_busy = Some(kind);
         self.wand_repo = Some(folder.clone());
+        self.wand_auto_commit = auto_commit;
         self.wand_error = None;
         let id = self.next_run_id("wand");
         self.wand_id = Some(id.clone());
@@ -1363,17 +1604,34 @@ impl Store {
             choice,
             warp_exe: exe.to_string_lossy().to_string(),
         });
-        cx.notify();
     }
 
-    /// Stops the live wand run. The run still answers with WandDone, so the
-    /// busy state clears through the one path and a late draft can never land.
-    pub fn cancel_wand(&mut self, cx: &mut Context<Self>) {
-        let Some(id) = self.wand_id.clone() else {
+    /// Fires the commit a Generate & Commit run asked for, in its own repo —
+    /// the user may be looking at another one by now. The message is kept
+    /// until the commit answers so a failure can hand it back.
+    fn commit_wand_message(&mut self, folder: String, message: String) {
+        self.wand_commits.insert(folder.clone(), message.clone());
+        self.git_jobs.insert(folder.clone(), "commit");
+        let _ = self.net.send_blocking(NetCommand::Git {
+            folder: std::path::PathBuf::from(folder),
+            action: GitAction::Commit(message),
+        });
+    }
+
+    /// Puts one finished draft in the slot its view drains.
+    fn set_wand_draft(&mut self, kind: WandKind, text: String) {
+        match kind {
+            WandKind::Commit => self.commit_message_draft = Some(text),
+            WandKind::Readme => self.readme_draft = Some(text),
+        }
+    }
+
+    /// Hands a repo the draft that finished while it was off screen.
+    fn take_pending_wand_draft(&mut self, folder: &str) {
+        let Some(draft) = self.wand_drafts.remove(folder) else {
             return;
         };
-        let _ = self.net.send_blocking(NetCommand::CancelWand { id });
-        cx.notify();
+        self.set_wand_draft(draft.kind, draft.text);
     }
 
     /// True when the AI surface can run (gates every wand button).
@@ -1814,6 +2072,8 @@ impl Store {
         self.selected_repo = Some(folder.to_string());
         self.persist_selection_soon(Some(folder.to_string()), cx);
         self.reset_repo_workspace();
+        // a draft that finished while this repo was off screen belongs to it
+        self.take_pending_wand_draft(folder);
         self.load_repo_workspace(folder);
         // the just-opened repo's GitHub/Azure snapshots re-ask once stale —
         // the rail's counts for it may date back an activity cadence
@@ -2238,16 +2498,16 @@ impl Store {
             return Some(format!("{running} running"));
         }
         if let Some((folder, label)) = self.git_jobs.iter().next() {
-            let name = self
-                .repos
-                .iter()
-                .find(|repo| repo.folder_path.to_string_lossy() == folder.as_str())
-                .map_or(folder.as_str(), |repo| repo.name.as_str());
             let word = crate::net::git_working_word(label).trim_end_matches('…');
-            return Some(format!("{word} {name}"));
+            return Some(format!("{word} {}", self.repo_name(folder)));
         }
         if self.summary_busy {
             return Some("Summarizing".to_string());
+        }
+        if let Some(folder) = self.wand_repo.as_deref() {
+            // name the repo: the run outlives the selection, so its chip is
+            // the one place that still says whose generation is live
+            return Some(format!("Generating {}", self.repo_name(folder)));
         }
         if self.wand_busy.is_some() {
             return Some("Generating".to_string());
@@ -2258,6 +2518,15 @@ impl Store {
         // the user-visible fetch pass streams k/n after the scan settles
         self.fetch_progress
             .map(|(done, total)| format!("Fetching {done}/{total}"))
+    }
+
+    /// A repo's display name, falling back to its folder when the list no
+    /// longer carries it. The title-bar queue panel uses it too.
+    pub fn repo_name(&self, folder: &str) -> String {
+        self.repos
+            .iter()
+            .find(|repo| repo.folder_path.to_string_lossy() == folder)
+            .map_or_else(|| folder.to_string(), |repo| repo.name.clone())
     }
 
     /// The repository page's Refresh button state: "Refreshing" while the
@@ -2306,7 +2575,6 @@ impl Store {
         self.commit_message_clear = false;
         self.readme_draft = None;
         self.wand_error = None;
-        self.wand_repo = None;
     }
 
     /// Folder text → index, so one status/GitHub pass does not scan the whole
@@ -2548,6 +2816,9 @@ impl Store {
         });
         self.notify_success(format!("Removed \"{name}\" from repositories"));
         self.clear_selection(cx);
+        // a draft kept for the removed repo can never be selected again
+        self.wand_drafts.remove(&folder);
+        self.wand_queue.retain(|queued| queued.folder != folder);
         self.kick_scan(&self.settings());
     }
 

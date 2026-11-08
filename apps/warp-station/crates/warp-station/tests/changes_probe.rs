@@ -593,7 +593,7 @@ fn git_verbs_and_commit_follow_the_repo_state(cx: &mut TestAppContext) {
 /// that lands after a failed/cancelled run is not armed to commit itself.
 #[gpui_kit::gpui::test]
 fn a_failed_generation_disarms_generate_and_commit(cx: &mut TestAppContext) {
-    use warp_station::net::{NetCommand, UiEvent, WandKind};
+    use warp_station::net::{GitAction, NetCommand, UiEvent, WandKind};
     use warp_station_core::model::{GitChangeSnapshot, GitChangedFile};
     use warp_station_core::repo_store::RepoEntry;
 
@@ -682,6 +682,10 @@ fn a_failed_generation_disarms_generate_and_commit(cx: &mut TestAppContext) {
         cx.debug_bounds("wand-cancel").is_some(),
         "the working chip carries a Cancel"
     );
+    assert!(
+        cx.debug_bounds("activity-cancel").is_some(),
+        "the title bar offers Cancel while a wand runs"
+    );
     click(cx, "wand-cancel");
     let mut cancelled = None;
     while let Ok(command) = net_rx.try_recv() {
@@ -694,6 +698,16 @@ fn a_failed_generation_disarms_generate_and_commit(cx: &mut TestAppContext) {
         Some(run_id.as_str()),
         "Cancel stops exactly the live run"
     );
+    // the title bar's stop is the one that stays reachable after a repo
+    // switch; it targets the same run
+    click(cx, "activity-cancel");
+    let mut cancelled_again = None;
+    while let Ok(command) = net_rx.try_recv() {
+        if let NetCommand::CancelWand { id } = command {
+            cancelled_again = Some(id);
+        }
+    }
+    assert_eq!(cancelled_again.as_deref(), Some(run_id.as_str()));
 
     // the stop answers like any run: busy clears, and it is not an error
     cx.update_entity(&store, |s: &mut Store, cx| {
@@ -750,6 +764,37 @@ fn a_failed_generation_disarms_generate_and_commit(cx: &mut TestAppContext) {
         git_commands(&net_rx).is_empty(),
         "no commit fires from a failed generation"
     );
+
+    // a successful Generate & Commit commits by itself: the store owns the
+    // follow-up, not this view
+    cx.update_entity(&store, |s: &mut Store, _| s.commit_message_clear = true);
+    cx.run_until_parked();
+    cx.update(|window, cx| drop(window.draw(cx)));
+    click(cx, "commit-button");
+    while net_rx.try_recv().is_ok() {}
+    cx.update_entity(&store, |s: &mut Store, cx| {
+        s.on_net_event(
+            UiEvent::WandDone {
+                wand_id: "w".into(),
+                kind: WandKind::Commit,
+                result: Ok("generated".into()),
+            },
+            cx,
+        );
+    });
+    cx.run_until_parked();
+    cx.update(|window, cx| drop(window.draw(cx)));
+    let committed: Vec<String> = git_commands(&net_rx)
+        .into_iter()
+        .filter_map(|command| match command {
+            NetCommand::Git {
+                action: GitAction::Commit(message),
+                ..
+            } => Some(message),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(committed, vec!["generated".to_string()]);
 }
 
 fn click(cx: &mut VisualTestContext, selector: &'static str) {
@@ -1158,4 +1203,175 @@ fn the_history_list_lays_out_only_its_visible_rows(cx: &mut TestAppContext) {
         built < laid_out,
         "a windowed list builds a screenful, not all {laid_out} commits ({built})",
     );
+}
+
+/// A request waiting behind another repo's run renders as queued on its own
+/// repo, and its Cancel drops just that entry: the live run keeps the slot.
+#[gpui_kit::gpui::test]
+fn a_queued_generation_offers_its_own_cancel(cx: &mut TestAppContext) {
+    use warp_station::net::{NetCommand, WandKind};
+    use warp_station::store::WandRequest;
+    use warp_station_core::model::{GitChangeSnapshot, GitChangedFile};
+    use warp_station_core::repo_store::RepoEntry;
+
+    cx.update(gpui_kit::init);
+    cx.update(warp_station::theme::apply_kit_theme);
+
+    fn repo(name: &str, folder: &str) -> RepoEntry {
+        RepoEntry {
+            name: name.into(),
+            folder_path: std::path::PathBuf::from(folder),
+            solution_path: None,
+            tags: Vec::new(),
+            git_branch_name: Some("main".into()),
+            git_modified_count: 1,
+            git_to_push_count: 0,
+            git_to_pull_count: 0,
+            git_last_commit_at: None,
+            git_last_fetch_at: None,
+            git_has_remote: true,
+            git_branch_published: true,
+            git_status_loaded: true,
+            github_pr_count: 0,
+            github_issue_count: 0,
+        }
+    }
+
+    let settings =
+        std::env::temp_dir().join(format!("warp-station-probe-queue-{}", std::process::id()));
+    std::fs::write(
+        &settings,
+        r#"{"WarpAgent":{"EnableWarpAgent":true,"Executable":"git"},"OpenCode":{"DefaultModel":"probe/model"}}"#,
+    )
+    .expect("scratch settings");
+
+    let (net_tx, net_rx) = async_channel::unbounded();
+    let store = cx.new(|cx| {
+        let mut store = Store::with_settings(
+            net_tx,
+            std::sync::Arc::new(warp_station_core::settings::SettingsService::at(
+                settings.clone(),
+            )),
+        );
+        store.replace_repos(vec![
+            repo("alpha", "/probe/alpha"),
+            repo("beta", "/probe/beta"),
+            repo("gamma", "/probe/gamma"),
+        ]);
+        store.select_repo("/probe/alpha", cx);
+        store.open_detail_tab(warp_station::store::WorkspaceTab::Changes, cx);
+        store.changes_loaded_for = Some("/probe/alpha".into());
+        let staged = vec![GitChangedFile {
+            path: "staged.txt".into(),
+            status_code: "M".into(),
+            additions: Some(1),
+            deletions: None,
+        }];
+        store.set_changes(Some(GitChangeSnapshot {
+            status_files: staged.clone(),
+            staged_files: staged,
+            unstaged_files: Vec::new(),
+            worktree_counts: Default::default(),
+            cached_counts: Default::default(),
+        }));
+        // beta's run owns the slot; alpha's request is waiting for it
+        store.wand_busy = Some(WandKind::Commit);
+        store.wand_id = Some("wand-live".into());
+        store.wand_repo = Some("/probe/beta".into());
+        store.wand_queue.push_back(WandRequest {
+            kind: WandKind::Commit,
+            folder: "/probe/alpha".into(),
+            auto_commit: false,
+        });
+        store.wand_queue.push_back(WandRequest {
+            kind: WandKind::Commit,
+            folder: "/probe/gamma".into(),
+            auto_commit: false,
+        });
+        store
+    });
+    let (_window, cx) = cx.add_window_view(|window, cx| MainWindow::new(store.clone(), window, cx));
+    cx.run_until_parked();
+    cx.update(|window, cx| drop(window.draw(cx)));
+
+    assert!(cx.debug_bounds("commit-button").is_some());
+    assert!(
+        cx.debug_bounds("wand-dequeue").is_some(),
+        "the queued chip renders on the waiting repo"
+    );
+    assert!(
+        cx.debug_bounds("wand-queue-toggle").is_some(),
+        "the title bar counts the queue"
+    );
+
+    // the panel lists the queue in run order: alpha is next, gamma after it
+    click(cx, "wand-queue-toggle");
+    assert!(
+        cx.debug_bounds("wand-queue-panel").is_some(),
+        "the toggle opens the panel"
+    );
+    let first = cx
+        .debug_bounds("wand-queue-row-0")
+        .expect("the first queue row");
+    let second = cx
+        .debug_bounds("wand-queue-row-1")
+        .expect("the second queue row");
+    assert!(
+        first.origin.y < second.origin.y,
+        "rows follow the order the runs will take"
+    );
+
+    // the panel's own Cancel drops the row it names, not the live run
+    click(cx, "wand-queue-cancel-1");
+    cx.read_entity(&store, |s, _| {
+        assert_eq!(s.wand_queue.len(), 1);
+        assert!(s.wand_queued(WandKind::Commit, "/probe/alpha"));
+        assert!(!s.wand_queued(WandKind::Commit, "/probe/gamma"));
+        assert!(s.wand_busy.is_some(), "the live run keeps the slot");
+    });
+    assert!(
+        cx.debug_bounds("wand-queue-row-1").is_none(),
+        "gamma's row left"
+    );
+
+    click(cx, "wand-dequeue");
+    cx.read_entity(&store, |s, _| {
+        assert!(s.wand_queue.is_empty(), "the request left the queue");
+        assert!(s.wand_busy.is_some(), "the live run keeps the slot");
+        assert_eq!(s.wand_repo.as_deref(), Some("/probe/beta"));
+        assert!(!s.wand_queued(WandKind::Commit, "/probe/alpha"));
+    });
+    assert!(
+        cx.debug_bounds("wand-queue-panel").is_none(),
+        "an empty queue closes the panel"
+    );
+    assert!(cx.debug_bounds("wand-queue-toggle").is_none());
+    let mut cancelled = 0;
+    while let Ok(command) = net_rx.try_recv() {
+        if matches!(command, NetCommand::CancelWand { .. }) {
+            cancelled += 1;
+        }
+    }
+    assert_eq!(cancelled, 0, "dequeue never stops the live run");
+
+    // the title bar's stop is the broad one: it drops the queue and stops
+    // the run that owns the slot
+    cx.update_entity(&store, |s: &mut Store, cx| {
+        s.wand_queue.push_back(WandRequest {
+            kind: WandKind::Commit,
+            folder: "/probe/gamma".into(),
+            auto_commit: false,
+        });
+        s.cancel_all_wands(cx);
+    });
+    cx.read_entity(&store, |s, _| {
+        assert!(s.wand_queue.is_empty(), "the queue was cleared");
+    });
+    let mut cancelled = 0;
+    while let Ok(command) = net_rx.try_recv() {
+        if matches!(command, NetCommand::CancelWand { .. }) {
+            cancelled += 1;
+        }
+    }
+    assert_eq!(cancelled, 1, "the live run was stopped too");
 }

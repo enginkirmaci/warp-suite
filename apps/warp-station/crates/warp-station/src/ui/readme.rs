@@ -59,10 +59,16 @@ impl Render for ReadmeView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl gpui::IntoElement {
         let folder = self.store.read(cx).selected_repo.clone();
         let draft = self.store.read(cx).readme_draft.clone();
-        let wand_active = {
+        let (wand_active, wand_queued_here) = {
             let state = self.store.read(cx);
-            state.wand_busy == Some(WandKind::Readme)
-                && state.wand_repo.as_deref() == state.selected_repo.as_deref()
+            (
+                state.wand_busy == Some(WandKind::Readme)
+                    && state.wand_repo.as_deref() == state.selected_repo.as_deref(),
+                state
+                    .selected_repo
+                    .as_deref()
+                    .is_some_and(|folder| state.wand_queued(WandKind::Readme, folder)),
+            )
         };
         let ai_available = self.store.read(cx).wand_available();
         let has_draft = draft.is_some();
@@ -188,34 +194,74 @@ impl Render for ReadmeView {
                         .child("Save README"),
                 )
             })
-            .when(!wand_active && shown.is_some() && ai_available, |row| {
-                row.child({
-                    let store = self.store.clone();
-                    div()
-                        .id("readme-wand")
-                        .a11y_button("Draft README with OpenCode")
-                        .cursor_pointer()
-                        .rounded_md()
-                        .p_1()
-                        .flex()
-                        .items_center()
-                        .hover(|s| s.bg(theme::hover_bg()))
-                        .on_click(move |_, _, cx| {
-                            store.update(cx, |s, cx| s.run_wand(WandKind::Readme, cx));
-                        })
-                        .child(icon(
-                            "icons/icon-wand.svg",
-                            px(theme::icon_small()),
-                            theme::text_muted(),
-                        ))
-                })
-            })
+            .when(
+                !wand_active && !wand_queued_here && shown.is_some() && ai_available,
+                |row| {
+                    row.child({
+                        let store = self.store.clone();
+                        div()
+                            .id("readme-wand")
+                            .a11y_button("Draft README with OpenCode")
+                            .cursor_pointer()
+                            .rounded_md()
+                            .p_1()
+                            .flex()
+                            .items_center()
+                            .hover(|s| s.bg(theme::hover_bg()))
+                            .on_click(move |_, _, cx| {
+                                store.update(cx, |s, cx| s.run_wand(WandKind::Readme, false, cx));
+                            })
+                            .child(icon(
+                                "icons/icon-wand.svg",
+                                px(theme::icon_small()),
+                                theme::text_muted(),
+                            ))
+                    })
+                },
+            )
             .when(wand_active, |row| {
                 row.child(div().rounded_md().p_1().flex().items_center().child(icon(
                     "icons/icon-wand.svg",
                     px(theme::icon_small()),
                     theme::blue_bright(),
                 )))
+            })
+            .when(wand_queued_here, |row| {
+                let store = self.store.clone();
+                let folder = folder.clone().unwrap_or_default();
+                row.child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap_1()
+                        .text_size(px(theme::font_meta()))
+                        .text_color(theme::text_dim())
+                        .child(icon(
+                            "icons/icon-wand.svg",
+                            px(theme::icon_small() - 1.),
+                            theme::text_dim(),
+                        ))
+                        .child("queued")
+                        // one request leaves the queue; the live run and the
+                        // rest of the queue stay
+                        .child(
+                            div()
+                                .id("readme-dequeue")
+                                .debug_selector(|| "readme-dequeue".into())
+                                .a11y_button("Cancel queued README draft")
+                                .cursor_pointer()
+                                .ml_1p5()
+                                .px_1p5()
+                                .rounded(px(4.))
+                                .hover(|s| s.bg(theme::hover_bg()).text_color(theme::text()))
+                                .on_click(move |_, _, cx| {
+                                    store.update(cx, |s, cx| {
+                                        s.dequeue_wand(WandKind::Readme, &folder, cx)
+                                    })
+                                })
+                                .child("Cancel"),
+                        ),
+                )
             });
 
         let store_for_empty = self.store.clone();
@@ -260,36 +306,40 @@ impl Render for ReadmeView {
                                 .text_color(theme::text_faint())
                                 .child("Create a README.md in the repository root to see it here."),
                         )
-                        .when(ai_available && !wand_active, |column| {
-                            column.child(
-                                div()
-                                    .id("readme-empty-wand")
-                                    .a11y_button("Draft README with OpenCode")
-                                    .cursor_pointer()
-                                    .rounded_md()
-                                    .border_1()
-                                    .border_color(theme::accent())
-                                    .px_3()
-                                    .py_1p5()
-                                    .flex()
-                                    .flex_row()
-                                    .items_center()
-                                    .gap_1p5()
-                                    .text_size(px(theme::font_body()))
-                                    .text_color(theme::blue_bright())
-                                    .hover(|s| s.bg(theme::tint(theme::accent())))
-                                    .on_click(move |_, _, cx| {
-                                        store_for_empty
-                                            .update(cx, |s, cx| s.run_wand(WandKind::Readme, cx));
-                                    })
-                                    .child(icon(
-                                        "icons/icon-wand.svg",
-                                        px(theme::icon_small()),
-                                        theme::blue_bright(),
-                                    ))
-                                    .child("Draft with OpenCode"),
-                            )
-                        }),
+                        .when(
+                            ai_available && !wand_active && !wand_queued_here,
+                            |column| {
+                                column.child(
+                                    div()
+                                        .id("readme-empty-wand")
+                                        .a11y_button("Draft README with OpenCode")
+                                        .cursor_pointer()
+                                        .rounded_md()
+                                        .border_1()
+                                        .border_color(theme::accent())
+                                        .px_3()
+                                        .py_1p5()
+                                        .flex()
+                                        .flex_row()
+                                        .items_center()
+                                        .gap_1p5()
+                                        .text_size(px(theme::font_body()))
+                                        .text_color(theme::blue_bright())
+                                        .hover(|s| s.bg(theme::tint(theme::accent())))
+                                        .on_click(move |_, _, cx| {
+                                            store_for_empty.update(cx, |s, cx| {
+                                                s.run_wand(WandKind::Readme, false, cx)
+                                            });
+                                        })
+                                        .child(icon(
+                                            "icons/icon-wand.svg",
+                                            px(theme::icon_small()),
+                                            theme::blue_bright(),
+                                        ))
+                                        .child("Draft with OpenCode"),
+                                )
+                            },
+                        ),
                 )
             });
 
