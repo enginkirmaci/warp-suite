@@ -1190,6 +1190,21 @@ fn the_repo_menu_refreshes_the_repo(cx: &mut TestAppContext) {
     );
 }
 
+#[gpui::test]
+fn the_head_refreshes_the_repo(cx: &mut TestAppContext) {
+    let (store, net_rx) = scratch_store(cx, "head-refresh", vec![entry("alpha", "/probe/alpha")]);
+    let cx = open_window(&store, cx);
+    load_changes_folders(&net_rx);
+
+    click(cx, "detail-refresh");
+
+    assert_eq!(
+        load_changes_folders(&net_rx),
+        vec!["/probe/alpha".to_string()],
+        "the head's refresh reloads the rail's changes"
+    );
+}
+
 /// Nothing links to GitHub before a pass has named the repo's page, and either
 /// pass can be the first to answer.
 #[gpui::test]
@@ -2364,7 +2379,8 @@ fn a_repo_opens_in_a_tab_with_the_list_out_of_the_way(cx: &mut TestAppContext) {
     let (store, cx) = two_repos(cx);
     assert!(cx.debug_bounds("repos-list-pane").is_some());
 
-    click(cx, "detail-open-tab");
+    cx.simulate_keystrokes("ctrl-t");
+    draw(cx);
     assert_eq!(active_tab(&store, cx).as_deref(), Some("/probe/alpha"));
     assert!(
         cx.debug_bounds("repo-strip-tab-0").is_some(),
@@ -2375,8 +2391,8 @@ fn a_repo_opens_in_a_tab_with_the_list_out_of_the_way(cx: &mut TestAppContext) {
         "the list leaves"
     );
     assert!(
-        cx.debug_bounds("detail-open-tab").is_none(),
-        "nothing is left to open"
+        cx.debug_bounds("detail-refresh").is_some(),
+        "the head keeps its refresh inside a tab"
     );
 
     click(cx, "repo-tab-home");
@@ -2390,7 +2406,8 @@ fn a_repo_opens_in_a_tab_with_the_list_out_of_the_way(cx: &mut TestAppContext) {
 #[gpui::test]
 fn each_view_keeps_its_own_detail_tab(cx: &mut TestAppContext) {
     let (store, cx) = two_repos(cx);
-    click(cx, "detail-open-tab");
+    cx.simulate_keystrokes("ctrl-t");
+    draw(cx);
     click(cx, "detail-tab-changes");
     click(cx, "repo-tab-home");
     assert!(
@@ -2493,7 +2510,8 @@ fn the_list_toggle_follows_the_view_it_is_on(cx: &mut TestAppContext) {
     click(cx, "list-toggle");
     assert!(cx.debug_bounds("repos-list-pane").is_some(), "shown");
 
-    click(cx, "detail-open-tab");
+    cx.simulate_keystrokes("ctrl-t");
+    draw(cx);
     assert!(
         cx.debug_bounds("repos-list-pane").is_none(),
         "a tab hides it"

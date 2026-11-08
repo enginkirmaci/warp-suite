@@ -1,7 +1,7 @@
 //! The Overview tab and the detail head above every tab: the repository's
-//! identity, its one primary launch and the repo menu up top, then what needs a
-//! person, where to open it, its status and what GitHub says about it, as cards
-//! in two columns that stack when the pane gets narrow.
+//! identity, its refresh, its one primary launch and the repo menu up top, then
+//! what needs a person, where to open it, its status and what GitHub says about
+//! it, as cards in two columns that stack when the pane gets narrow.
 
 use crate::net::GitAction;
 use crate::store::{Store, WorkspaceTab};
@@ -35,10 +35,6 @@ pub struct RepoMenu {
 pub struct HeadState {
     /// The open tab holds no action of its own, so the launch is the primary.
     pub filled: bool,
-    /// The repo already has a tab; the button goes to it.
-    pub tabbed: bool,
-    /// The repo is on screen as a tab, so there is nothing left to open.
-    pub in_tab: bool,
     pub launch_menu_open: bool,
     /// Bumped by each press on the star, so only a press makes it jump.
     pub star_press: Option<u64>,
@@ -141,8 +137,8 @@ fn head_icon(id: &'static str, label: &'static str) -> gpui::Stateful<gpui::Div>
         .hover(|d| d.bg(theme::raised()))
 }
 
-/// The head's top row: star, name, then the verbs. The open tab owns the one
-/// filled action, so Open in VS Code only fills on Overview.
+/// The head's top row: star, name, refresh, then the verbs. The open tab owns
+/// the one filled action, so Open in VS Code only fills on Overview.
 pub(crate) fn header(
     repo: &RepoEntry,
     launchers: &[Launcher],
@@ -155,8 +151,6 @@ pub(crate) fn header(
     let star_press = state.star_press;
     let star_target = entities.clone();
     let star_folder = folder.to_string();
-    let tab_target = entities.clone();
-    let tab_folder = folder.to_string();
     div()
         .flex()
         .items_center()
@@ -219,47 +213,20 @@ pub(crate) fn header(
                 .text_ellipsis()
                 .child(repo.name.clone()),
         )
-        .when(!state.in_tab, |row| {
-            let label = if state.tabbed {
-                "Go to tab"
-            } else {
-                "Open in tab"
-            };
-            row.child(
-                div()
-                    .id("detail-open-tab")
-                    .debug_selector(|| "detail-open-tab".into())
-                    .a11y_button(label)
-                    .cursor_pointer()
-                    .flex_shrink_0()
-                    .h(px(warpui_kit_core::shell::CONTROL_HEIGHT))
-                    .px_3()
-                    .rounded(px(6.))
-                    .border_1()
-                    .border_color(theme::line_strong())
-                    .bg(theme::panel())
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    .text_size(px(theme::font_control()))
-                    .font_weight(FontWeight::MEDIUM)
-                    .text_color(theme::text())
-                    .hover(|d| d.bg(theme::raised()))
-                    .on_click(move |_, _, cx| {
-                        tab_target.update(cx, |s, cx| s.open_repo_tab(&tab_folder, cx));
-                    })
-                    .child(icon(
-                        if state.tabbed {
-                            "icons/icon-tab.svg"
-                        } else {
-                            "icons/icon-tab-plus.svg"
-                        },
-                        px(theme::icon_small()),
-                        theme::text_dim(),
-                    ))
-                    .child(label),
-            )
-        })
+        .child(
+            head_icon("detail-refresh", "Refresh repository")
+                .on_click({
+                    let target = entities.clone();
+                    move |_, _, cx| {
+                        target.update(cx, |s, cx| s.refresh_panel(cx));
+                    }
+                })
+                .child(icon(
+                    "icons/icon-refresh.svg",
+                    px(theme::icon_small()),
+                    theme::text_dim(),
+                )),
+        )
         .children(
             launchers
                 .first()

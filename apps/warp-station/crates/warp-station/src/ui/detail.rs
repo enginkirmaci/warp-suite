@@ -107,8 +107,6 @@ pub fn render(
     let active = store.active_detail_tab();
     let head_state = HeadState {
         filled: matches!(active, WorkspaceTab::Overview),
-        tabbed: store.repo_tabs.iter().any(|tab| tab.folder == folder),
-        in_tab: store.active_repo_tab.is_some(),
         launch_menu_open: props.launch_menu_open,
         star_press: store
             .star_pressed
