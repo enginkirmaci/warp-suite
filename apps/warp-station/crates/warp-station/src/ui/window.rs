@@ -913,9 +913,10 @@ impl MainWindow {
     }
 
     /// Launches the external warp-notes app on the shared store: the notes
-    /// toggle, the tools-menu row, the rows' notes icon (with no note) and
-    /// the global-search note hits (with one) all land here. The selected
-    /// repo pins the scope; fire-and-forget — the window outlives Warp Station.
+    /// toggle, the summary's "Open in Notes" and the global-search note hits
+    /// (with one) all land here. They ask for the whole store, so the titlebar
+    /// always opens the notes root whatever repo is selected; only the repo
+    /// launchers pin a folder. Fire-and-forget — the window outlives Station.
     fn launch_notes(&mut self, note: Option<std::path::PathBuf>, cx: &mut Context<Self>) {
         let settings = self.store.read(cx).settings();
         if !settings.warp_notes.enable_warp_notes {
@@ -924,11 +925,10 @@ impl MainWindow {
         let executable = settings.warp_notes.executable.clone();
         let store_root =
             warp_station_core::notes::resolve_store_root(&settings.general.notes_store_path);
-        let repo = self.store.read(cx).selected_entry().map(|e| e.name.clone());
         if let Err(err) = warp_station_core::warp_notes::launch(
             &executable,
             &store_root,
-            repo.as_deref(),
+            warp_station_core::warp_notes::NotesScope::WholeStore,
             note.as_deref(),
         ) {
             self.store.update(cx, |s, _| s.notify_error(err));

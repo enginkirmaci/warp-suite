@@ -121,16 +121,16 @@ together. When one changes, update the other side in the **same** commit.
   field). Warp Station's `SnapIt.Executable` setting points at the Rust
   `warp-snapit.exe`, which is a portable-zip deliverable (no installer) and
   skipped in the Linux bundle (`linux_skip = true` in `apps.toml`).
-- **Shared notes store** (`~/notes`, one folder per repo): Warp
-  Station's notes surfaces (titlebar toggle, tools menu, repo-row icons,
-  global-search note hits) launch
-  [warp-notes](https://github.com/enginkirmaci/warp-notes)
-  with `--store` (Warp Station's resolved `notes_store_path`) plus `--repo`/`--note`;
-  standalone launches root at the shared store; a store an older release
-  kept in `~/.warp/notes` (or the older `~/.devtools/notes`) moves to
-  `~/notes` on whichever app runs first. Missing
-  warp-notes binary = the notes surfaces fail with a toast, nothing else
-  breaks.
+- **Shared notes store** (`~/notes`, one folder per repo):
+  [warp-notes](https://github.com/enginkirmaci/warp-notes) always gets
+  `--store` (Warp Station's resolved `notes_store_path`) and an explicit
+  scope — the titlebar toggle and the global-search note hits ask for
+  `--root` (the whole store), a repo's launcher pins its folder with
+  `--repo` — plus `--note` when a hit names one. Standalone launches root at
+  the shared store; a store an older release kept in `~/.warp/notes` (or the
+  older `~/.devtools/notes`) moves to `~/notes` on whichever app runs first.
+  Missing warp-notes binary = the notes surfaces fail with a toast, nothing
+  else breaks.
 - **Per-user layout** (`~/.warp`): every app's own data sits in its own
   folder — `station/`, `agent/`, `notes/` — beside the SnapIt settings in
   `snapit/`, the shared `ui.json` at the root and one `logs/` for every

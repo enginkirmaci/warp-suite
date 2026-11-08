@@ -65,7 +65,12 @@ impl Launch {
                 exe,
                 store_root,
                 repo,
-            } => warp_station_core::warp_notes::launch(exe, store_root, Some(repo), None),
+            } => warp_station_core::warp_notes::launch(
+                exe,
+                store_root,
+                warp_station_core::warp_notes::NotesScope::Repo(repo),
+                None,
+            ),
         };
         if let Err(err) = started {
             store.update(cx, |s, cx| {

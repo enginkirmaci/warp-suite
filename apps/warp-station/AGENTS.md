@@ -62,8 +62,10 @@ Keep this order; several steps depend on the previous one:
   demand. Wand runs are real warp-agent chats in the repo workspace; the daily
   summary runs in the General workspace.
 - **Notes.** The notes surfaces launch warp-notes with `--store` (the resolved
-  `notes_store_path`), plus `--repo`/`--note`; a missing binary shows a toast
-  and nothing else breaks.
+  `notes_store_path`) and an explicit scope: the titlebar, the summary and the
+  global-search note hits ask for `--root` (the whole store, never the
+  selected repo), while a repo's launcher pins `--repo <name>`; a hit also
+  passes `--note`. A missing binary shows a toast and nothing else breaks.
 - **SnapIt.** Reads the same `~/.warp/snapit` files as warp-snapit. On Windows
   the auto-start setting launches the configured executable with
   `--parent <pid>`. The default executable name is historical; the Rust port is
