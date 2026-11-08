@@ -1454,7 +1454,12 @@ impl ChangesView {
                             window,
                             cx,
                         )
-                        .h_full(),
+                        .h_full()
+                        // the card carries one accent — the commit button
+                        // under the box — so the box keeps its resting edge
+                        // while the draft has focus instead of turning accent
+                        // and reading as a second, competing action
+                        .focus(|s| s.border_color(theme::hairline())),
                     )
                     // the corner wand: overlay inside the message box
                     .when(wand_on && !wand_busy_elsewhere, |box_area| {
