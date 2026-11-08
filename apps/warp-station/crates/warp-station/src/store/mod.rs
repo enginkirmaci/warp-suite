@@ -229,10 +229,11 @@ pub struct Store {
     /// it from its store observer (the single-instance door).
     focus_requested: bool,
 
-    /// Write-behind cache saves: bumped on every tag/favorite mutation; the
-    /// deferred flush only writes when its generation is still current. Kept
-    /// separate from [`Self::run_id_seq`]: a wand or summary run must not
-    /// invalidate a pending tag save (the bug this split fixes).
+    /// Write-behind cache saves: bumped on every cache-relevant mutation
+    /// (tags, favorites and the status/activity counts); the deferred flush
+    /// only writes when its generation is still current. Kept separate from
+    /// [`Self::run_id_seq`]: a wand or summary run must not invalidate a
+    /// pending cache save (the bug this split fixes).
     cache_generation: u64,
     /// Monotonic id source for wand/summary runs, so two runs in one session
     /// never share an id without touching the cache-save gate.
@@ -414,26 +415,24 @@ impl Store {
         store.next_activity_refresh =
             Some(std::time::Instant::now() + std::time::Duration::from_secs(ACTIVITY_REFRESH_SECS));
 
-        // Cache first for instant labels, then the session scan + a status
-        // pass over whatever we know (the scan's settle re-probes the merged
-        // list). Archived repos stay out of the passes; the scan still gets
-        // the full list so their tags survive the merge.
+        // Cache first for instant labels. The scan is a filesystem walk
+        // (milliseconds) and goes out before the network-bound activity
+        // pass: its settle probes the merged list, so the launch never
+        // waits for `gh` to learn its own repos. Archived repos stay out of
+        // the activity pass; the scan still gets the full list so their
+        // tags survive the merge.
         let folders: Vec<std::path::PathBuf> = store
             .repos
             .iter()
             .filter(|repo| !repo.is_archived())
             .map(|r| r.folder_path.clone())
             .collect();
-        let _ = store.net.send_blocking(NetCommand::ProbeAll {
-            folders: folders.clone(),
-        });
-        store.kick_github_pass(&folders);
-        store.kick_azure_pass(&folders);
         store.scanning = true;
         let _ = store.net.send_blocking(NetCommand::Scan {
             settings: app_settings.repos.clone(),
-            previous: store.repos.clone(),
         });
+        store.kick_github_pass(&folders);
+        store.kick_azure_pass(&folders);
 
         // E2E hook: WARP_STATION_SELECT=<index-or-name-substring> picks the repo the
         // app opens on, so automation can verify the workspace surfaces
@@ -540,34 +539,34 @@ impl Store {
         self.scanning = true;
         let _ = self.net.send_blocking(NetCommand::Scan {
             settings: settings.repos.clone(),
-            previous: self.repos.clone(),
         });
     }
 
-    /// A full refresh — the repository page's Refresh button and the
-    /// auto-refresh timer run this. The order is local-first: the scan (a
-    /// filesystem walk, milliseconds) refreshes the list at once, then the
-    /// much slower fetch pass rides behind it, re-probing each repo as its
-    /// own fetch lands (per-repo badges). Stale GitHub/Azure snapshots for
-    /// the eager set (favorites + the selected repo) re-ask on the side. A
-    /// pass also restarts both periodic clocks, since it just did their
-    /// work. While a scan is already in flight that pass is this ask: the
-    /// clocks restart, nothing is queued behind it.
+    /// A full refresh — the repository page's Refresh button. The order is
+    /// local-first: the scan (a filesystem walk, milliseconds) refreshes the
+    /// list at once, then the much slower fetch pass rides behind it,
+    /// re-probing each repo as its own fetch lands (per-repo badges). The
+    /// eager set (favorites + the selected repo) re-asks even when its
+    /// snapshots are still inside [ACTIVITY_TTL]: an explicit ask outranks
+    /// the clock. A pass also restarts both periodic clocks, since it just
+    /// did their work. While a scan is already in flight that pass is this
+    /// ask: the clocks restart, nothing is queued behind it.
     pub fn refresh(&mut self, cx: &mut Context<Self>) {
-        self.refresh_inner(cx, false);
+        self.refresh_inner(cx, false, true);
     }
 
     /// The focus-regain form: the same local-first refresh, but only repos
     /// whose status is older than [FOCUS_STALE_SECS] are fetched, so the
     /// synthesis is a trickle. `last_fetch_at` unset counts as stale.
     pub fn refresh_fetched_stale(&mut self, cx: &mut Context<Self>) {
-        self.refresh_inner(cx, true);
+        self.refresh_inner(cx, true, false);
     }
 
     /// Shared body for [Self::refresh] and [Self::refresh_fetched_stale]:
     /// scan first (local), fetch queued after it, `stale_only` shrinking the
     /// fetch list to repos whose last fetch predates the stale window.
-    fn refresh_inner(&mut self, cx: &mut Context<Self>, stale_only: bool) {
+    /// `force_activity` re-asks the eager set even inside its TTL.
+    fn refresh_inner(&mut self, cx: &mut Context<Self>, stale_only: bool, force_activity: bool) {
         if self.scanning {
             self.reset_auto_schedules();
             cx.notify();
@@ -595,7 +594,7 @@ impl Store {
         }
         self.kick_scan(&settings);
         self.queue_fetch(&folders, true);
-        self.kick_eager_activity();
+        self.kick_eager_activity(force_activity);
         self.reset_auto_schedules();
         cx.notify();
     }
@@ -639,8 +638,15 @@ impl Store {
 
     pub fn on_net_event(&mut self, event: UiEvent, cx: &mut Context<Self>) {
         match event {
-            UiEvent::ScanSettled { repos, removed: _ } => {
+            UiEvent::ScanSettled { scanned } => {
+                // Merge into the live list, not into the snapshot the scan
+                // was queued with: a status probe or a GitHub snapshot can
+                // land while the scan waits behind a fetch or a `gh` sweep,
+                // and replaying the older snapshot would blank the counts
+                // they just filled.
+                let (repos, _removed) = repo_store::merge_scan(&self.repos, &scanned);
                 self.repos = repos;
+                self.save_cache_now();
                 self.list_version += 1;
                 self.scanning = false;
                 self.reproject();
@@ -674,6 +680,7 @@ impl Store {
                 progress,
             } => {
                 let by_folder = self.repo_index_by_folder();
+                let mut applied = false;
                 for probe in &probes {
                     // a user git action owns the truth until its own probe
                     // lands: now that passes run off the command loop, a
@@ -683,7 +690,13 @@ impl Store {
                     }
                     if let Some(&ix) = by_folder.get(&probe.folder_path) {
                         repo_store::apply_status_probe(&mut self.repos[ix], probe);
+                        applied = true;
                     }
+                }
+                // the cache carries the last known counts: keep it in step
+                // with the probes so the next launch paints them at once
+                if applied {
+                    self.persist_cache_soon(cx);
                 }
                 // a fetch pass streams one repo at a time: the settled badge
                 // goes up as each fetch lands, and the toolbar tracks k/n
@@ -775,9 +788,12 @@ impl Store {
             }
             UiEvent::AzureSettled { items } => {
                 for (folder, snapshot) in items {
-                    // the freshness gate for the eager and open passes
-                    self.activity_landed_at
-                        .insert(folder.clone(), std::time::Instant::now());
+                    // the freshness gate for the eager and open passes: a
+                    // failed probe must not count as a fresh answer
+                    if snapshot.available {
+                        self.activity_landed_at
+                            .insert(folder.clone(), std::time::Instant::now());
+                    }
                     self.azure_by_folder.insert(folder, Arc::new(snapshot));
                 }
                 self.reproject();
@@ -785,16 +801,33 @@ impl Store {
             }
             UiEvent::GitHubSettled { items } => {
                 let by_folder = self.repo_index_by_folder();
+                let mut counts_changed = false;
                 for (folder, snapshot) in items {
-                    // the freshness gate for the eager and open passes
-                    self.activity_landed_at
-                        .insert(folder.clone(), std::time::Instant::now());
-                    if let Some(&ix) = by_folder.get(&folder) {
-                        let entry = &mut self.repos[ix];
-                        entry.github_pr_count = snapshot.pulls.len() as u32;
-                        entry.github_issue_count = snapshot.issues.len() as u32;
+                    // a failed probe is not a fresh answer: the rail keeps
+                    // its last known counts, and the eager/open kick may
+                    // retry at once instead of waiting out the TTL
+                    if snapshot.available {
+                        self.activity_landed_at
+                            .insert(folder.clone(), std::time::Instant::now());
                     }
+                    if snapshot.available
+                        && let Some(&ix) = by_folder.get(&folder)
+                    {
+                        let entry = &mut self.repos[ix];
+                        let pulls = snapshot.pulls.len() as u32;
+                        let issues = snapshot.issues.len() as u32;
+                        if entry.github_pr_count != pulls || entry.github_issue_count != issues {
+                            entry.github_pr_count = pulls;
+                            entry.github_issue_count = issues;
+                            counts_changed = true;
+                        }
+                    }
+                    // the tab still records the failure, so it can offer a
+                    // retry instead of showing stale pulls as current
                     self.github_by_folder.insert(folder, Arc::new(snapshot));
+                }
+                if counts_changed {
+                    self.persist_cache_soon(cx);
                 }
                 self.reproject();
                 cx.notify();
@@ -1166,10 +1199,10 @@ impl Store {
     }
 
     /// The refresh's eager activity set: favorites and the selected repo,
-    /// skipped when their snapshots are still fresh.
-    fn kick_eager_activity(&mut self) {
+    /// skipped when their snapshots are still fresh unless `force`.
+    fn kick_eager_activity(&mut self, force: bool) {
         let folders = self.eager_activity_folders();
-        self.maybe_activity_kick(&folders, false);
+        self.maybe_activity_kick(&folders, force);
     }
 
     /// A repo just opened: its GitHub/Azure snapshots re-ask when stale — the
@@ -1520,9 +1553,7 @@ impl Store {
                 roots.sort();
             });
         }
-        if let Err(err) = repo_store::save_cache(&repo_store::cache_path(), &self.repos) {
-            tracing::warn!("could not save repo cache: {err}");
-        }
+        self.save_cache_now();
         if !new_folders.is_empty() {
             let _ = self.net.send_blocking(NetCommand::ProbeAll {
                 folders: new_folders,
@@ -1881,9 +1912,10 @@ impl Store {
             self.auto_refresh_armed_secs = None;
             return;
         }
-        // refresh() restarts both clocks itself, and an in-flight scan counts
-        // as this cycle's pass
-        self.refresh(cx);
+        // the shared body restarts both clocks itself, and an in-flight scan
+        // counts as this cycle's pass; the timer does not force the eager
+        // activity set — the fifteen-minute activity clock owns that
+        self.refresh_inner(cx, false, false);
     }
 
     /// Restarts both periodic clocks from now: a full refresh just ran, so the
@@ -2814,7 +2846,7 @@ impl Store {
             }
         }
         self.reproject();
-        self.persist_tags_soon(cx);
+        self.persist_cache_soon(cx);
     }
 
     /// Persists the selected row after a short idle: holding an arrow key
@@ -2844,9 +2876,10 @@ impl Store {
         format!("{prefix}-{}", self.run_id_seq)
     }
 
-    /// Write-behind cache save: a burst of star/tag/archive clicks collapses
-    /// into one full-file write after a short debounce.
-    fn persist_tags_soon(&mut self, cx: &mut Context<Self>) {
+    /// Write-behind cache save: a burst of star/tag/archive clicks or a
+    /// stream of per-repo probe/GitHub settles collapses into one full-file
+    /// write after a short debounce.
+    fn persist_cache_soon(&mut self, cx: &mut Context<Self>) {
         self.cache_generation += 1;
         let generation = self.cache_generation;
         let repos = self.repos.clone();
@@ -2865,6 +2898,17 @@ impl Store {
         })
         .detach();
         cx.notify();
+    }
+
+    /// Immediate cache write for an event that replaces the list (a scan
+    /// settle, a registration): the list is new, and bumping the generation
+    /// invalidates a pending debounced write so it cannot replay an older
+    /// list over this one.
+    fn save_cache_now(&mut self) {
+        self.cache_generation += 1;
+        if let Err(err) = repo_store::save_cache(&repo_store::cache_path(), &self.repos) {
+            tracing::warn!("could not save repo cache: {err}");
+        }
     }
 
     /// The toolbar's Archive chip: flips whether archived rows join the
@@ -2916,7 +2960,7 @@ impl Store {
                 folders: vec![std::path::PathBuf::from(folder)],
             });
         }
-        self.persist_tags_soon(cx);
+        self.persist_cache_soon(cx);
     }
 }
 

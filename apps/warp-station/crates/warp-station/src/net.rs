@@ -1,22 +1,24 @@
 //! The net thread: a dedicated OS thread with its own tokio runtime doing all
 //! the blocking work (repo scans, git status passes) off the UI. Two unbounded
 //! async_channels bridge the sides — commands in, events out. The net thread
-//! keeps no repo state; commands carry their own inputs (the store snapshots
-//! what a pass needs), so results can never race a stale view of the list.
+//! keeps no repo state; commands carry their own inputs and every result comes
+//! back as a fact (the filesystem's repos, a repo's status), which the store
+//! applies to the live list when it lands.
 
 use async_channel::{Receiver, Sender};
 use std::path::{Path, PathBuf};
-use warp_station_core::repo_store::{self, RepoEntry, StatusProbe};
+use warp_station_core::repo_store::{self, StatusProbe};
 use warp_station_core::scan;
 use warp_station_core::settings::ReposSettings;
 use warp_station_core::warp::ModelChoice;
 
 pub enum NetCommand {
-    /// The listing scan: direct children of each scan root, user tags and
-    /// last-known status carried over from `previous`, cache saved after.
+    /// The listing scan: direct children of each scan root. It reports what
+    /// the filesystem shows only; the store merges it into the live list
+    /// when it settles, so status and activity that landed in the meantime
+    /// are never rolled back.
     Scan {
         settings: ReposSettings,
-        previous: Vec<RepoEntry>,
     },
     /// One status pass over every folder, 4-way parallel, burst-applied.
     ProbeAll {
@@ -335,9 +337,10 @@ fn parse_warp_status(workspaces: &serde_json::Value) -> Vec<(String, WarpWorkspa
 }
 
 pub enum UiEvent {
+    /// The raw scan result: `merge_scan` runs in the store at settle time,
+    /// against the live list.
     ScanSettled {
-        repos: Vec<RepoEntry>,
-        removed: Vec<String>,
+        scanned: Vec<warp_station_core::scan::ScannedRepo>,
     },
     /// `after_fetch` marks the pass a FetchAll ends with, so the store can
     /// re-read the selected repo's open workspace from the post-fetch state
@@ -751,17 +754,12 @@ fn spawn_read_intake(
 async fn background_loop(rx: Receiver<NetCommand>, evt_tx: Sender<UiEvent>) {
     while let Ok(cmd) = rx.recv().await {
         match cmd {
-            NetCommand::Scan { settings, previous } => {
+            NetCommand::Scan { settings } => {
                 let scanned = tokio::task::spawn_blocking(move || scan::scan(&settings, None))
                     .await
                     .unwrap_or_default();
-                let (merged, removed) = repo_store::merge_scan(&previous, &scanned.repos);
-                if let Err(err) = repo_store::save_cache(&repo_store::cache_path(), &merged) {
-                    tracing::warn!("could not save repo cache: {err}");
-                }
                 let _ = evt_tx.send_blocking(UiEvent::ScanSettled {
-                    repos: merged,
-                    removed,
+                    scanned: scanned.repos,
                 });
             }
             NetCommand::FetchAll { folders } => {

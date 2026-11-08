@@ -28,6 +28,19 @@ pub struct CachedRepo {
     #[serde(rename = "SolutionPath")]
     pub solution_path: Option<String>,
     pub tags: Vec<CachedTag>,
+    /// The last known row status, so a launch paints the counts the previous
+    /// session left instead of a blank row until the scan's probe lands. Not
+    /// a freshness claim: the probe replaces these moments later.
+    pub git_branch_name: Option<String>,
+    pub git_modified_count: u32,
+    pub git_to_push_count: u32,
+    pub git_to_pull_count: u32,
+    pub git_has_remote: bool,
+    pub git_branch_published: bool,
+    pub git_status_loaded: bool,
+    /// The last GitHub pass's counts, restored alongside the git status.
+    pub github_pr_count: u32,
+    pub github_issue_count: u32,
     /// Committer time of HEAD at the last probe (instant "2w ago" labels on
     /// startup before the status pass lands).
     pub git_last_commit_at: Option<String>,
@@ -110,6 +123,15 @@ fn cache_from_entry(repo: &RepoEntry) -> CachedRepo {
             .iter()
             .map(|t| CachedTag { name: t.clone() })
             .collect(),
+        git_branch_name: repo.git_branch_name.clone(),
+        git_modified_count: repo.git_modified_count,
+        git_to_push_count: repo.git_to_push_count,
+        git_to_pull_count: repo.git_to_pull_count,
+        git_has_remote: repo.git_has_remote,
+        git_branch_published: repo.git_branch_published,
+        git_status_loaded: repo.git_status_loaded,
+        github_pr_count: repo.github_pr_count,
+        github_issue_count: repo.github_issue_count,
         git_last_commit_at: repo.git_last_commit_at.map(|t| t.to_rfc3339()),
         git_last_fetch_at: repo.git_last_fetch_at.map(|t| t.to_rfc3339()),
     }
@@ -121,10 +143,10 @@ pub fn entry_from_cache(cached: &CachedRepo) -> RepoEntry {
         folder_path: PathBuf::from(&cached.folder_path),
         solution_path: cached.solution_path.clone(),
         tags: cached.tags.iter().map(|t| t.name.clone()).collect(),
-        git_branch_name: None,
-        git_modified_count: 0,
-        git_to_push_count: 0,
-        git_to_pull_count: 0,
+        git_branch_name: cached.git_branch_name.clone(),
+        git_modified_count: cached.git_modified_count,
+        git_to_push_count: cached.git_to_push_count,
+        git_to_pull_count: cached.git_to_pull_count,
         git_last_commit_at: cached
             .git_last_commit_at
             .clone()
@@ -135,11 +157,11 @@ pub fn entry_from_cache(cached: &CachedRepo) -> RepoEntry {
             .clone()
             .and_then(|s| chrono::DateTime::parse_from_rfc3339(&s).ok())
             .map(|t| t.with_timezone(&chrono::Local)),
-        git_has_remote: false,
-        git_branch_published: false,
-        git_status_loaded: false,
-        github_pr_count: 0,
-        github_issue_count: 0,
+        git_has_remote: cached.git_has_remote,
+        git_branch_published: cached.git_branch_published,
+        git_status_loaded: cached.git_status_loaded,
+        github_pr_count: cached.github_pr_count,
+        github_issue_count: cached.github_issue_count,
     }
 }
 
@@ -353,5 +375,51 @@ mod tests {
         })
         .unwrap();
         assert!(out.contains("\"FolderPath\""));
+    }
+
+    /// The cache carries the last known row status so a launch paints the
+    /// counts the previous session left; an older file without them loads
+    /// blank (and unprobed) instead of failing.
+    #[test]
+    fn cache_round_trips_the_last_known_counts() {
+        let json = r#"{"Repos":[{"Name":"r","FolderPath":"/x/r",
+            "Tags":[{"Name":"favorites"}],"GitBranchName":"main",
+            "GitModifiedCount":7,"GitToPushCount":2,"GitToPullCount":1,
+            "GitHasRemote":true,"GitBranchPublished":true,"GitStatusLoaded":true,
+            "GithubPrCount":3,"GithubIssueCount":4}]}"#;
+        let file: RepoCacheFile = serde_json::from_str(json).unwrap();
+        let entry = entry_from_cache(&file.repos[0]);
+        assert_eq!(entry.git_branch_name.as_deref(), Some("main"));
+        assert_eq!(entry.git_modified_count, 7);
+        assert_eq!(entry.git_to_push_count, 2);
+        assert_eq!(entry.git_to_pull_count, 1);
+        assert!(entry.git_has_remote);
+        assert!(entry.git_branch_published);
+        assert!(entry.git_status_loaded);
+        assert_eq!(entry.github_pr_count, 3);
+        assert_eq!(entry.github_issue_count, 4);
+
+        // a save writes the same shape back
+        let out = serde_json::to_string(&RepoCacheFile {
+            repos: vec![cache_from_entry(&entry)],
+        })
+        .unwrap();
+        let back: RepoCacheFile = serde_json::from_str(&out).unwrap();
+        let back = entry_from_cache(&back.repos[0]);
+        assert_eq!(back.git_modified_count, 7);
+        assert_eq!(back.github_pr_count, 3);
+        assert_eq!(back.github_issue_count, 4);
+        assert!(back.git_status_loaded);
+    }
+
+    #[test]
+    fn an_older_cache_without_counts_loads_blank() {
+        let file: RepoCacheFile =
+            serde_json::from_str(r#"{"Repos":[{"Name":"r","FolderPath":"/x/r"}]}"#).unwrap();
+        let entry = entry_from_cache(&file.repos[0]);
+        assert_eq!(entry.git_modified_count, 0);
+        assert_eq!(entry.github_pr_count, 0);
+        assert_eq!(entry.github_issue_count, 0);
+        assert!(!entry.git_status_loaded);
     }
 }

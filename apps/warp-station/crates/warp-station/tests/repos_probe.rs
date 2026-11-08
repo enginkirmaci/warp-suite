@@ -1079,6 +1079,357 @@ fn refresh_rescans_first_fetches_second_and_restarts_both_timers(cx: &mut TestAp
     let _ = std::fs::remove_file(&scratch);
 }
 
+/// A scan that settles after a status probe and a GitHub snapshot landed must
+/// keep their counts: the merge runs against the live list, not against the
+/// snapshot the scan was queued with (the launch queues its activity pass
+/// behind the scan, and a fetch can hold the scan for longer).
+#[gpui::test]
+fn a_settling_scan_keeps_counts_that_landed_while_it_waited(cx: &mut TestAppContext) {
+    use warp_station::net::UiEvent;
+    use warp_station_core::github::{GitHubItem, GitHubSnapshot};
+    use warp_station_core::repo_store::StatusProbe;
+
+    cx.update(gpui_kit::init);
+    scratch_home();
+
+    let (net_tx, _net_rx) = async_channel::unbounded();
+    let store = cx.new(|cx| {
+        let mut store = Store::new(cx, net_tx);
+        // the cache load: known identity, no runtime state
+        store.replace_repos(vec![entry("alpha", "/probe/alpha", &[])]);
+        store.repos[0].git_status_loaded = false;
+        store.repos[0].git_modified_count = 0;
+        store.repos[0].github_pr_count = 0;
+        store.repos[0].github_issue_count = 0;
+        store
+    });
+
+    cx.update_entity(&store, |s: &mut Store, cx| {
+        s.on_net_event(
+            UiEvent::StatusSettled {
+                probes: vec![StatusProbe {
+                    folder_path: "/probe/alpha".into(),
+                    branch_name: Some("main".into()),
+                    modified_count: 10,
+                    ..Default::default()
+                }],
+                after_fetch: false,
+                progress: None,
+            },
+            cx,
+        );
+        s.on_net_event(
+            UiEvent::GitHubSettled {
+                items: vec![(
+                    "/probe/alpha".into(),
+                    GitHubSnapshot {
+                        url: Some("https://github.com/example/alpha".into()),
+                        pulls: vec![GitHubItem {
+                            number: 1,
+                            ..Default::default()
+                        }],
+                        issues: vec![
+                            GitHubItem {
+                                number: 2,
+                                ..Default::default()
+                            },
+                            GitHubItem {
+                                number: 3,
+                                ..Default::default()
+                            },
+                        ],
+                        available: true,
+                    },
+                )],
+            },
+            cx,
+        );
+    });
+
+    // the scan settles last, naming the same repo it named when it was queued
+    cx.update_entity(&store, |s: &mut Store, cx| {
+        s.on_net_event(
+            UiEvent::ScanSettled {
+                scanned: vec![scanned("alpha", "/probe/alpha")],
+            },
+            cx,
+        );
+    });
+
+    cx.read_entity(&store, |s, _| {
+        let alpha = s
+            .repos
+            .iter()
+            .find(|repo| repo.name == "alpha")
+            .expect("alpha survives the scan");
+        assert!(
+            alpha.git_status_loaded,
+            "the probe's loaded flag survives the scan"
+        );
+        assert_eq!(
+            alpha.git_branch_name.as_deref(),
+            Some("main"),
+            "the probe's branch survives the scan"
+        );
+        assert_eq!(
+            alpha.git_modified_count, 10,
+            "the probe's change count survives the scan"
+        );
+        assert_eq!(
+            alpha.github_pr_count, 1,
+            "the GitHub snapshot's pull count survives the scan"
+        );
+        assert_eq!(
+            alpha.github_issue_count, 2,
+            "the GitHub snapshot's issue count survives the scan"
+        );
+    });
+}
+
+/// Local-first at launch: the scan goes out before the network-bound
+/// GitHub/Azure pass, no separate probe rides in front of it (the scan's
+/// settle probes the merged list), and a repo the scan names joins the list.
+#[gpui::test]
+fn launch_scans_first_and_probes_on_settle(cx: &mut TestAppContext) {
+    use warp_station::net::{NetCommand, UiEvent};
+
+    cx.update(gpui_kit::init);
+    scratch_home();
+
+    let (net_tx, net_rx) = async_channel::unbounded();
+    let store = cx.new(|cx| Store::new(cx, net_tx));
+
+    let mut commands = Vec::new();
+    while let Ok(command) = net_rx.try_recv() {
+        commands.push(command);
+    }
+    let scan = commands
+        .iter()
+        .position(|command| matches!(command, NetCommand::Scan { .. }))
+        .expect("the launch scans");
+    assert!(
+        !commands
+            .iter()
+            .any(|command| matches!(command, NetCommand::ProbeAll { .. })),
+        "the settle probes the scanned list; a launch probe would double the work"
+    );
+    if let Some(activity) = commands.iter().position(|command| {
+        matches!(
+            command,
+            NetCommand::GitHubPass { .. } | NetCommand::AzurePass { .. }
+        )
+    }) {
+        assert!(
+            scan < activity,
+            "the local scan never waits for the network"
+        );
+    }
+
+    cx.update_entity(&store, |s: &mut Store, cx| {
+        s.on_net_event(
+            UiEvent::ScanSettled {
+                scanned: vec![scanned("alpha", "/probe/alpha")],
+            },
+            cx,
+        );
+    });
+
+    let mut probed = Vec::new();
+    while let Ok(command) = net_rx.try_recv() {
+        if let NetCommand::ProbeAll { folders } = command {
+            probed = folders;
+        }
+    }
+    assert_eq!(
+        probed,
+        vec![PathBuf::from("/probe/alpha")],
+        "the settle probes the repo the scan names"
+    );
+}
+
+/// Drains the store's net channel, reporting whether a GitHub pass was
+/// queued (the eager kick and the activity clock both emit one).
+fn drained_a_github_pass(net_rx: &async_channel::Receiver<warp_station::net::NetCommand>) -> bool {
+    let mut found = false;
+    while let Ok(command) = net_rx.try_recv() {
+        if matches!(command, warp_station::net::NetCommand::GitHubPass { .. }) {
+            found = true;
+        }
+    }
+    found
+}
+
+/// A failed GitHub probe is not a fresh answer: the row keeps its last known
+/// counts, the eager kick retries instead of parking for the TTL, and the
+/// Refresh button's explicit ask outranks the gate even when it is fresh.
+#[gpui::test]
+fn activity_failures_keep_counts_and_the_eager_kick_retries(cx: &mut TestAppContext) {
+    use warp_station::net::UiEvent;
+    use warp_station_core::github::{GitHubItem, GitHubSnapshot};
+
+    let _env_turn = AUTO_FETCH_ENV.lock().unwrap_or_else(|e| e.into_inner());
+    cx.update(gpui_kit::init);
+    scratch_home();
+
+    let gh = fake_gh_executable("keep-counts");
+    let scratch = std::env::temp_dir().join(format!(
+        "warp-station-github-failure-{}.json",
+        std::process::id()
+    ));
+    std::fs::write(
+        &scratch,
+        format!(
+            r#"{{"Repos": {{ "GitHubExecutable": "{}" }}, "Notifications": {{ "Enabled": false }}}}"#,
+            gh.display()
+        ),
+    )
+    .expect("scratch settings");
+
+    let (net_tx, net_rx) = async_channel::unbounded();
+    let store = cx.new(|_cx| {
+        let mut store = Store::with_settings(
+            net_tx,
+            std::sync::Arc::new(warp_station_core::settings::SettingsService::at(
+                scratch.clone(),
+            )),
+        );
+        // a favorite, so the eager set names it
+        store.replace_repos(vec![entry("alpha", "/probe/alpha", &["favorites"])]);
+        store.scanning = false;
+        store
+    });
+    while net_rx.try_recv().is_ok() {}
+
+    let snapshot = |available: bool, pulls: u32, issues: u32| GitHubSnapshot {
+        url: Some("https://github.com/example/alpha".into()),
+        pulls: (0..pulls)
+            .map(|ix| GitHubItem {
+                number: u64::from(ix) + 1,
+                ..Default::default()
+            })
+            .collect(),
+        issues: (0..issues)
+            .map(|ix| GitHubItem {
+                number: u64::from(ix) + 1,
+                ..Default::default()
+            })
+            .collect(),
+        available,
+    };
+    let settle = |folder: &str, snapshot: GitHubSnapshot| UiEvent::GitHubSettled {
+        items: vec![(folder.to_string(), snapshot)],
+    };
+
+    // nothing has landed yet: the eager set is due
+    cx.update_entity(&store, |s: &mut Store, cx| s.refresh_fetched_stale(cx));
+    assert!(drained_a_github_pass(&net_rx), "the first eager kick asks");
+    cx.update_entity(&store, |s: &mut Store, _| s.scanning = false);
+
+    // a failed pass must not stamp the freshness gate
+    cx.update_entity(&store, |s: &mut Store, cx| {
+        s.on_net_event(settle("/probe/alpha", snapshot(false, 0, 0)), cx);
+    });
+    cx.update_entity(&store, |s: &mut Store, cx| s.refresh_fetched_stale(cx));
+    assert!(
+        drained_a_github_pass(&net_rx),
+        "a failed probe leaves the eager set due"
+    );
+    cx.update_entity(&store, |s: &mut Store, _| s.scanning = false);
+
+    // a good pass fills the counts and counts as the fresh answer
+    cx.update_entity(&store, |s: &mut Store, cx| {
+        s.on_net_event(settle("/probe/alpha", snapshot(true, 2, 1)), cx);
+    });
+    cx.read_entity(&store, |s, _| {
+        assert_eq!(s.repos[0].github_pr_count, 2);
+        assert_eq!(s.repos[0].github_issue_count, 1);
+    });
+    cx.update_entity(&store, |s: &mut Store, cx| s.refresh_fetched_stale(cx));
+    assert!(
+        !drained_a_github_pass(&net_rx),
+        "a fresh snapshot is not re-asked by the focus sync"
+    );
+    cx.update_entity(&store, |s: &mut Store, _| s.scanning = false);
+
+    // a later failure keeps the counts it cannot replace
+    cx.update_entity(&store, |s: &mut Store, cx| {
+        s.on_net_event(settle("/probe/alpha", snapshot(false, 0, 0)), cx);
+    });
+    cx.read_entity(&store, |s, _| {
+        assert_eq!(
+            s.repos[0].github_pr_count, 2,
+            "a failed probe does not blank the row"
+        );
+        assert_eq!(s.repos[0].github_issue_count, 1);
+    });
+
+    // the Refresh button forces the eager set even inside the TTL
+    cx.update_entity(&store, |s: &mut Store, cx| s.refresh(cx));
+    assert!(
+        drained_a_github_pass(&net_rx),
+        "a manual refresh re-asks the eager set"
+    );
+}
+
+/// A row with no status yet says so; "clean" is a claim only a probe earns.
+#[gpui::test]
+fn an_unprobed_row_says_checking_instead_of_clean(cx: &mut TestAppContext) {
+    use warp_station::net::UiEvent;
+    use warp_station_core::repo_store::StatusProbe;
+
+    cx.update(gpui_kit::init);
+    scratch_home();
+    cx.update(warp_station::theme::apply_kit_theme);
+
+    let (net_tx, _net_rx) = async_channel::unbounded();
+    let store = cx.new(|cx| {
+        let mut store = Store::new(cx, net_tx);
+        let mut alpha = entry("alpha", "/probe/alpha", &[]);
+        alpha.git_status_loaded = false;
+        alpha.git_branch_name = None;
+        alpha.git_modified_count = 0;
+        store.replace_repos(vec![alpha]);
+        store
+    });
+
+    let store_handle = store.clone();
+    let (_window, cx) = cx.add_window_view(|window, cx| MainWindow::new(store_handle, window, cx));
+    cx.run_until_parked();
+    cx.update(|window, cx| drop(window.draw(cx)));
+
+    assert!(
+        cx.debug_bounds("repo-checking-0").is_some(),
+        "an unprobed row shows the checking state"
+    );
+    assert!(
+        cx.debug_bounds("repo-clean-0").is_none(),
+        "and never claims the repo is clean"
+    );
+
+    cx.update_entity(&store, |s: &mut Store, cx| {
+        s.on_net_event(
+            UiEvent::StatusSettled {
+                probes: vec![StatusProbe {
+                    folder_path: "/probe/alpha".into(),
+                    branch_name: Some("main".into()),
+                    modified_count: 0,
+                    ..Default::default()
+                }],
+                after_fetch: false,
+                progress: None,
+            },
+            cx,
+        );
+    });
+    cx.update(|window, cx| drop(window.draw(cx)));
+
+    assert!(
+        cx.debug_bounds("repo-clean-0").is_some(),
+        "the probe's settle earns the clean state"
+    );
+    assert!(cx.debug_bounds("repo-checking-0").is_none());
+}
+
 /// The focus-regain sync: the first observation primes the edge (a focused
 /// launch must not double the startup pass), a later focus regain runs the
 /// local-first refresh but fetches only the repos whose status is stale,

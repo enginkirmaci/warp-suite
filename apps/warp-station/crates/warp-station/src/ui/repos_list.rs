@@ -355,7 +355,26 @@ pub fn stats(repo: &RepoEntry, github: bool, row_ix: Option<usize>) -> gpui::Div
     } else {
         (0, 0)
     };
-    if repo.git_modified_count > 0 {
+    if !repo.git_status_loaded {
+        // the cache starts a repo without a status (a fresh add, or a first
+        // run): say what is happening instead of claiming "clean"
+        meta = meta.child(
+            div()
+                .when_some(row_ix, |d, ix| {
+                    d.debug_selector(move || format!("repo-checking-{ix}"))
+                })
+                .flex()
+                .items_center()
+                .gap(px(5.))
+                .text_color(theme::text_muted())
+                .child(icon(
+                    "icons/icon-clock.svg",
+                    px(theme::icon_tiny()),
+                    theme::text_muted(),
+                ))
+                .child("checking"),
+        );
+    } else if repo.git_modified_count > 0 {
         meta = meta.child(counted(
             "icons/icon-file-diff.svg",
             repo.git_modified_count,
