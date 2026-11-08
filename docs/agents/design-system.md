@@ -335,12 +335,18 @@ mockup, and use the shared helper where one exists.
   `controls::button(…, BtnKind::Primary(accent), …)` dim to 0.9.
 - **Ghost action:** `ghost_bg()` / `ghost_border()` (station) read the live
   ramp; `GHOST_BORDER_HOVER` is still a Copper constant (station pins Copper).
+- **Head icon verb:** `controls::icon_button()` — 34 square on `panel()`,
+  `line_strong()` edge, `raised()` hover, glyph as the child. Warp Station's
+  detail head (`head_icon`) and warp-notes' note head (`…`) are this one.
+  The list heads' smaller quiet verbs are theirs, not this shape.
 - **Segmented control:** a trough 34 to 36 high, padding 3, radius 8, on
   `well()` (the shared pickers add a `hairline()` or `line()` edge); segments 28
   to 30 high, radius 6, `font_row_meta`, active on `raised()` with `text()`, the
   rest `text_muted()`/`text_dim()` and `text()` on hover. `settings::segmented`
   and `text_size_control`/`palette_control` are the 34/28 ones; Warp Station's
-  36/30 `segment_row`/`segment` in `ui/repos.rs` is the list's.
+  36/30 `segment_row`/`segment` in `ui/repos.rs` is the list's. warp-notes'
+  list scope (`All` / `Pinned`) uses the shared 34/28 control rather than a
+  copy of station's private pair; its counts ride in the segment labels.
 - **Settings rows:** `settings::{row, row_with_desc, stack_row, switch_row,
   switch_row_with_desc, subhead, rows}` — a 60-high row, label and optional
   description left, control right, `border_light()` rule between rows, no card
@@ -353,9 +359,11 @@ mockup, and use the shared helper where one exists.
   (`.a11y_button`, `.a11y_toggle`, `.a11y_tab`), plus a `debug_selector` so a
   probe can find it.
 
-Adoption of the shared helpers is partial: `field`, `settings` and `motion` are
-used by all three apps, while `controls::{button, menu_row, popover_card}` are
-warp-agent's so far and notes/station still draw some of those shapes locally.
+Adoption of the shared helpers is partial: `field`, `settings`, `motion` and
+`popover_card` are used by all three apps, and `controls::icon_button` by Warp
+Station and warp-notes. `controls::button` is warp-agent's; `menu_row` takes no
+debug selector, so warp-notes and Warp Station keep their menu rows local while
+their probes click selectors, and the list heads still draw their own rows.
 Use the core helper for new code rather than adding another copy.
 
 ## Text editing

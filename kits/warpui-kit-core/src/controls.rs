@@ -100,6 +100,32 @@ pub fn menu_row(
         .into_any_element()
 }
 
+/// The head's quiet icon verb: a square on the panel step at the control
+/// height, edged like every outlined control, lifted to `raised()` on hover.
+/// Returns a stateful div so the caller adds its debug selector, its glyph and
+/// its click.
+pub fn icon_button(
+    id: impl Into<ElementId>,
+    label: impl Into<SharedString>,
+) -> gpui::Stateful<Div> {
+    let label: SharedString = label.into();
+    div()
+        .id(id.into())
+        .role(Role::Button)
+        .aria_label(label)
+        .cursor_pointer()
+        .flex_shrink_0()
+        .size(shell::control_height())
+        .rounded(px(6.))
+        .border_1()
+        .border_color(palette::line_strong())
+        .bg(palette::panel())
+        .flex()
+        .items_center()
+        .justify_center()
+        .hover(|d| d.bg(palette::raised()))
+}
+
 /// The shared popover card chrome: the design's menu edge, overlay bg, soft
 /// shadow. Returns a `Div` so callers keep chaining (p_2, min_w, children).
 pub fn popover_card() -> Div {

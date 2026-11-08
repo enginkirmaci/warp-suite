@@ -120,21 +120,7 @@ pub(crate) fn empty_state() -> AnyElement {
 
 /// A square quiet button of the head.
 fn head_icon(id: &'static str, label: &'static str) -> gpui::Stateful<gpui::Div> {
-    div()
-        .id(id)
-        .debug_selector(move || id.into())
-        .a11y_button(label)
-        .cursor_pointer()
-        .flex_shrink_0()
-        .size(px(warpui_kit_core::shell::CONTROL_HEIGHT))
-        .rounded(px(6.))
-        .border_1()
-        .border_color(theme::line_strong())
-        .bg(theme::panel())
-        .flex()
-        .items_center()
-        .justify_center()
-        .hover(|d| d.bg(theme::raised()))
+    warpui_kit_core::controls::icon_button(id, label).debug_selector(move || id.into())
 }
 
 /// The head's top row: star, name, refresh, then the verbs. The open tab owns
