@@ -15,7 +15,7 @@ size goes into core, where every app gets it, and never into one app.
 **Current state:** all three GPUI apps run the shared `bootstrap::init`, carry
 the text-size and palette pickers, and have a per-app Reduce motion switch. A
 palette click moves every surface in all three. The accent family follows the
-palette in warp-agent only; warp-notes and warp-station still pin Copper (see
+palette in warp-agent and warp-notes; warp-station still pins Copper (see
 [The accent](#the-accent)).
 
 | Part | Module | Read this when |
@@ -83,12 +83,11 @@ palette switch moves surfaces and accent together.
 
 warp-agent reads it that way: its Accent picker and the preset normalization
 behind it are gone, and its store re-derives the accent with the fonts whenever
-the palette re-maps the kit theme. warp-notes and warp-station still pass a
-fixed family, so their accent does not follow the ramp yet: warp-station passes
-`AccentColors::default_colors()` (Copper), and warp-notes passes
-`for_preset(normalize_accent(Some("blue")))`, which now normalizes to Copper too
-— the eight `ACCENT_PRESETS` have no blue. That is the remaining step of the
-palette refactor; do not add a second accent picker on top of them.
+the palette re-maps the kit theme. warp-notes now reads
+`current_ramp().accent_colors()` in its retheme, so a palette switch carries
+its primary controls too. warp-station is the remaining step: it still passes
+`AccentColors::default_colors()` (Copper). Do not add a second accent picker
+on top of either app.
 
 The rules that are easy to get wrong:
 
