@@ -37,6 +37,29 @@ struct HistoryRow {
 /// The staged/unstaged split produced by `GitChangeSnapshot::change_groups`.
 type GroupedFiles = (Vec<GitChangedFile>, Vec<GitChangedFile>);
 
+/// Which of the file list's two sections a header folds.
+#[derive(Clone, Copy)]
+enum FileSection {
+    Staged,
+    Unstaged,
+}
+
+impl FileSection {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Staged => "Staged Changes",
+            Self::Unstaged => "Unstaged Changes",
+        }
+    }
+
+    fn selector(self) -> &'static str {
+        match self {
+            Self::Staged => "changes-section-staged",
+            Self::Unstaged => "changes-section-unstaged",
+        }
+    }
+}
+
 /// One history row: a commit, with its day header on the row above the first
 /// of each day. Fixed so `uniform_list` can size the whole list.
 const HISTORY_ROW_HEIGHT: f32 = 58.;
@@ -61,6 +84,10 @@ pub struct ChangesView {
     /// The unstaged header's discard-all has been clicked once: the second
     /// click throws the whole working tree away.
     discard_all_armed: bool,
+    /// The file list's two sections fold independently; their headers and
+    /// whole-tree verbs stay visible while the rows hide.
+    staged_collapsed: bool,
+    unstaged_collapsed: bool,
     patches: std::collections::HashMap<(String, bool), String>,
     /// The branch selector: the shared FilteredPicker in branch mode.
     branch_picker: Entity<FilteredPicker>,
@@ -117,6 +144,8 @@ impl ChangesView {
             file_by_repo: std::collections::HashMap::new(),
             discard_armed: None,
             discard_all_armed: false,
+            staged_collapsed: false,
+            unstaged_collapsed: false,
             patches: std::collections::HashMap::new(),
             branch_picker,
             branch_ui,
@@ -146,6 +175,8 @@ impl ChangesView {
         self.selected_file = None;
         self.discard_armed = None;
         self.discard_all_armed = false;
+        self.staged_collapsed = false;
+        self.unstaged_collapsed = false;
         self.patches.clear();
         self.branch_picker.update(cx, FilteredPicker::dismiss);
         {
@@ -172,6 +203,15 @@ impl ChangesView {
     /// whether it was actually open so the window can stop propagating.
     pub fn dismiss_branch_menu(&mut self, cx: &mut Context<Self>) -> bool {
         self.branch_picker.update(cx, FilteredPicker::dismiss)
+    }
+
+    /// Folds or unfolds one of the file list's sections.
+    fn toggle_section(&mut self, section: FileSection, cx: &mut Context<Self>) {
+        match section {
+            FileSection::Staged => self.staged_collapsed = !self.staged_collapsed,
+            FileSection::Unstaged => self.unstaged_collapsed = !self.unstaged_collapsed,
+        }
+        cx.notify();
     }
 
     /// Opens the history list, loading it once per selection.
@@ -549,12 +589,35 @@ impl ChangesView {
             return list.into_any_element();
         }
 
-        // order: unstaged first, then staged; headers render only when their
+        // order: staged first, then unstaged; headers render only when their
         // side has rows. Unstaged carries both whole-tree verbs — discard-all
-        // (the arrow glyph the rows discard with, armed before it fires) and
-        // stage-all — while staged only ever unstages: discarding the index
-        // wholesale has no place there.
+        // (armed before it fires) and stage-all — while staged only ever
+        // unstages: discarding the index wholesale has no place there. The
+        // verbs are icon buttons; their tooltips carry the names.
         let show_tooltips = self.store.read(cx).settings().general.show_tooltips;
+        let staged_collapsed = self.staged_collapsed;
+        let unstaged_collapsed = self.unstaged_collapsed;
+        if !staged.is_empty() {
+            list = list.child(section_header(
+                FileSection::Staged,
+                staged.len(),
+                staged_collapsed,
+                cx.entity(),
+                vec![staging_icon(
+                    "stage-all-clear",
+                    "icons/icon-minus.svg",
+                    "Unstage all",
+                    GitAction::UnstageAll,
+                    self.store.clone(),
+                    show_tooltips,
+                )],
+            ));
+            if !staged_collapsed {
+                for file in staged {
+                    list = list.child(self.render_row(file, true, cx));
+                }
+            }
+        }
         if !unstaged.is_empty() {
             let trailing = vec![
                 discard_all_button(
@@ -564,37 +627,26 @@ impl ChangesView {
                     cx.entity(),
                     show_tooltips,
                 ),
-                staging_link(
+                staging_icon(
                     "stage-all",
+                    "icons/icon-plus.svg",
                     "Stage all",
                     GitAction::StageAll,
                     self.store.clone(),
+                    show_tooltips,
                 ),
             ];
             list = list.child(section_header(
-                "Unstaged Changes",
+                FileSection::Unstaged,
                 unstaged.len(),
-                false,
+                unstaged_collapsed,
+                cx.entity(),
                 trailing,
             ));
-            for file in unstaged {
-                list = list.child(self.render_row(file, false, cx));
-            }
-        }
-        if !staged.is_empty() {
-            list = list.child(section_header(
-                "Staged Changes",
-                staged.len(),
-                true,
-                vec![staging_link(
-                    "stage-all-clear",
-                    "Unstage all",
-                    GitAction::UnstageAll,
-                    self.store.clone(),
-                )],
-            ));
-            for file in staged {
-                list = list.child(self.render_row(file, true, cx));
+            if !unstaged_collapsed {
+                for file in unstaged {
+                    list = list.child(self.render_row(file, false, cx));
+                }
             }
         }
         list.into_any_element()
@@ -612,6 +664,7 @@ impl ChangesView {
         let status_color = status_color(file.status_code.as_str());
         let row_id: SharedString =
             format!("{}-{}", if staged { "s" } else { "u" }, file.path).into();
+        let row_selector = row_id.clone();
         let (dir, name) = match file.path.rsplit_once('/') {
             Some((dir, name)) => (dir.to_string(), name.to_string()),
             None => (String::new(), file.path.clone()),
@@ -621,11 +674,10 @@ impl ChangesView {
             let this = cx.entity();
             let path = file.path.clone();
             let key = key.clone();
+            let selector = format!("discard-{staged}-{}", file.path);
             div()
-                .id(SharedString::from(format!(
-                    "discard-{staged}-{}",
-                    file.path
-                )))
+                .id(SharedString::from(selector.clone()))
+                .debug_selector(move || selector.clone())
                 .a11y_button(format!("Discard {}", file.path))
                 .cursor_pointer()
                 .rounded(px(4.))
@@ -672,6 +724,7 @@ impl ChangesView {
         };
         div()
             .id(row_id)
+            .debug_selector(move || row_selector.to_string())
             .a11y_button(file.path.clone())
             .aria_selected(selected)
             .cursor_pointer()
@@ -762,8 +815,8 @@ impl ChangesView {
                     .when(!armed, |d| {
                         d.invisible().group_hover("file-row", |s| s.visible())
                     })
-                    .child(row_action_button(file, staged, self.store.clone()))
-                    .child(discard),
+                    .child(discard)
+                    .child(row_action_button(file, staged, self.store.clone())),
             )
             .into_any_element()
     }
@@ -1455,6 +1508,11 @@ impl ChangesView {
                             cx,
                         )
                         .h_full()
+                        // the well is one flex slot, not a content-sized box:
+                        // without the zero floor a long draft grows the box
+                        // past the card's row and paints under the button;
+                        // the editor scrolls inside the fixed well instead
+                        .min_h(px(0.))
                         // the card carries one accent — the commit button
                         // under the box — so the box keeps its resting edge
                         // while the draft has focus instead of turning accent
@@ -1803,25 +1861,37 @@ impl ChangesView {
 }
 
 fn section_header(
-    label: &str,
+    section: FileSection,
     count: usize,
-    with_check: bool,
+    collapsed: bool,
+    this: Entity<ChangesView>,
     trailing: Vec<gpui::AnyElement>,
 ) -> impl IntoElement + use<> {
-    let mut header = div()
+    let label = section.label();
+    let selector = section.selector();
+    let title = div()
+        .id(SharedString::from(selector))
+        .debug_selector(move || selector.to_string())
+        .a11y_button(format!("{label} ({count})"))
+        .aria_expanded(!collapsed)
+        .cursor_pointer()
+        .min_w_0()
         .flex()
         .flex_row()
         .items_center()
         .gap_1p5()
-        .py_1p5()
-        .px_1()
-        .when(with_check, |h| {
-            h.child(icon(
-                "icons/icon-check.svg",
-                px(theme::icon_small() - 1.),
-                theme::SUCCESS_DEEP,
-            ))
+        .on_click(move |_, _, cx| {
+            this.update(cx, |view, cx| view.toggle_section(section, cx));
         })
+        .child(icon(
+            if collapsed {
+                "icons/icon-chevron-right.svg"
+            } else {
+                "icons/icon-chevron-down.svg"
+            },
+            px(theme::icon_tiny()),
+            theme::text_muted(),
+        ))
         .child(
             div()
                 .text_size(px(theme::font_heading()))
@@ -1834,18 +1904,40 @@ fn section_header(
                 .text_size(px(theme::font_body()))
                 .text_color(theme::text_faint())
                 .child(format!("({count})")),
-        )
-        .child(div().flex_1());
+        );
+
+    // the header's verbs are hover-revealed like the rows' actions: the
+    // container keeps their width, so the title does not jump when they show
+    let mut actions = div()
+        .flex()
+        .flex_row()
+        .items_center()
+        .gap_1p5()
+        .flex_shrink_0()
+        .invisible()
+        .group_hover(selector, |s| s.visible());
     for element in trailing {
-        header = header.child(element);
+        actions = actions.child(element);
     }
-    header
+
+    div()
+        .group(selector)
+        .flex()
+        .flex_row()
+        .items_center()
+        .gap_1p5()
+        .py_1p5()
+        .px_1()
+        .rounded(px(4.))
+        .hover(|s| s.bg(theme::panel()))
+        .child(title.flex_1())
+        .child(actions)
 }
 
 /// The unstaged header's discard-all: the row discard's arrow glyph, so the
 /// whole-tree verb reads as the same action its rows offer. Its first click
-/// arms it and its second throws every unstaged change away — the row
-/// discards take their confirmation the same way.
+/// arms it (the glyph becomes "Confirm") and its second throws every unstaged
+/// change away — the row discards take their confirmation the same way.
 fn discard_all_button(
     armed: bool,
     files: Vec<String>,
@@ -1898,34 +1990,37 @@ fn discard_all_button(
     crate::ui::with_tooltip(button, show_tooltips, label).into_any_element()
 }
 
-/// A whole-list staging verb as a text action — no icon, no outline, just the
-/// accent's ink with an underline on hover (the design's `.link`). The stage
-/// footer and both section headers offer it, so the verb is learned once.
-fn staging_link(
+/// A whole-list staging verb as an icon button — the compact form both
+/// section headers use, with the verb in the tooltip and the a11y name. The
+/// stage footer keeps the primary button.
+fn staging_icon(
     id: &'static str,
+    icon_path: &'static str,
     label: &'static str,
     action: GitAction,
     store: Entity<Store>,
+    show_tooltips: bool,
 ) -> gpui::AnyElement {
     let selector = id.to_string();
-    div()
+    let button = div()
         .id(SharedString::from(id))
         .debug_selector(move || selector.clone())
         .a11y_button(label)
         .cursor_pointer()
-        .flex_shrink_0()
-        // padding only grows the hit area: at rest the link is bare text
-        .px(px(2.))
-        .py(px(5.))
-        .text_size(px(theme::font_meta()))
-        .font_weight(FontWeight::MEDIUM)
-        .text_color(theme::blue_bright())
-        .hover(|s| s.underline())
+        .rounded_md()
+        .p_1()
+        .flex()
+        .items_center()
+        .hover(|s| s.bg(theme::raised()))
         .on_click(move |_, _, cx| {
             store.update(cx, |s, cx| s.run_git(action.clone(), cx));
         })
-        .child(label)
-        .into_any_element()
+        .child(icon(
+            icon_path,
+            px(theme::icon_small()),
+            theme::text_muted(),
+        ));
+    crate::ui::with_tooltip(button, show_tooltips, label).into_any_element()
 }
 
 /// The no-staged-files footer: the commit box only exists when a commit can
@@ -2048,8 +2143,10 @@ fn row_action_button(
     } else {
         "icons/icon-plus.svg"
     };
+    let selector = format!("toggle-{staged}-{}", file.path);
     div()
-        .id(SharedString::from(format!("toggle-{staged}-{}", file.path)))
+        .id(SharedString::from(selector.clone()))
+        .debug_selector(move || selector.clone())
         .a11y_button(if staged {
             format!("Unstage {}", file.path)
         } else {

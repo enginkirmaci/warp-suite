@@ -282,6 +282,11 @@ fn git_verbs_and_commit_follow_the_repo_state(cx: &mut TestAppContext) {
         "a staged tree shows the commit box, not the stage footer"
     );
     assert!(
+        cx.debug_bounds("stage-all-clear").is_none(),
+        "the staged header's verb waits for hover"
+    );
+    hover(cx, "changes-section-staged");
+    assert!(
         cx.debug_bounds("stage-all-clear").is_some(),
         "staged: the unstage-all verb is a named button"
     );
@@ -301,6 +306,141 @@ fn git_verbs_and_commit_follow_the_repo_state(cx: &mut TestAppContext) {
         );
     }
     assert!(unstaged_all, "the header button unstages everything");
+
+    // both sides present: the staged section sits above the unstaged one, so
+    // the index reads first as the thing the commit box will take
+    cx.update_entity(&store, |s: &mut Store, _| {
+        s.set_changes(Some(snapshot(true, true)));
+    });
+    cx.run_until_parked();
+    cx.update(|window, cx| drop(window.draw(cx)));
+    let staged_header = cx
+        .debug_bounds("changes-section-staged")
+        .expect("the staged header draws");
+    let unstaged_header = cx
+        .debug_bounds("changes-section-unstaged")
+        .expect("the unstaged header draws");
+    assert!(
+        staged_header.top() < unstaged_header.top(),
+        "staged first: staged header {staged_header:?}, unstaged header {unstaged_header:?}"
+    );
+
+    cx.simulate_mouse_move(
+        gpui::point(gpui::px(5.), gpui::px(5.)),
+        None,
+        Modifiers::default(),
+    );
+    cx.run_until_parked();
+    cx.update(|window, cx| drop(window.draw(cx)));
+    assert!(
+        cx.debug_bounds("stage-all").is_none() && cx.debug_bounds("discard-all-u").is_none(),
+        "the unstaged header's verbs wait for hover"
+    );
+    hover(cx, "changes-section-unstaged");
+    let stage = cx.debug_bounds("stage-all").expect("the stage icon draws");
+    let discard = cx
+        .debug_bounds("discard-all-u")
+        .expect("the discard icon draws");
+    assert!(
+        discard.origin.x < stage.origin.x,
+        "discard sits left of stage: discard {discard:?}, stage {stage:?}"
+    );
+    // the row's hover verbs follow the same order
+    for (staged, row_selector, path) in [
+        (false, "u-unstaged.txt", "unstaged.txt"),
+        (true, "s-staged.txt", "staged.txt"),
+    ] {
+        let row = cx
+            .debug_bounds(row_selector)
+            .unwrap_or_else(|| panic!("the {path} row draws"));
+        cx.simulate_mouse_move(
+            gpui::point(
+                row.origin.x + row.size.width / 2.,
+                row.origin.y + row.size.height / 2.,
+            ),
+            None,
+            Modifiers::default(),
+        );
+        cx.run_until_parked();
+        cx.update(|window, cx| drop(window.draw(cx)));
+        let discard = cx
+            .debug_bounds(if staged {
+                "discard-true-staged.txt"
+            } else {
+                "discard-false-unstaged.txt"
+            })
+            .unwrap_or_else(|| panic!("the {path} row discard draws"));
+        let toggle = cx
+            .debug_bounds(if staged {
+                "toggle-true-staged.txt"
+            } else {
+                "toggle-false-unstaged.txt"
+            })
+            .unwrap_or_else(|| panic!("the {path} row toggle draws"));
+        assert!(
+            discard.origin.x < toggle.origin.x,
+            "{path}: discard sits left of the stage toggle: discard {discard:?}, toggle {toggle:?}"
+        );
+    }
+
+    // a draft longer than the well scrolls inside it; it must not grow the
+    // box past its row and paint under the Commit button
+    cx.update_entity(&store, |s: &mut Store, _| {
+        s.commit_message_draft = Some(
+            "docs(agents): add suite-wide agent instructions and app guides\n\n\
+             Add a root AGENTS.md as the entry point for agents working in the monorepo:\n\n\
+             - read the suite guide first\n\
+             - then the app guide\n\
+             - keep the shared contracts in step\n\n\
+             The app guides describe the store, the net thread and the UI."
+                .into(),
+        );
+    });
+    cx.run_until_parked();
+    cx.update(|window, cx| drop(window.draw(cx)));
+    let well = cx
+        .debug_bounds("commit-message")
+        .expect("the commit well draws");
+    let button = cx
+        .debug_bounds("commit-button")
+        .expect("the commit button draws");
+    assert!(
+        well.bottom() <= button.top(),
+        "a long draft stays above the button: well {well:?}, button {button:?}"
+    );
+
+    // both headers fold their rows; their verbs and the commit box stay
+    assert!(cx.debug_bounds("u-unstaged.txt").is_some());
+    click(cx, "changes-section-unstaged");
+    assert!(
+        cx.debug_bounds("u-unstaged.txt").is_none(),
+        "the folded rows are gone"
+    );
+    hover(cx, "changes-section-unstaged");
+    assert!(
+        cx.debug_bounds("stage-all").is_some(),
+        "the header verb survives the fold"
+    );
+    click(cx, "changes-section-unstaged");
+    assert!(
+        cx.debug_bounds("u-unstaged.txt").is_some(),
+        "the rows come back"
+    );
+
+    click(cx, "changes-section-staged");
+    assert!(
+        cx.debug_bounds("s-staged.txt").is_none(),
+        "the staged rows fold too"
+    );
+    assert!(
+        cx.debug_bounds("commit-message").is_some(),
+        "the commit box survives a folded staged section"
+    );
+    click(cx, "changes-section-staged");
+    assert!(
+        cx.debug_bounds("s-staged.txt").is_some(),
+        "the staged rows come back"
+    );
 
     // behind and ahead: Pull, Push and Sync appear
     cx.update_entity(&store, |s: &mut Store, _| {
@@ -329,6 +469,18 @@ fn git_verbs_and_commit_follow_the_repo_state(cx: &mut TestAppContext) {
     );
     assert!(cx.debug_bounds("commit-button").is_none());
     assert!(cx.debug_bounds("changes-stage-hint").is_some());
+    cx.simulate_mouse_move(
+        gpui::point(gpui::px(5.), gpui::px(5.)),
+        None,
+        Modifiers::default(),
+    );
+    cx.run_until_parked();
+    cx.update(|window, cx| drop(window.draw(cx)));
+    assert!(
+        cx.debug_bounds("discard-all-u").is_none(),
+        "the unstaged header's verbs wait for hover"
+    );
+    hover(cx, "changes-section-unstaged");
     assert!(
         cx.debug_bounds("discard-all-u").is_some(),
         "unstaged still offers its discard-all"
@@ -359,6 +511,7 @@ fn git_verbs_and_commit_follow_the_repo_state(cx: &mut TestAppContext) {
     });
     cx.run_until_parked();
     cx.update(|window, cx| drop(window.draw(cx)));
+    hover(cx, "changes-section-unstaged");
     click(cx, "discard-all-u");
     assert!(
         !drain_discard(&net_rx),
@@ -608,6 +761,24 @@ fn click(cx: &mut VisualTestContext, selector: &'static str) {
             x: b.origin.x + b.size.width / 2.,
             y: b.origin.y + b.size.height / 2.,
         },
+        Modifiers::default(),
+    );
+    cx.run_until_parked();
+    cx.update(|window, cx| drop(window.draw(cx)));
+}
+
+/// Parks the pointer on an element so its group-hover children (the section
+/// headers' verbs, a row's actions) are laid out and measurable.
+fn hover(cx: &mut VisualTestContext, selector: &'static str) {
+    let b = cx
+        .debug_bounds(selector)
+        .unwrap_or_else(|| panic!("{selector} missing from the frame"));
+    cx.simulate_mouse_move(
+        gpui::point(
+            b.origin.x + b.size.width / 2.,
+            b.origin.y + b.size.height / 2.,
+        ),
+        None,
         Modifiers::default(),
     );
     cx.run_until_parked();

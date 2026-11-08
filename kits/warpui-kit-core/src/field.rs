@@ -158,9 +158,13 @@ pub fn custom(
 /// below at this size), so the box tops them up to the design's 10/9.
 ///
 /// The box also carries a min height for the content's line count: the
-/// editor's own auto-height collapses multi-line content to one visible row
-/// on some platforms (its `size_full` inside this `h_auto` box resolves to
-/// the minimum), which hid every scan root past the first on Windows.
+/// editor's own auto-height comes back as one row on some platforms (its
+/// `size_full` inside this `h_auto` box resolves to the minimum), which hid
+/// every scan root past the first on Windows. The editor fills the box
+/// instead, so a pinned box (`h(96)`, the commit well's `h_full`) scrolls the
+/// value inside it rather than showing a one-row strip at the top; the
+/// pinned caller also zeroes the box's min height, or a long value grows the
+/// box past its row.
 pub fn area(
     id: impl Into<ElementId>,
     state: &Entity<TextareaState>,
@@ -175,7 +179,7 @@ pub fn area(
         .pt(px(shell::scaled(9.)))
         .pb(px(shell::scaled(9.)))
         .px(px(shell::scaled(6.)))
-        .child(bare_area(state))
+        .child(bare_area(state).h_full())
 }
 
 /// [`area`] for code: the prototype's `.area.t-mono` — pasted payloads, folder
@@ -197,13 +201,14 @@ pub fn mono_area(
         .child(
             bare_area(state)
                 .font_family(SharedString::from(fonts::code_font()))
-                .text_size(px(fonts::font_mono_meta())),
+                .text_size(px(fonts::font_mono_meta()))
+                .h_full(),
         )
 }
 
 /// The 9/9 box padding plus one line height per content line, at 1.55 leading —
-/// a floor for the editor's own height, so a multi-line value is fully visible
-/// even where the editor's measurement comes back short.
+/// a floor for the box's height, so an auto-height area shows the whole
+/// multi-line value even where the editor's own measurement comes back short.
 fn area_min_height(state: &Entity<TextareaState>, cx: &App, font_size: f32) -> Pixels {
     let lines = state.read(cx).value().lines().count().max(1) as f32;
     px(shell::scaled(9. * 2. + lines * (font_size * 1.55)))
