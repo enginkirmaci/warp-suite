@@ -6,3 +6,11 @@ out/
 # stops moving whenever a transitive dependency publishes a new release.
 # (The per-app and kits/ lockfiles this replaced are gone.)
 __pycache__/
+
+# Android build output. The APK is a build artifact; the Gradle wrapper is
+# checked in, local.properties (the SDK path) is not.
+android-apps/*/android/.gradle/
+android-apps/*/android/.kotlin/
+android-apps/*/android/local.properties
+android-apps/*/android/build/
+android-apps/*/android/app/build/

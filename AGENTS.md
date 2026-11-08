@@ -6,10 +6,12 @@ the app's own `AGENTS.md` when the work is in one app, then the deep guides in
 
 ## What this repo is
 
-warp-suite is the monorepo for desktop apps. The apps live
-under `apps/<name>/`, imported with `git subtree` so each keeps its history;
-the shared `warpui-kit-*` crates live under `kits/`; one Cargo workspace builds
-all of it and one release pipeline publishes it.
+warp-suite is the monorepo for desktop apps and the Android dictation keyboard.
+The desktop apps live under `apps/<name>/`, imported with `git subtree` so each
+keeps its history; the shared `warpui-kit-*` crates live under `kits/`; one
+Cargo workspace builds all of it and one release pipeline publishes it. The
+Android app lives under `android-apps/` and has its own Gradle build; only its
+Rust bridge is a workspace member.
 
 | App | Package | Path | What it is |
 |---|---|---|---|
@@ -17,14 +19,16 @@ all of it and one release pipeline publishes it.
 | warp-agent | `warp-agent` | `apps/warp-agent/` | Chat client over `opencode serve` and `dsh web` (Rust/GPUI) |
 | warp-snapit | `warp-snapit` | `apps/warp-snapit/` | Windows-only zone snapper (Win32, no GPUI/kit) |
 | warp-notes | `warp-notes` | `apps/warp-notes/` | Per-repo markdown notes with a live editor (Rust/GPUI) |
+| warp-android-scribe | `warp-android-scribe-bridge` | `android-apps/warp-android-scribe/` | Compact Android IME over Superwhisper S1-Voice (Kotlin/Compose + Rust bridge) |
 
 ## Before you edit
 
 1. Read this file and, for a UI or kit change, the matching guide in
    [`docs/agents/`](docs/agents/): design system, new-app recipe, and testing
    and captures.
-2. Read the app's `AGENTS.md` (`apps/<name>/AGENTS.md`). It wins over this file
-   for app-specific facts.
+2. Read the app's `AGENTS.md` (`apps/<name>/AGENTS.md` or
+   `android-apps/<name>/AGENTS.md`). It wins over this file for app-specific
+   facts.
 3. Read the root [`Cargo.toml`](Cargo.toml), [`Cargo.lock`](Cargo.lock) and the
    touched crate's `Cargo.toml`. Note the pins and what is already a
    dependency before adding anything.
@@ -70,6 +74,7 @@ cargo build -p warp-notes
 cargo test -p warp-notes
 cargo test -p warp-station -p warp-station-core
 cargo test -p warpui-kit-core
+cargo test -p warp-android-scribe-bridge
 cargo fmt --all
 cargo clippy --locked --all-targets -p warp-agent -- -D warnings
 ```
@@ -77,8 +82,18 @@ cargo clippy --locked --all-targets -p warp-agent -- -D warnings
 The CI gate is [`.github/workflows/kits.yml`](.github/workflows/kits.yml):
 
 - `cargo fmt --all --check`.
-- Clippy with `-D warnings` on all five kit crates and all app crates.
-- `cargo test --locked` on the kit crates and the app crates.
+- Clippy with `-D warnings` on all five kit crates, all app crates and the
+  Android bridge.
+- `cargo test --locked` on the kit crates, the app crates and the Android
+  bridge.
+
+The Android Gradle project is built separately and is not in that workflow:
+
+```sh
+cd android-apps/warp-android-scribe/android
+JAVA_HOME=/usr/lib/jvm/java-17-openjdk ANDROID_HOME=$HOME/tools/android-sdk \
+  ./gradlew assembleDebug
+```
 
 Match that locally for the crates you touched before calling a change done. A
 passing probe is not the whole gate. Run `cargo fmt --all` (without `--check`)
@@ -91,6 +106,7 @@ cargo clippy --locked --all-targets \
   -p warpui-kit-core -p warpui-kit-diff -p warpui-kit-markdown \
   -p warpui-kit-picker -p warpui-kit-platform \
   -p warp-station-core -p warp-station -p warp-agent -p warp-notes -p warp-snapit \
+  -p warp-android-scribe-bridge \
   -- -D warnings
 ```
 
@@ -177,6 +193,16 @@ when one side changes, update the other side in the **same commit**.
   other apps read the value when they next start. Both keys are additive; a
   writer must not drop the key it does not own. Writes use a sidecar lock and
   an atomic rename. Reduced motion is per-app, not in this file.
+- **warp-android-scribe bridge** (`android-apps/warp-android-scribe`, NAS port
+  8787): `POST /transcribe?lang=tr|auto` with raw `audio/wav` and
+  `Authorization: Bearer <token>` answers `{"text","language","duration"}`;
+  `GET /health` is the phone's token-checked server test. The bridge owns the
+  Superwhisper CLI flow (transcribe → poll `status` for the same session id →
+  text) and serializes requests because the daemon has one active session.
+  The bearer scheme, JSON field names and status codes are the Android client's
+  contract: change both sides in the same commit. The APK is sideloaded; the
+  bridge is installed by hand on the NAS from
+  `android-apps/warp-android-scribe/deploy/`.
 
 ## GPUI Kit app conventions
 
@@ -232,6 +258,10 @@ when one side changes, update the other side in the **same commit**.
 - Warp Station's `changes_probe` and `git_parity` read this repository's own
   git history; CI checks that job out with `fetch-depth: 0`. Do not shallow-
   clone it locally.
+- The Android bridge has two integration probes: `api_probe` (auth, limits,
+  temp-file cleanup, gateway errors) and `superwhisper_cli_probe` (a fake
+  `superwhisper` shell script: session polling, refusal, timeout). The Android
+  Gradle project has no CI job; build it locally with `assembleDebug`.
 
 ## Platform rules
 
@@ -268,6 +298,10 @@ when one side changes, update the other side in the **same commit**.
   `gh workflow run suite-release.yml -f version=<version>`. One release builds
   every app at the dispatched commit and records that commit in the release
   body and in the Linux `REVISIONS.txt`.
+- `android-apps/` is outside that pipeline. `warp-android-scribe` ships as a
+  sideloaded debug APK (`./gradlew assembleDebug`); its bridge is a systemd
+  user service on the NAS. Never add the Android app to `apps.toml` to make the
+  desktop build pick it up.
 
 ## Adding an app
 
@@ -310,6 +344,11 @@ when one side changes, update the other side in the **same commit**.
   `warpui-kit-core` if the family needs it.
 - Do not silence clippy. Fix the source, or use
   `#[expect(clippy::..., reason = "...")]` on that one item.
+- Do not add `android-apps/*` to `apps.toml`, `scripts/build.sh` or the suite
+  release; the Gradle build and the APK are separate.
+- Do not expose the bridge beyond the LAN or log its token/transcripts. The
+  NAS UFW rule is `<nas-subnet>` only, and the token is the sole access
+  control.
 
 ## Docs map
 
@@ -326,4 +365,6 @@ when one side changes, update the other side in the **same commit**.
   delete a plan once its work lands.
 - [`kits/README.md`](kits/README.md) — what each kit crate provides and where a
   shared shape belongs.
+- [`android-apps/warp-android-scribe/README.md`](android-apps/warp-android-scribe/README.md)
+  — the Android IME, the bridge API, NAS install and the decisions.
 - Each app's `README.md` and `AGENTS.md` — app-specific detail.

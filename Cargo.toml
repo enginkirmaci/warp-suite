@@ -1,9 +1,10 @@
 # The warp-suite cargo workspace.
 #
-# Every app under apps/ and every kit crate under kits/ is a member, so the
-# suite resolves ONE dependency graph from ONE Cargo.lock and builds into one
-# target dir (.cargo/config.toml). That is what lets a single gpui-pre compile
-# serve all four apps: cargo fingerprints a crate over its whole dependency
+# Every app under apps/, every kit crate under kits/ and the Android bridge
+# under android-apps/ is a member, so the suite resolves ONE dependency graph
+# from ONE Cargo.lock and builds into one target dir (.cargo/config.toml). That
+# is what lets a single gpui-pre compile serve all four desktop apps: cargo
+# fingerprints a crate over its whole dependency
 # graph, so separate workspaces that resolve different versions (or enable
 # different features on a shared leaf) each paid for their own 228 MB copy.
 #
@@ -31,6 +32,10 @@ members = [
     "apps/warp-agent",
     "apps/warp-notes",
     "apps/warp-snapit",
+    # The Android IME lives outside apps/ because the desktop release does not
+    # build or ship it. Its bridge is a normal member so cargo and the CI gate
+    # still compile and test it with the same lockfile.
+    "android-apps/warp-android-scribe/bridge",
 ]
 
 [workspace.package]

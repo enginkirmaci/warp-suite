@@ -61,6 +61,7 @@ def main() -> int:
     for pattern in (
         "apps/*/Cargo.toml",
         "apps/*/crates/*/Cargo.toml",
+        "android-apps/*/bridge/Cargo.toml",
         "kits/*/Cargo.toml",
     ):
         for path in ROOT.glob(pattern):

@@ -1,8 +1,9 @@
 # warp-suite
 
-Monorepo for Engin's connected apps. Each app lives under `apps/<name>`,
+Monorepo for Engin's connected apps. Each desktop app lives under `apps/<name>`,
 imported with `git subtree` so its history stays intact; warp-suite builds
-them together and publishes **one combined release**.
+them together and publishes **one combined release**. The Android dictation
+keyboard lives under `android-apps/` and is built and sideloaded separately.
 
 Currently in the suite:
 
@@ -12,6 +13,7 @@ Currently in the suite:
 | warp-agent | `apps/warp-agent` | Chat client over `opencode serve` (Rust/GPUI) |
 | warp-snapit | `apps/warp-snapit` | Rust port of the SnapIt zone snapper (Windows-only, portable zip) |
 | warp-notes | `apps/warp-notes` | Per-repo markdown notes with a live editor (Rust/GPUI) |
+| warp-android-scribe | `android-apps/warp-android-scribe` | Compact Android IME over Superwhisper S1-Voice (Kotlin/Compose + Rust bridge) |
 
 The C#/.NET SnapIt repo ([enginkirmaci/SnapIt](https://github.com/enginkirmaci/SnapIt))
 stays excluded — the Rust port above is the suite's zone snapper.
@@ -28,7 +30,9 @@ The run builds every app under `apps/` at the dispatched commit and publishes
 release `v<version>` with the Linux tarball plus per-app Windows installers
 and portable zips. The release records the suite commit, and the Linux
 tarball's `REVISIONS.txt` records it per app — one commit identifies the whole
-suite.
+suite. `android-apps/` is outside this pipeline: the Android APK is a
+separate Gradle build and is sideloaded; see
+[`android-apps/warp-android-scribe/README.md`](android-apps/warp-android-scribe/README.md).
 
 ## Install on a Linux machine
 
@@ -68,6 +72,7 @@ Both builds default the version to `git describe --tags --always
 |---|---|
 | `AGENTS.md` | suite-wide agent instructions (pins, gates, contracts, traps) |
 | `apps/<name>/` | the app sources, each with its own history (imported with `git subtree`) |
+| `android-apps/warp-android-scribe/` | the Android IME and its Rust HTTP bridge; separate Gradle build, not in the suite release |
 | `apps/<name>/AGENTS.md` | app-specific agent instructions |
 | `plans/` | working design plans and proposals, one markdown file per topic |
 | `apps.toml` | per-app build knobs (`linux_build`, `linux_skip`, `icon_prefix`, `scalable_svg`) and contract notes |
@@ -153,6 +158,17 @@ together. When one changes, update the other side in the **same** commit.
   old per-app `text_size`/`font_scale` settings only seed the file on its first run, so every app
   must be on the same `warpui-kit-core`. Both keys are additive: a file that
   lacks one keeps the other.
+
+- **warp-android-scribe bridge** (NAS, `<nas-lan>:8787`): the Android IME
+  posts a 16 kHz mono WAV to `POST /transcribe?lang=tr|auto` with
+  `Authorization: Bearer <token>` and receives
+  `{"text","language","duration"}`. `GET /health` is the token-checked server
+  test. The bridge turns the request into `superwhisper transcribe` plus
+  `status` polling on the NAS and serializes requests because the daemon has
+  one active session. The bearer scheme, field names and status codes are one
+  contract: change the bridge and the Android client in the same commit. The
+  APK is sideloaded; the bridge is a systemd user service installed from
+  `android-apps/warp-android-scribe/deploy/`.
 
 ## Adding an app
 
