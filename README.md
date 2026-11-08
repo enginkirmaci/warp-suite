@@ -160,15 +160,18 @@ together. When one changes, update the other side in the **same** commit.
   must be on the same `warpui-kit-core`. Both keys are additive: a file that
   lacks one keeps the other.
 
-- **warp-android-scribe bridge** (NAS, `<nas-lan>:8787`): the Android IME
-  posts a 16 kHz mono WAV to `POST /transcribe?lang=tr|auto` with
-  `Authorization: Bearer <token>` and receives
-  `{"text","language","duration"}`. `GET /health` is the token-checked server
-  test. The bridge turns the request into `superwhisper transcribe` plus
-  `status` polling on the NAS and serializes requests because the daemon has
-  one active session. The bearer scheme, field names and status codes are one
-  contract: change the bridge and the Android client in the same commit. The
-  APK is sideloaded; the bridge is a systemd user service installed from
+- **warp-android-scribe bridge** (LAN `<nas-lan>:8787`, public
+  `https://<nas-host>`): the Android IME posts a 16 kHz mono WAV to
+  `POST /transcribe?lang=tr|auto` with `Authorization: Bearer <token>` and
+  receives `{"text","language","duration"}`. `GET /health` is the
+  token-checked server test. The bridge turns the request into
+  `superwhisper transcribe` plus `status` polling on the NAS and serializes
+  requests because the daemon has one active session. The public route is
+  Cloudflare Tunnel -> Nginx Proxy Manager -> 8787. The bearer scheme, field
+  names and status codes are one contract: change the bridge and the Android
+  client in the same commit. Android 17 needs `ACCESS_LOCAL_NETWORK` for LAN;
+  the app requests it and has an HTTPS/Cloudflare preset. The APK is sideloaded;
+  the bridge is a systemd user service installed from
   `android-apps/warp-android-scribe/deploy/`.
 
 ## Adding an app

@@ -197,16 +197,19 @@ when one side changes, update the other side in the **same commit**.
   other apps read the value when they next start. Both keys are additive; a
   writer must not drop the key it does not own. Writes use a sidecar lock and
   an atomic rename. Reduced motion is per-app, not in this file.
-- **warp-android-scribe bridge** (`android-apps/warp-android-scribe`, NAS port
-  8787): `POST /transcribe?lang=tr|auto` with raw `audio/wav` and
+- **warp-android-scribe bridge** (`android-apps/warp-android-scribe`): LAN
+  `http://<nas-lan>:8787` (UFW `<nas-subnet>`) and public
+  `https://<nas-host>` through Cloudflare Tunnel -> Nginx Proxy
+  Manager -> 8787. `POST /transcribe?lang=tr|auto` with raw `audio/wav` and
   `Authorization: Bearer <token>` answers `{"text","language","duration"}`;
   `GET /health` is the phone's token-checked server test. The bridge owns the
   Superwhisper CLI flow (transcribe → poll `status` for the same session id →
   text) and serializes requests because the daemon has one active session.
   The bearer scheme, JSON field names and status codes are the Android client's
-  contract: change both sides in the same commit. The APK is sideloaded; the
-  bridge is installed by hand on the NAS from
-  `android-apps/warp-android-scribe/deploy/`.
+  contract: change both sides in the same commit. Android 17 LAN sockets need
+  `ACCESS_LOCAL_NETWORK`; the app requests it and offers an HTTPS/Cloudflare
+  preset. The APK is sideloaded; the bridge is installed by hand on the NAS
+  from `android-apps/warp-android-scribe/deploy/`.
 
 ## GPUI Kit app conventions
 
@@ -350,9 +353,10 @@ when one side changes, update the other side in the **same commit**.
   `#[expect(clippy::..., reason = "...")]` on that one item.
 - Do not add `android-apps/*` to `apps.toml`, `scripts/build.sh` or the suite
   release; the Gradle build and the APK are separate.
-- Do not expose the bridge beyond the LAN or log its token/transcripts. The
-  NAS UFW rule is `<nas-subnet>` only, and the token is the sole access
-  control.
+- Do not remove the bearer token, the UFW LAN rule or HTTPS from the bridge.
+  The public endpoint is `https://<nas-host>`; the token is the sole
+  auth there and must not be logged, committed or shared. Add Cloudflare
+  Access/WAF before exposing it further.
 
 ## Docs map
 
