@@ -49,7 +49,9 @@ pub struct Grouping<'a> {
     /// shared folder (1 = that folder itself, 2 = its parent, …). Every
     /// repo under the roots folds into the header, so a larger level widens
     /// the group. Roots that resolve to one folder share a header; roots
-    /// sharing no folder count from their own folder.
+    /// sharing no named folder count from their own folder. A volume (a drive
+    /// letter, a UNC server, the filesystem root) is not a folder, so it never
+    /// becomes a header and never counts as a shared one.
     pub depth: usize,
     pub collapsed: &'a std::collections::HashSet<String>,
     /// When set, only this group's repos are projected (the header's
@@ -113,16 +115,16 @@ pub fn project_scoped(
     // OR-tag filter first (as flat), then the solo filter: only the soloed
     // group's repos survive, the rest of the buckets come up empty.
     let solo = grouping.solo;
-    // the roots' shared folder does not depend on the repo, so resolve it
-    // once per projection instead of canonicalizing every root per row
-    let trunk = shared_trunk(grouping.roots);
+    // which roots share a header, and the folder each family counts up from,
+    // does not depend on the repo: resolve it once per projection instead of
+    // canonicalizing every root per row
+    let families = root_families(grouping.roots);
     let mut groups: Vec<(String, String, Vec<usize>)> = Vec::new();
     for &ix in &sorted {
         let (key, name) = assign_group(
             &repos[ix].folder_path.to_string_lossy(),
-            grouping.roots,
+            &families,
             grouping.depth,
-            trunk.as_deref(),
         );
         if solo.is_some_and(|solo| !keys_match(solo, &key)) {
             continue;
@@ -189,23 +191,20 @@ fn keys_match(a: &str, b: &str) -> bool {
 
 /// A repo groups only when some root contains its folder (roots may
 /// themselves be repo folders); no match → the "other" fallback group.
-/// Otherwise every repo under the roots shares one header: the roots'
-/// shared folder at depth 1, that folder's parent at depth 2, and so on,
+/// Otherwise the repo joins its root's family and takes that family's header:
+/// the shared folder at depth 1, that folder's parent at depth 2, and so on,
 /// so a deeper level always widens the group instead of subdividing it.
-fn assign_group(
-    folder: &str,
-    roots: &[String],
-    depth: usize,
-    trunk: Option<&str>,
-) -> (String, String) {
-    let Some(matched) = roots.iter().find(|root| is_under(folder, root)) else {
+fn assign_group(folder: &str, families: &[Family], depth: usize) -> (String, String) {
+    let Some(family) = families
+        .iter()
+        .find(|family| family.roots.iter().any(|root| is_under(folder, root)))
+    else {
         return (OTHER_GROUP_KEY.to_string(), OTHER_GROUP_NAME.to_string());
     };
-    let base = trunk
-        .map(str::to_string)
-        .unwrap_or_else(|| canonical_text(matched));
-    let key = ancestor_folder(&base, depth.saturating_sub(1));
-    if folder_name(&key).is_empty() {
+    let key = ancestor_folder(&family.trunk, depth.saturating_sub(1));
+    // a header is a folder, never a volume: a `C:\` scan root has no name of
+    // its own to group under, so its repos fall back like unreachable ones
+    if !has_named_folder(&key) {
         return (OTHER_GROUP_KEY.to_string(), OTHER_GROUP_NAME.to_string());
     }
     let name = folder_name(&key).to_string();
@@ -226,45 +225,163 @@ fn ancestor_folder(base: &str, levels: usize) -> String {
     current
 }
 
-/// The folder every scan root sits under — the base the depth picker counts
-/// up from. Roots are canonicalized first, so a symlink and its target (or
-/// the same tree reached through two mounts) count as one family; None when
-/// they share nothing above the filesystem root.
-fn shared_trunk(roots: &[String]) -> Option<String> {
-    let canonical: Vec<String> = roots.iter().map(|root| canonical_text(root)).collect();
-    let trimmed: Vec<&str> = canonical
-        .iter()
-        .map(|root| root.trim_end_matches(['/', '\\']))
-        .filter(|root| !root.is_empty())
-        .collect();
-    let first = *trimmed.first()?;
-    if trimmed.len() == 1 {
-        return Some(first.to_string());
+/// One family of scan roots: the roots that share a folder, and the folder
+/// their headers count up from. Roots that share nothing but the volume stay
+/// apart, so a drive letter never becomes the one header every repo falls
+/// into — on Windows that also froze the depth picker, since no level can
+/// climb above a bare drive — and one root on another volume cannot collapse
+/// every other tree to one header per repo.
+struct Family {
+    /// The roots as the settings spell them: membership is a lexical match
+    /// against these, not against the canonical text.
+    roots: Vec<String>,
+    /// Canonical text of the deepest folder every member shares.
+    trunk: String,
+}
+
+/// Splits the scan roots into families and resolves each family's trunk once
+/// per projection. Roots are canonicalized first, so a symlink and its target
+/// (or the same tree reached through two mounts) count as one family; a root
+/// that resolves to an already-seen folder is dropped.
+fn root_families(roots: &[String]) -> Vec<Family> {
+    let mut entries: Vec<(String, String)> = Vec::new();
+    for root in roots {
+        let canonical = canonical_text(root);
+        let canonical = canonical.trim_end_matches(['/', '\\']).to_string();
+        if canonical.is_empty()
+            || entries
+                .iter()
+                .any(|(_, seen)| same_folder_text(seen, &canonical))
+        {
+            continue;
+        }
+        entries.push((root.clone(), canonical));
     }
-    fn components(path: &str) -> Vec<&str> {
-        path.split(['/', '\\']).filter(|c| !c.is_empty()).collect()
+
+    // union-find: two roots join one family when they share a named folder
+    let mut parent: Vec<usize> = (0..entries.len()).collect();
+    for (left, entry) in entries.iter().enumerate() {
+        for (right, other) in entries.iter().enumerate().skip(left + 1) {
+            if !shares_named_folder(&entry.1, &other.1) {
+                continue;
+            }
+            let a = find_root(&mut parent, left);
+            let b = find_root(&mut parent, right);
+            if a != b {
+                parent[a] = b;
+            }
+        }
     }
-    let mut shared: Vec<&str> = components(first);
-    for other in &trimmed[1..] {
-        let comps = components(other);
+
+    let mut members: Vec<Vec<usize>> = Vec::new();
+    let mut slots: Vec<Option<usize>> = vec![None; entries.len()];
+    for ix in 0..entries.len() {
+        let root = find_root(&mut parent, ix);
+        let slot = *slots[root].get_or_insert_with(|| {
+            members.push(Vec::new());
+            members.len() - 1
+        });
+        members[slot].push(ix);
+    }
+
+    members
+        .into_iter()
+        .map(|group| {
+            let trunks: Vec<&str> = group.iter().map(|&ix| entries[ix].1.as_str()).collect();
+            Family {
+                trunk: family_trunk(&trunks),
+                roots: group.iter().map(|&ix| entries[ix].0.clone()).collect(),
+            }
+        })
+        .collect()
+}
+
+/// The root of a union-find node, with path compression.
+fn find_root(parent: &mut [usize], mut ix: usize) -> usize {
+    while parent[ix] != ix {
+        parent[ix] = parent[parent[ix]];
+        ix = parent[ix];
+    }
+    ix
+}
+
+/// The deepest folder every member of one family shares; a single-member
+/// family's trunk is its own root. Members are canonical and trimmed.
+fn family_trunk(members: &[&str]) -> String {
+    let Some(first) = members.first().copied() else {
+        return String::new();
+    };
+    let mut shared = components(first);
+    for other in &members[1..] {
+        let other = components(other);
         let mut keep = 0;
         while keep < shared.len()
-            && keep < comps.len()
-            && same_folder_text(shared[keep], comps[keep])
+            && keep < other.len()
+            && same_folder_text(shared[keep], other[keep])
         {
             keep += 1;
         }
         shared.truncate(keep);
-        if shared.is_empty() {
-            return None;
-        }
     }
-    Some(first[..component_prefix_len(first, shared.len())].to_string())
+    if shared.is_empty() {
+        return first.to_string();
+    }
+    first[..component_prefix_len(first, shared.len())].to_string()
+}
+
+/// Whether two canonical roots share a folder with a name of its own. The
+/// volume does not count: `C:\Users\x` and `C:\src` share only `C:`, which
+/// nobody wants a header named after (and nothing can be raised above it, so
+/// every depth would show the same band).
+fn shares_named_folder(left: &str, right: &str) -> bool {
+    let left_parts = components(left);
+    let right_parts = components(right);
+    let mut keep = 0;
+    while keep < left_parts.len()
+        && keep < right_parts.len()
+        && same_folder_text(left_parts[keep], right_parts[keep])
+    {
+        keep += 1;
+    }
+    keep > volume_components(left)
+}
+
+/// Path components in order, either separator, empty segments dropped.
+fn components(path: &str) -> Vec<&str> {
+    path.split(['/', '\\'])
+        .filter(|part| !part.is_empty())
+        .collect()
+}
+
+/// How many leading components name the volume rather than a folder: one for a
+/// drive (`C:`) and one for a UNC server (`\\server` — the share name below it
+/// is a folder the user sees). Nothing to skip on a Unix path.
+fn volume_components(path: &str) -> usize {
+    let parts = components(path);
+    let Some(first) = parts.first() else {
+        return 0;
+    };
+    if first.len() == 2 && first.ends_with(':') && first.as_bytes()[0].is_ascii_alphabetic() {
+        return 1;
+    }
+    if path.starts_with("\\\\") || path.starts_with("//") {
+        return 1;
+    }
+    0
+}
+
+/// Whether the folder has a name below its volume root: `C:`, `\\server` and
+/// `/` do not, so a header never names itself after one.
+fn has_named_folder(path: &str) -> bool {
+    components(path).len() > volume_components(path)
 }
 
 /// Byte length of `path`'s first `count` non-empty components (separators
 /// included), so the trunk is a literal prefix of the root text.
 fn component_prefix_len(path: &str, count: usize) -> usize {
+    if count == 0 {
+        return 0;
+    }
     let bytes = path.as_bytes();
     let mut seen = 0usize;
     let mut start = 0usize;
@@ -335,20 +452,21 @@ fn strip_verbatim_prefix(path: &str) -> String {
 
 /// The folder one level up, with either separator (Windows paths stay
 /// readable in tests on every platform). None at the topmost named folder:
-/// `/work` and `C:\dev` have no parent left to group by, so a larger depth
-/// keeps them rather than inventing `/` or `C:` as a header.
+/// `/work`, `C:\dev` and `\\server\share` have no parent left to group by, so
+/// a larger depth keeps them rather than inventing `/`, `C:` or `\\server` as
+/// a header.
 fn parent_folder(path: &str) -> Option<String> {
     let trimmed = path.trim_end_matches(['/', '\\']);
     let sep = trimmed.rfind(['/', '\\'])?;
     let parent = trimmed[..sep].trim_end_matches(['/', '\\']);
-    if parent.is_empty() || parent.ends_with(':') {
+    if parent.is_empty() || !has_named_folder(parent) {
         return None;
     }
     Some(parent.to_string())
 }
 
 /// The last named segment, with either separator. Empty for a root (`/`,
-/// `C:\`) so callers can treat it as "no group".
+/// `C:\`); callers guard those with [`has_named_folder`].
 fn folder_name(path: &str) -> &str {
     let trimmed = path.trim_end_matches(['/', '\\']);
     match trimmed.rfind(['/', '\\']) {
@@ -1442,6 +1560,135 @@ mod tests {
             vec!["#C:\\dev(1)", "alpha"],
             "backslash paths climb too and stop at the drive folder"
         );
+    }
+
+    /// Windows: two trees on one drive share only the `C:` volume, which is
+    /// not a folder. It must not become the single header every repo falls
+    /// into, and the depth picker must keep meaning something (`C:` was the
+    /// one header, and no level can climb above a bare drive).
+    #[test]
+    fn a_drive_letter_never_names_a_group() {
+        let all = vec![
+            repo("alpha", r"C:\Users\e\Developments\alpha", &[]),
+            repo("beta", r"C:\src\beta", &[]),
+        ];
+        let roots = vec![
+            r"C:\Users\e\Developments".to_string(),
+            r"C:\src".to_string(),
+        ];
+        let collapsed = std::collections::HashSet::new();
+        let at = |depth| {
+            project(
+                &all,
+                &[],
+                RepoSortMode::Name,
+                true,
+                false,
+                Some(&grouping_at(&roots, &collapsed, depth)),
+            )
+        };
+        assert_eq!(
+            sketch(&at(1), &all),
+            vec![
+                r"#C:\src(1)",
+                "beta",
+                r"#C:\Users\e\Developments(1)",
+                "alpha"
+            ],
+            "each tree keeps a folder header of its own, not one C: band"
+        );
+        assert_eq!(
+            sketch(&at(2), &all),
+            vec![r"#C:\src(1)", "beta", r"#C:\Users\e(1)", "alpha"],
+            "depth still raises the tree that has a folder above it"
+        );
+        assert_eq!(
+            sketch(&at(9), &all),
+            vec![r"#C:\src(1)", "beta", r"#C:\Users(1)", "alpha"],
+            "an over-deep level stops at the topmost named folder, never C:"
+        );
+    }
+
+    /// One root on another volume must not collapse the whole list into one
+    /// header per repo: the tree that shares a folder keeps sharing it.
+    #[test]
+    fn a_root_on_another_drive_keeps_the_other_tree_together() {
+        let all = vec![
+            repo("alpha", r"C:\Users\e\Developments\alpha", &[]),
+            repo("beta", r"C:\Users\e\Developments\beta", &[]),
+            repo("gamma", r"D:\repos\gamma", &[]),
+        ];
+        let roots = vec![
+            r"C:\Users\e\Developments\alpha".to_string(),
+            r"C:\Users\e\Developments\beta".to_string(),
+            r"D:\repos\gamma".to_string(),
+        ];
+        let collapsed = std::collections::HashSet::new();
+        let rows = project(
+            &all,
+            &[],
+            RepoSortMode::Name,
+            true,
+            false,
+            Some(&grouping(&roots, &collapsed)),
+        );
+        assert_eq!(
+            sketch(&rows, &all),
+            vec![
+                r"#C:\Users\e\Developments(2)",
+                "alpha",
+                "beta",
+                r"#D:\repos\gamma(1)",
+                "gamma"
+            ],
+            "the two C: roots still share Developments; the lone D: root is its own family"
+        );
+    }
+
+    /// A UNC server is the volume, the share name below it is a folder: the
+    /// header stops at the share and never names itself after `\\server`.
+    #[test]
+    fn unc_roots_stop_at_the_share() {
+        let all = vec![
+            repo("alpha", r"\\nas\dev\alpha", &[]),
+            repo("beta", r"\\nas\dev\beta", &[]),
+        ];
+        let roots = vec![
+            r"\\nas\dev\alpha".to_string(),
+            r"\\nas\dev\beta".to_string(),
+        ];
+        let collapsed = std::collections::HashSet::new();
+        let rows = project(
+            &all,
+            &[],
+            RepoSortMode::Name,
+            true,
+            false,
+            Some(&grouping_at(&roots, &collapsed, 9)),
+        );
+        assert_eq!(
+            sketch(&rows, &all),
+            vec![r"#\\nas\dev(2)", "alpha", "beta"],
+            "the share is the deepest header an over-deep level can reach"
+        );
+    }
+
+    /// A scan root at the drive itself names nothing to group under; its
+    /// repos fall back to "Other" instead of a `C:` band.
+    #[test]
+    fn a_scan_root_at_the_drive_falls_back_to_other() {
+        let all = vec![repo("alpha", r"C:\src\alpha", &[])];
+        let roots = vec![r"C:\".to_string()];
+        let collapsed = std::collections::HashSet::new();
+        let rows = project(
+            &all,
+            &[],
+            RepoSortMode::Name,
+            true,
+            false,
+            Some(&grouping(&roots, &collapsed)),
+        );
+        assert_eq!(sketch(&rows, &all), vec!["#other(1)", "alpha"]);
     }
 
     /// Two spellings of one folder (a scan root under a symlink and the same
