@@ -11,11 +11,14 @@ use crate::theme;
 use crate::ui::{A11y, icon};
 use gpui::prelude::*;
 use gpui::{Context, Entity, FontWeight, SharedString, Window, div, px, uniform_list};
+use gpui_kit::base::{Scrollbar, ScrollbarMode};
 use gpui_kit::component::input::{InputState, TextareaState};
+use gpui_kit::component::menu::ContextMenuExt as _;
 use std::cell::RefCell;
 use std::rc::Rc;
 use warp_station_core::model::GitChangedFile;
 use warp_station_core::settings::DiffViewMode;
+use warpui_kit_diff::{DiffScrollHandles, render_diff_with_scroll};
 use warpui_kit_picker::{
     FilteredPicker, OverlayAnchor, PanelChrome, PickerBody, PickerData, PickerIcons, PickerItem,
     PickerRow, PickerSpec, PickerTarget, Selection, TrailingDelete, TriggerScale,
@@ -83,6 +86,8 @@ pub struct ChangesView {
     diff_view: DiffViewMode,
     /// Whether long diff rows wrap; persisted with the layout.
     diff_wrap: bool,
+    /// The diff's horizontal scroll handles, kept so the pinned bars work.
+    diff_scroll: DiffScrollHandles,
     file_by_repo: std::collections::HashMap<String, (String, bool)>,
     /// The row whose discard took its first click; the second one discards.
     discard_armed: Option<(String, bool)>,
@@ -147,6 +152,7 @@ impl ChangesView {
             selected_file: None,
             diff_view,
             diff_wrap,
+            diff_scroll: DiffScrollHandles::default(),
             file_by_repo: std::collections::HashMap::new(),
             discard_armed: None,
             discard_all_armed: false,
@@ -499,21 +505,24 @@ impl ChangesView {
         let show_tooltips = self.store.read(cx).settings().general.show_tooltips;
         // an empty patch is a state, not a one-row diff: a binary file or a
         // mode-only change has nothing textual to draw
+        let has_patch = matches!(self.patches.get(&key), Some(patch) if !patch.is_empty());
         let body: gpui::AnyElement = match self.patches.get(&key) {
             Some(patch) if !patch.is_empty() => div()
                 .id("changes-diff-scroll")
                 .flex_1()
                 .min_h_0()
-                .overflow_y_scroll()
-                .child(warpui_kit_core::text_menu::attach(
+                .flex()
+                .flex_col()
+                .child(attach_filling(
                     gpui::ElementId::Name("changes-diff-menu".into()),
-                    warpui_kit_diff::render_diff_with(
+                    render_diff_with_scroll(
                         patch,
                         None,
                         warpui_kit_diff::DiffOptions {
                             mode: kit_mode(self.diff_view),
                             wrap: self.diff_wrap,
                         },
+                        &self.diff_scroll,
                         theme::font_control(),
                         window,
                         cx,
@@ -568,7 +577,39 @@ impl ChangesView {
                 ),
         )
         .child(body)
+        .children((has_patch && !self.diff_wrap).then(|| self.render_diff_scrollbars()))
         .into_any_element()
+    }
+
+    /// Pinned horizontal bars under the diff body. The kit tracks each
+    /// viewport with the matching handle; the bars live here, outside the
+    /// vertical scroller, so they stay visible while the diff scrolls.
+    fn render_diff_scrollbars(&self) -> gpui::AnyElement {
+        let bar = |handle: &gpui::ScrollHandle, id: &'static str| {
+            div().flex_1().min_w_0().relative().child(
+                Scrollbar::horizontal(handle)
+                    .id(id)
+                    .mode(ScrollbarMode::Always)
+                    .viewport_from_layout(),
+            )
+        };
+        let mut footer = div()
+            .debug_selector(|| "diff-scrollbars".into())
+            .flex_shrink_0()
+            .h(px(16.))
+            .px_1()
+            .flex()
+            .flex_row()
+            .bg(theme::well());
+        footer = if self.diff_view == DiffViewMode::Split {
+            footer
+                .child(bar(&self.diff_scroll.left, "diff-scrollbar-left"))
+                .child(div().flex_shrink_0().w(px(1.)).bg(theme::hairline()))
+                .child(bar(&self.diff_scroll.right, "diff-scrollbar-right"))
+        } else {
+            footer.child(bar(&self.diff_scroll.unified, "diff-scrollbar-unified"))
+        };
+        footer.into_any_element()
     }
 
     fn render_file_list(
@@ -1321,53 +1362,61 @@ impl ChangesView {
             let key = format!("{}|{}", details.hash, file.path);
             let expanded = self.expanded_details.contains(&key);
             let mut row = div()
-                .id(SharedString::from(format!("detail-file-{}", file.path)))
-                .a11y_tree_item(file.path.clone(), Some(expanded))
-                .cursor_pointer()
                 .flex()
                 .flex_col()
                 .rounded_md()
                 .px_1()
-                .when(expanded, |d| d.bg(theme::tint(theme::accent())))
-                .hover(|s| s.bg(theme::hover_bg()))
-                .on_click({
-                    let hash = details.hash.clone();
-                    let path = file.path.clone();
-                    cx.listener(move |this, _, _, cx| this.toggle_detail_patch(&hash, &path, cx))
-                })
-                .child(
-                    div()
-                        .flex()
-                        .flex_row()
-                        .items_center()
-                        .gap_2()
-                        .py_0p5()
-                        .child(
-                            div()
-                                .flex_1()
-                                .min_w_0()
-                                .text_size(px(theme::font_body()))
-                                .font_family(gpui::SharedString::from(theme::code_font()))
-                                .text_color(theme::text_dim())
-                                .child(file.path.clone()),
-                        )
-                        .when_some(file.additions, |row, a| {
-                            row.child(
-                                div()
-                                    .text_size(px(theme::font_meta()))
-                                    .text_color(theme::SUCCESS_BRIGHT)
-                                    .child(format!("+{a}")),
-                            )
+                .when(expanded, |d| d.bg(theme::tint(theme::accent())));
+            // Only the title row toggles the patch. The patch below belongs to
+            // the row for layout, but it is selectable diff text: with the
+            // click on the whole row, selecting a line (or any press in the
+            // diff) collapsed it on mouse-up.
+            row = row.child(
+                div()
+                    .id(SharedString::from(format!("detail-file-{}", file.path)))
+                    .debug_selector(|| "commit-detail-file".into())
+                    .a11y_tree_item(file.path.clone(), Some(expanded))
+                    .cursor_pointer()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap_2()
+                    .py_0p5()
+                    .rounded_md()
+                    .hover(|s| s.bg(theme::hover_bg()))
+                    .on_click({
+                        let hash = details.hash.clone();
+                        let path = file.path.clone();
+                        cx.listener(move |this, _, _, cx| {
+                            this.toggle_detail_patch(&hash, &path, cx)
                         })
-                        .when_some(file.deletions, |row, d| {
-                            row.child(
-                                div()
-                                    .text_size(px(theme::font_meta()))
-                                    .text_color(theme::DANGER)
-                                    .child(format!("−{d}")),
-                            )
-                        }),
-                );
+                    })
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .text_size(px(theme::font_body()))
+                            .font_family(gpui::SharedString::from(theme::code_font()))
+                            .text_color(theme::text_dim())
+                            .child(file.path.clone()),
+                    )
+                    .when_some(file.additions, |row, a| {
+                        row.child(
+                            div()
+                                .text_size(px(theme::font_meta()))
+                                .text_color(theme::SUCCESS_BRIGHT)
+                                .child(format!("+{a}")),
+                        )
+                    })
+                    .when_some(file.deletions, |row, d| {
+                        row.child(
+                            div()
+                                .text_size(px(theme::font_meta()))
+                                .text_color(theme::DANGER)
+                                .child(format!("−{d}")),
+                        )
+                    }),
+            );
             if expanded {
                 let patch = self
                     .detail_patches
@@ -1382,6 +1431,7 @@ impl ChangesView {
                 row = row.child(
                     div()
                         .id(SharedString::from(format!("detail-patch-{}", file.path)))
+                        .debug_selector(|| "commit-detail-patch".into())
                         .ml_4()
                         .mr_1()
                         .mb_1()
@@ -2246,6 +2296,31 @@ fn diff_view_toggle(
             theme::text_muted(),
         ));
     crate::ui::with_tooltip(button, show_tooltips, label).into_any_element()
+}
+
+/// Wrap a full-pane selectable surface in the Copy menu. [`text_menu::attach`]
+/// sizes to its content, which is right for a text block in flow but collapses
+/// a surface that owns a scroller; this wrapper grows in the pane's flex
+/// column and gives the scroller a definite height.
+fn attach_filling(
+    id: gpui::ElementId,
+    content: gpui::AnyElement,
+    focus: Option<gpui::FocusHandle>,
+) -> gpui::AnyElement {
+    let wrapper = div()
+        .id(id)
+        .relative()
+        .flex()
+        .flex_col()
+        .flex_1()
+        .min_h_0()
+        .child(content);
+    match focus {
+        Some(focus) => wrapper
+            .context_menu(warpui_kit_core::text_menu::menu(focus))
+            .into_any_element(),
+        None => wrapper.into_any_element(),
+    }
 }
 
 /// The header's word-wrap toggle. The icon button is active while rows wrap;

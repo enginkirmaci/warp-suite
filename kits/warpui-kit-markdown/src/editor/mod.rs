@@ -18,6 +18,8 @@
 pub(crate) mod code;
 pub(crate) mod diagram;
 pub(crate) mod display;
+
+pub use display::note_key;
 pub(crate) mod element;
 pub(crate) mod frame;
 pub(crate) mod icons;

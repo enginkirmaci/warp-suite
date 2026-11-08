@@ -1,13 +1,14 @@
 # Plan: a diff view instead of a diff renderer
 
-Status: revision 3 landed (split columns with their own horizontal
-scrollbars, and a persisted word-wrap toggle for both layouts). Revisions 0–2
-landed too (the document, the unified view, hunk rows removed, the split
-view, states, full drag selection and the single-icon layout toggle). Phase 2
-(virtualization and the pinned number column), phase 6 (consumers) and the
-rest of phase 3 (counts, copy, `n`/`p`) are open. Decisions D1–D13 are
-recorded in §5; D7–D12 came with revision 2, D8 is the single icon, and D13
-is the wrap/per-column-scroll pair.
+Status: revision 5 landed (the scrolled pane owns both axes, the wrapped body
+is a virtualised list, and a horizontal wheel moves only the horizontal
+viewport). Revision 4 added the pinned footer bars and the window-refresh
+selection repaint; revisions 0–3 added the document, the unified view, hunk
+rows removed, the split view, states, full drag selection, the single-icon
+layout toggle, the persisted word-wrap toggle and per-column viewports.
+Phase 2's unwrapped virtualization and pinned number column, phase 6
+(consumers) and the rest of phase 3 (counts, copy, `n`/`p`) are open.
+Decisions D1–D15 are recorded in §5; D15 covers scroll ownership.
 
 ## 1. The problem
 
@@ -121,9 +122,11 @@ path/to/file.rs                             [ wrap ] [ unified icon ]
   this is also what makes rows regular enough to virtualize. Pinning the
   number column is the follow-up once the virtualized list lands.
 - Split splits the pane evenly and each column owns its horizontal viewport,
-  so a long line on one side never pushes the other side off screen. The
-  340px floor and the whole-body scrollbar are gone; there is no width-based
-  fallback to unified.
+  so a long line on one side never pushes the other side off screen. The app
+  pins a bar for each viewport in a 16px footer under the body (a single bar
+  for unified); the footer is outside the vertical scroller and is hidden in
+  wrap mode. The 340px floor and the whole-body scrollbar are gone; there is
+  no width-based fallback to unified.
 - Word wrap is a second toggle. On, each source row is an element: the code
   wraps in its cell, the number stays on the first visual line, and a split
   row takes the taller side's height so the next row starts on the same line
@@ -336,6 +339,33 @@ a drag copies one row; the unwrapped body keeps the whole-patch selection.
 The wrap flag is `DiffOptions::wrap` and the app persists it beside the
 layout (`changes.diff_wrap`).
 
+D14. **Pinned bars and selection repaint — settled.** The kit exposes
+`DiffScrollHandles`; `render_diff_with_scroll` tracks the unified/left/right
+viewports with them. The app keeps the handles and draws always-visible
+horizontal `Scrollbar`s in a 16px footer with `viewport_from_layout`, so the
+bars stay at the bottom of the visible diff pane, not the end of a tall
+document; wrap hides the footer. A selection event refreshes the window
+instead of notifying the view: `SelectableText` no longer calls
+`cx.notify(view)`, and a wrapped body's row participant refreshes only when
+the selection's anchor or cursor is on that row. A wrapped drag therefore
+repaints the window without rebuilding every row.
+
+D15. **Scroll ownership and virtualised wrap — settled.** The scrolled pane
+owns the vertical viewport: `render_diff_with_scroll` wraps the body in an
+axis-restricted `overflow_y_scroll` frame (or a `gpui::list` in wrap mode),
+so the app's `changes-diff-scroll` is only a flex height source and no
+longer scrolls. That removes the parent scroller's habit of reading a
+horizontal wheel delta as vertical movement because its own x axis is
+hidden. Each horizontal viewport is also axis-restricted. The wrapped
+scrolled body is a `gpui::list` whose `ListState` lives in
+`DiffScrollHandles` (keyed by the line text and font size; a new patch
+replaces it), so a wheel tick builds only the rows near the viewport. The
+embedded `render_diff_with` keeps the row-per-div wrap renderer. The app
+wraps the scrolled body in a filled `text_menu` wrapper instead of the
+content-sized `attach`, because a list needs a definite height. Probes:
+`diff_scroll_probe` (both axes, split column, virtualised rows) and
+`diff_mode_probe` (the real pane scrolls and only visible rows exist).
+
 ## 6. Risks
 
 - **Kit API — additive.** `render_diff` keeps its signature and every current
@@ -358,9 +388,10 @@ layout (`changes.diff_wrap`).
   selection belongs to one column at a time; the copy callback must return
   only that column's text. The existing no-selection `update_runs` refresh
   runs per participant and is cheap.
-- **Two scroll axes.** A virtualized list owns vertical scrolling; horizontal
-  scrolling must live on the code body with a synchronized gutter. Prove the
-  combination with a probe in phase 2 before building the rest on it.
+- **Two scroll axes — settled for wrap.** The vertical list and the wrapped
+  rows need no horizontal scroller; the unwrapped body keeps separate
+  horizontal viewports and one shared vertical frame. Both directions are
+  covered by `diff_scroll_probe`.
 - **Selection under scroll.** The selection registration carries no ancestor
   scroll offset yet, so a selection held while the pane scrolls can drift.
   Fix it when the diff owns its scroller in phase 2 (pass the offset through
@@ -395,6 +426,17 @@ Revisions 2–3 — landed:
   layouts, a long line wraps, a split row takes the taller side's height, and
   a trailing filler keeps its row. Both choices are persisted and restored
   (`diff_wrap_probe`, `diff_mode_probe`).
+- The split and unified bars sit in a pinned footer, reflect the matching
+  viewport's offset, and disappear in wrap mode; a selection move refreshes
+  the window without notifying the view (`diff_mode_probe`,
+  `diff_view_probe`).
+- A horizontal wheel step moves the code column under the pointer and never
+  the shared body; a vertical step moves the body only. The scrolled pane
+  owns both axes, so no parent scroller translates one into the other
+  (`diff_scroll_probe`, `diff_mode_probe`).
+- A large wrapped patch draws only the rows near its viewport and the wheel
+  scrolls it; the first row leaves and a far row never enters the element
+  tree (`diff_scroll_probe`, `diff_mode_probe`).
 - Copy from either split column gives only that side's code
   (`diff_split_probe`); unified selection still passes `diff_view_probe`.
 - `cargo fmt --all --check`, the clippy selector for the touched crates, and

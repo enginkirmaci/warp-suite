@@ -204,14 +204,22 @@ warp-agent's tool tiles. The rules:
   appears on both, a deletion only left, an addition only right, and the side
   without a row gets a blank filler so the columns never drift. A 1px
   `hairline` divider separates them. The columns split the pane evenly and
-  each owns its horizontal scrollbar, so a long line on one side never pushes
-  the other side off screen. A state-only, truncated or multi-file patch
-  stays unified.
+  each owns its horizontal viewport and a bar in the pinned footer under the
+  body, so a long line on one side never pushes the other side off screen.
+  A state-only, truncated or multi-file patch stays unified.
+- **The scrolled pane owns both axes.** `render_diff_with_scroll` is the
+  vertical viewport; the app does not wrap it in another scroller. Both the
+  vertical frame and each horizontal viewport are axis-restricted, so a
+  horizontal wheel step moves the code column under the pointer and never
+  the shared body. The plain `render_diff_with` stays in flow for an embedded
+  block (a history detail, an agent tile) and has no vertical viewport.
 - **Word wrap is a toggle.** On, each source row is an element: the code wraps
   inside its column, the number stays on the first visual line, and a split
   row takes the taller side's height so the next row starts together. Wrap
   mode selects and copies within one row; the unwrapped body keeps the one
-  selection across the whole patch.
+  selection across the whole patch. In the scrolled pane the wrapped body is
+  a virtualised list: only the rows near the viewport are elements, so a
+  wheel tick does not rebuild thousands of rows.
 - **States are rows with a word:** loading, binary, no textual change and
   truncation. They never pass through the row renderer.
 - **Size:** `font_control` (14) for the diff body. The block still follows the
@@ -222,11 +230,15 @@ warp-agent's tool tiles. The rules:
   selectable texts. The gutter and washes are drawn beside and behind the
   text, so copy never carries line numbers or +/− markers. The app must mount
   `gpui_kit::base::TextSelectionLayer` or the drag never registers.
+  A selection change refreshes the window rather than notifying the view; a
+  wrapped body has one participant per row, and only the row that owns an
+  endpoint refreshes.
 - **Unwrapped is texts and canvases, not a row per div.** The gutter and the
   code are one text layout each (two of each in split); a canvas per column
   paints every row's wash. A large unwrapped diff re-renders without laying
-  out thousands of row divs. Wrapped mode is the deliberate exception: one
-  row element per line, because wrapping needs a real row height.
+  out thousands of row divs. Wrapped rows need a real row height, so the
+  scrolled pane uses a list (one element per visible row); only the embedded
+  `render_diff_with` still builds every wrapped row up front.
 
 The washes live in `warpui-kit-core::palette`; a new diff color goes there,
 never into an app.

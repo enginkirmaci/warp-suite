@@ -24,6 +24,6 @@ pub mod highlighter;
 pub mod live;
 
 pub use editor::read_only_selection_text;
-pub use editor::{CodeBlock, LiveColors, LiveEditor, LiveEditorEvent, LiveEditorState};
+pub use editor::{CodeBlock, LiveColors, LiveEditor, LiveEditorEvent, LiveEditorState, note_key};
 pub use highlighter::{LIVE_LANGUAGE, live_highlighter_factory};
 pub use live::{MarkdownLiveKind, MarkdownLiveSpan, parse, parse_document, toggle_task_at};

@@ -3,7 +3,9 @@
 //! view over the same settings file starts in the saved mode.
 
 use gpui::prelude::*;
-use gpui::{Modifiers, TestAppContext, point};
+use gpui::{
+    Modifiers, ScrollDelta, ScrollEvent, ScrollSource, TestAppContext, TouchPhase, point, px,
+};
 use std::path::PathBuf;
 use std::sync::Arc;
 use warp_station::store::{Store, WorkspaceTab};
@@ -96,10 +98,15 @@ fn draw(vcx: &mut gpui::VisualTestContext) {
 /// The first draw installs the snapshot (which clears stale patches) and
 /// selects the file; the patch then arrives as the second draw's drain.
 fn inject_patch(vcx: &mut gpui::VisualTestContext, store: &gpui::Entity<Store>) {
+    inject_patch_text(vcx, store, PATCH);
+}
+
+fn inject_patch_text(vcx: &mut gpui::VisualTestContext, store: &gpui::Entity<Store>, patch: &str) {
     let store = store.clone();
+    let patch = patch.to_string();
     vcx.update(|_, cx| {
         store.update(cx, |store, _| {
-            store.change_patch_result = Some((FILE_PATH.into(), false, PATCH.into()));
+            store.change_patch_result = Some((FILE_PATH.into(), false, patch));
         });
     });
     draw(vcx);
@@ -143,6 +150,10 @@ fn the_toggles_switch_and_save_the_layout(cx: &mut TestAppContext) {
         vcx.debug_bounds("diff-split").is_none(),
         "no split body until the button is pressed"
     );
+    assert!(
+        vcx.debug_bounds("diff-scrollbars").is_some(),
+        "the unwrapped diff carries a pinned horizontal bar"
+    );
 
     click(vcx, "diff-view-toggle");
 
@@ -162,6 +173,10 @@ fn the_toggles_switch_and_save_the_layout(cx: &mut TestAppContext) {
         vcx.debug_bounds("diff-text").is_none(),
         "the unified body is gone"
     );
+    assert!(
+        vcx.debug_bounds("diff-scrollbars").is_some(),
+        "split keeps the pinned bars"
+    );
 
     assert!(
         vcx.debug_bounds("diff-wrap-toggle").is_some(),
@@ -173,9 +188,22 @@ fn the_toggles_switch_and_save_the_layout(cx: &mut TestAppContext) {
         vcx.debug_bounds("diff-wrap-body").is_some(),
         "the click draws the wrapped body"
     );
+    let body = vcx.debug_bounds("diff-wrap-body").unwrap();
+    assert!(
+        body.size.height > px(50.),
+        "the wrapped body fills the pane: {body:?}"
+    );
+    assert!(
+        vcx.debug_bounds("diff-wrap-code-0-l").is_some(),
+        "the wrapped list draws its first row"
+    );
     assert!(
         vcx.debug_bounds("diff-left-text").is_none(),
         "wrapped rows are not the one-text columns"
+    );
+    assert!(
+        vcx.debug_bounds("diff-scrollbars").is_none(),
+        "wrap has no horizontal bar to pin"
     );
 
     let reloaded = SettingsService::at(settings.clone());
@@ -207,4 +235,117 @@ fn the_toggles_switch_and_save_the_layout(cx: &mut TestAppContext) {
         vcx.debug_bounds("diff-text").is_none(),
         "the next view keeps split, not unified"
     );
+    assert!(
+        vcx.debug_bounds("diff-scrollbars").is_none(),
+        "the next view keeps wrap off the bar row"
+    );
+}
+
+#[gpui_kit::gpui::test]
+fn a_large_wrapped_diff_virtualises_its_rows_and_scrolls(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+    cx.update(warp_station::theme::apply_kit_theme);
+    let settings = scratch("virtual");
+    let store = seeded_store(cx, settings);
+    let patch_store = store.clone();
+    let (_window, vcx) = cx.add_window_view(|window, cx| ChangesView::new(store, window, cx));
+    draw(vcx);
+
+    let mut patch = String::from("--- a/src/x.rs\n+++ b/src/x.rs\n@@ -1,400 +1,400 @@\n");
+    for index in 0..400 {
+        patch.push_str(&format!("+row {index}: {}\n", "word ".repeat(30)));
+    }
+    inject_patch_text(vcx, &patch_store, &patch);
+
+    click(vcx, "diff-wrap-toggle");
+    assert!(
+        vcx.debug_bounds("diff-wrap-code-0-u").is_some(),
+        "the first wrapped row is drawn"
+    );
+    assert!(
+        vcx.debug_bounds("diff-wrap-code-399-u").is_none(),
+        "the list does not build every row"
+    );
+
+    let bounds = vcx.debug_bounds("diff-wrap-code-0-u").unwrap();
+    let at = point(bounds.origin.x + px(20.), bounds.origin.y + px(8.));
+    for _ in 0..40 {
+        vcx.simulate_event(ScrollEvent {
+            position: at,
+            delta: ScrollDelta::Pixels(point(px(0.), px(-120.))),
+            modifiers: Modifiers::default(),
+            touch_phase: TouchPhase::Moved,
+            source: ScrollSource::Pointer,
+        });
+    }
+    draw(vcx);
+
+    assert!(
+        vcx.debug_bounds("diff-wrap-code-0-u").is_none(),
+        "the wheel scrolled the wrapped body"
+    );
+    assert!(
+        vcx.debug_bounds("diff-wrap-code-399-u").is_none(),
+        "scrolling still draws only the visible rows"
+    );
+}
+
+#[gpui_kit::gpui::test]
+fn a_horizontal_wheel_scrolls_only_the_unwrapped_code(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+    cx.update(warp_station::theme::apply_kit_theme);
+    let settings = scratch("wheel");
+    let store = seeded_store(cx, settings);
+    let patch_store = store.clone();
+    let (_window, vcx) = cx.add_window_view(|window, cx| ChangesView::new(store, window, cx));
+    draw(vcx);
+
+    let mut patch = String::from("--- a/src/x.rs\n+++ b/src/x.rs\n@@ -1,300 +1,300 @@\n");
+    patch.push_str(&format!(
+        "+fn wide() {{ let x = \"{}\"; }}\n",
+        "a".repeat(300)
+    ));
+    for index in 1..300 {
+        patch.push_str(&format!("+fn row_{index}() {{}}\n"));
+    }
+    inject_patch_text(vcx, &patch_store, &patch);
+
+    let before = vcx.debug_bounds("diff-text").expect("the code column");
+    let at = point(before.origin.x + px(30.), before.origin.y + px(30.));
+    scroll(vcx, at, point(px(-120.), px(0.)));
+    let horizontal = vcx.debug_bounds("diff-text").expect("the code column");
+    assert!(
+        horizontal.origin.x < before.origin.x,
+        "the horizontal wheel moved the code: {horizontal:?} vs {before:?}"
+    );
+    assert_eq!(
+        horizontal.origin.y, before.origin.y,
+        "the horizontal wheel must not move the body vertically"
+    );
+
+    scroll(vcx, at, point(px(0.), px(-120.)));
+    let vertical = vcx.debug_bounds("diff-text").expect("the code column");
+    assert!(
+        vertical.origin.y < horizontal.origin.y,
+        "the vertical wheel moved the body: {vertical:?} vs {horizontal:?}"
+    );
+    assert_eq!(
+        vertical.origin.x, horizontal.origin.x,
+        "the vertical wheel must not move the code horizontally"
+    );
+}
+
+fn scroll(
+    vcx: &mut gpui::VisualTestContext,
+    at: gpui::Point<gpui::Pixels>,
+    delta: gpui::Point<gpui::Pixels>,
+) {
+    vcx.simulate_event(ScrollEvent {
+        position: at,
+        delta: ScrollDelta::Pixels(delta),
+        modifiers: Modifiers::default(),
+        touch_phase: TouchPhase::Moved,
+        source: ScrollSource::Pointer,
+    });
+    draw(vcx);
 }

@@ -24,6 +24,14 @@
 //! the number stays on the first visual line; in split a row takes the taller
 //! side's height so both columns stay aligned.
 //!
+//! [`render_diff_with_scroll`] also owns the vertical viewport. That is what
+//! keeps a horizontal wheel step from being read as vertical movement by a
+//! parent scroller: the vertical frame is axis-restricted, the horizontal
+//! viewport consumes only horizontal deltas, and the wrapped body is a
+//! virtualised list that builds just the rows near its viewport. The plain
+//! [`render_diff_with`] stays in flow for an embedded block and is not a
+//! scrolling pane.
+//!
 //! Unwrapped unified is one selectable text: a drag crosses lines and Copy
 //! gives the patch content without the gutter numbers or markers. Unwrapped
 //! split has one participant per column, so a drag stays on its side. Wrapped
@@ -65,8 +73,8 @@ use std::sync::Arc;
 use gpui::prelude::*;
 use gpui::{
     AbsoluteLength, AnyElement, App, BorderStyle, Bounds, Corners, Div, Edges, ElementId,
-    HighlightStyle, Hsla, PaintQuad, Pixels, StyledText, TextStyle, Window, canvas, div, point, px,
-    size, transparent_black,
+    HighlightStyle, Hsla, ListAlignment, ListState, PaintQuad, Pixels, ScrollHandle, StyledText,
+    TextStyle, Window, canvas, div, list, point, px, size, transparent_black,
 };
 
 use warpui_kit_core::fonts;
@@ -93,9 +101,35 @@ pub enum DiffMode {
 pub struct DiffOptions {
     pub mode: DiffMode,
     /// Wrap long rows instead of scrolling horizontally. A wrapped row keeps
-    /// its number on the first visual line; each row is a real element, so a
-    /// very large wrapped diff costs more layout than the unwrapped body.
+    /// its number on the first visual line. In the scrolled pane the wrapped
+    /// rows are a virtualised list, so only the visible rows are built; the
+    /// plain [`render_diff_with`] still draws one element per row.
     pub wrap: bool,
+}
+
+/// Scroll handles the app keeps across frames so it can draw pinned
+/// horizontal scrollbars outside the vertical scroller. The kit owns the
+/// vertical scroller too (see [`render_diff_with_scroll`]), so a horizontal
+/// wheel can never be turned into vertical movement by a parent scroller.
+/// An app that does not draw bars can use the plain [`render_diff_with`],
+/// which passes none and leaves the body in flow.
+#[derive(Clone, Default)]
+pub struct DiffScrollHandles {
+    pub unified: ScrollHandle,
+    pub left: ScrollHandle,
+    pub right: ScrollHandle,
+    /// The vertical viewport of the unwrapped body. Wrapped bodies virtualise
+    /// their rows with a list, which owns its own scroll offset.
+    pub vertical: ScrollHandle,
+    /// The wrapped body's list state, replaced when the patch or font
+    /// changes. Shared through the handles so the app keeps one state across
+    /// frames without the kit parsing the patch again.
+    wrap_list: Rc<RefCell<Option<WrapList>>>,
+}
+
+struct WrapList {
+    key: u64,
+    state: ListState,
 }
 
 /// A unified diff with Zed-style gutter, marker column and two-tone washes.
@@ -133,7 +167,34 @@ pub fn render_diff_with(
         return div().into_any_element();
     }
     let doc = cached_document(text);
-    render_document(&doc, path_hint, options, font_detail, window, cx)
+    render_document(&doc, path_hint, options, None, font_detail, window, cx)
+}
+
+/// Like [`render_diff_with`], but tracks the horizontal viewports in `scroll`
+/// so the caller can draw pinned scrollbars. The handles must outlive the
+/// render and be reused; a fresh set every frame loses the scroll offsets.
+pub fn render_diff_with_scroll(
+    text: &str,
+    path_hint: Option<&str>,
+    options: DiffOptions,
+    scroll: &DiffScrollHandles,
+    font_detail: f32,
+    window: &mut Window,
+    cx: &App,
+) -> AnyElement {
+    if text.is_empty() {
+        return div().into_any_element();
+    }
+    let doc = cached_document(text);
+    render_document(
+        &doc,
+        path_hint,
+        options,
+        Some(scroll),
+        font_detail,
+        window,
+        cx,
+    )
 }
 
 /// Draw an already parsed patch. The app can keep the document alongside its
@@ -142,6 +203,7 @@ pub fn render_document(
     doc: &DiffDocument,
     path_hint: Option<&str>,
     options: DiffOptions,
+    scroll: Option<&DiffScrollHandles>,
     font_detail: f32,
     window: &mut Window,
     cx: &App,
@@ -180,6 +242,7 @@ pub fn render_document(
                 paint_style,
                 number_style,
                 font_detail,
+                scroll,
             );
         }
         return render_split(
@@ -190,6 +253,7 @@ pub fn render_document(
             number_style,
             line_height,
             font_detail,
+            scroll,
         );
     }
     if options.wrap {
@@ -200,6 +264,7 @@ pub fn render_document(
             paint_style,
             number_style,
             font_detail,
+            scroll,
         );
     }
     render_unified(
@@ -210,11 +275,16 @@ pub fn render_document(
         number_style,
         line_height,
         font_detail,
+        scroll,
     )
 }
 
 /// The unified body: every file's rows in one column. File headers and state
 /// rows span the column; metadata and hunk headers take no rows.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the render call carries the theme, paint and scroll inputs"
+)]
 fn render_unified(
     doc: &DiffDocument,
     language: Option<&'static str>,
@@ -223,6 +293,7 @@ fn render_unified(
     number_style: HighlightStyle,
     line_height: Pixels,
     font_detail: f32,
+    scroll: Option<&DiffScrollHandles>,
 ) -> AnyElement {
     let gutter_width = doc.max_number().to_string().len().max(4);
     let paint = RowPaint {
@@ -242,12 +313,26 @@ fn render_unified(
         &ColumnIds::UNIFIED,
         ColumnWidth::Full,
     );
-    diff_scroller(column.into_any_element(), font_detail).into_any_element()
+    let body = diff_scroller(
+        column.into_any_element(),
+        font_detail,
+        scroll.map(|scroll| &scroll.unified),
+    );
+    match scroll {
+        Some(scroll) => {
+            vertical_frame(body.into_any_element(), &scroll.vertical).into_any_element()
+        }
+        None => body.into_any_element(),
+    }
 }
 
 /// The split body: old file left, new file right, one line per paired row.
 /// Only a single-file patch reaches here; state-only and multi-file patches
 /// stay unified.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the render call carries the theme, paint and scroll inputs"
+)]
 fn render_split(
     doc: &DiffDocument,
     language: Option<&'static str>,
@@ -256,6 +341,7 @@ fn render_split(
     number_style: HighlightStyle,
     line_height: Pixels,
     font_detail: f32,
+    scroll: Option<&DiffScrollHandles>,
 ) -> AnyElement {
     let gutter_width = split_gutter_width(&doc.files[0]);
     let paint = RowPaint {
@@ -289,10 +375,24 @@ fn render_split(
         .flex()
         .flex_row()
         .items_stretch()
-        .child(column_viewport(&ColumnIds::LEFT, left))
+        .child(column_viewport(
+            &ColumnIds::LEFT,
+            left,
+            scroll.map(|scroll| &scroll.left),
+        ))
         .child(div().flex_shrink_0().w(px(1.)).bg(palette::hairline()))
-        .child(column_viewport(&ColumnIds::RIGHT, right));
-    split_frame(body.into_any_element(), font_detail).into_any_element()
+        .child(column_viewport(
+            &ColumnIds::RIGHT,
+            right,
+            scroll.map(|scroll| &scroll.right),
+        ));
+    let body = split_frame(body.into_any_element(), font_detail);
+    match scroll {
+        Some(scroll) => {
+            vertical_frame(body.into_any_element(), &scroll.vertical).into_any_element()
+        }
+        None => body.into_any_element(),
+    }
 }
 
 /// The unified body's lines: file headers only for a multi-file patch, then
@@ -389,6 +489,7 @@ fn render_unified_wrapped(
     paint_style: TextStyle,
     number_style: HighlightStyle,
     font_detail: f32,
+    scroll: Option<&DiffScrollHandles>,
 ) -> AnyElement {
     let lines = unified_lines(doc, language, hl_theme);
     if lines.is_empty() {
@@ -399,6 +500,9 @@ fn render_unified_wrapped(
         number_style,
         gutter_width: doc.max_number().to_string().len().max(4),
     };
+    if let Some(scroll) = scroll {
+        return render_unified_wrapped_list(lines, paint, font_detail, scroll);
+    }
     let mut body = div()
         .debug_selector(|| "diff-wrap-body".into())
         .w_full()
@@ -420,6 +524,7 @@ fn render_split_wrapped(
     paint_style: TextStyle,
     number_style: HighlightStyle,
     font_detail: f32,
+    scroll: Option<&DiffScrollHandles>,
 ) -> AnyElement {
     let (left, right) = split_lines(file, language, hl_theme);
     if left.is_empty() {
@@ -430,6 +535,9 @@ fn render_split_wrapped(
         number_style,
         gutter_width: split_gutter_width(file),
     };
+    if let Some(scroll) = scroll {
+        return render_split_wrapped_list(left, right, paint, font_detail, scroll);
+    }
     let mut body = div()
         .debug_selector(|| "diff-wrap-body".into())
         .w_full()
@@ -445,6 +553,102 @@ fn render_split_wrapped(
         ));
     }
     wrapped_frame(body.into_any_element(), font_detail).into_any_element()
+}
+
+/// The scrolled wrapped unified body: a virtualised list, so a wheel tick
+/// rebuilds only the visible rows instead of every row in the patch. The
+/// list owns the vertical scroll, which is what lets a horizontal wheel event
+/// pass through without also moving the body.
+fn render_unified_wrapped_list(
+    lines: Vec<Line>,
+    paint: RowPaint,
+    font_detail: f32,
+    scroll: &DiffScrollHandles,
+) -> AnyElement {
+    let key = wrapped_key(1, font_detail, &[&lines]);
+    let state = wrap_list_state(scroll, key, lines.len());
+    let lines = Rc::new(lines);
+    let item_paint = paint.clone();
+    wrap_list_frame(state, font_detail, move |index, _, _| {
+        wrapped_row(&lines[index], &item_paint, font_detail, index).into_any_element()
+    })
+}
+
+/// The scrolled wrapped split body. One list row still holds both cells, so
+/// the two sides stay aligned when only one side wraps.
+fn render_split_wrapped_list(
+    left: Vec<Line>,
+    right: Vec<Line>,
+    paint: RowPaint,
+    font_detail: f32,
+    scroll: &DiffScrollHandles,
+) -> AnyElement {
+    let key = wrapped_key(2, font_detail, &[&left, &right]);
+    let state = wrap_list_state(scroll, key, left.len());
+    let left = Rc::new(left);
+    let right = Rc::new(right);
+    let item_paint = paint.clone();
+    wrap_list_frame(state, font_detail, move |index, _, _| {
+        wrapped_split_row(&left[index], &right[index], &item_paint, font_detail, index)
+            .into_any_element()
+    })
+}
+
+/// The list element and its frame. The frame repeats the code family and the
+/// size so list items, which are rendered outside the normal row tree, keep
+/// the same metrics as the unwrapped column.
+fn wrap_list_frame(
+    state: ListState,
+    font_detail: f32,
+    render_item: impl FnMut(usize, &mut Window, &mut App) -> AnyElement + 'static,
+) -> AnyElement {
+    div()
+        .debug_selector(|| "diff-wrap-body".into())
+        .size_full()
+        .flex()
+        .flex_col()
+        .min_h_0()
+        .font_family(fonts::code_font())
+        .text_size(px(font_detail))
+        .whitespace_normal()
+        .child(list(state, render_item).size_full())
+        .into_any_element()
+}
+
+/// One persistent list state per patch and font size. A different patch
+/// replaces it; a width change is handled inside the list, which remeasures
+/// its items. Item heights, not just the text, decide this key: the wrapped
+/// row count changes only when the text does.
+fn wrap_list_state(handles: &DiffScrollHandles, key: u64, count: usize) -> ListState {
+    let mut slot = handles.wrap_list.borrow_mut();
+    if let Some(wrap) = slot.as_ref()
+        && wrap.key == key
+        && wrap.state.item_count() == count
+    {
+        return wrap.state.clone();
+    }
+    let state = ListState::new(count, ListAlignment::Top, px(400.));
+    *slot = Some(WrapList {
+        key,
+        state: state.clone(),
+    });
+    state
+}
+
+fn wrapped_key(salt: u64, font_detail: f32, columns: &[&[Line]]) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    salt.hash(&mut hasher);
+    font_detail.to_bits().hash(&mut hasher);
+    for lines in columns {
+        lines.len().hash(&mut hasher);
+        for line in *lines {
+            line.text.hash(&mut hasher);
+            std::mem::discriminant(&line.kind).hash(&mut hasher);
+            line.number.hash(&mut hasher);
+        }
+    }
+    hasher.finish()
 }
 
 /// The wrapped frame: the code family, the caller's size and normal white
@@ -591,8 +795,12 @@ fn wrapped_cell(
 /// One split column's viewport. The column body keeps at least the viewport's
 /// width and grows with a long line; the viewport scrolls that line on its own
 /// instead of pushing the other column off screen.
-fn column_viewport(ids: &'static ColumnIds, body: Div) -> impl IntoElement {
-    div()
+fn column_viewport(
+    ids: &'static ColumnIds,
+    body: Div,
+    handle: Option<&ScrollHandle>,
+) -> impl IntoElement {
+    let viewport = div()
         .id(ids.viewport)
         .debug_selector(move || ids.viewport.into())
         .flex_1()
@@ -600,8 +808,12 @@ fn column_viewport(ids: &'static ColumnIds, body: Div) -> impl IntoElement {
         .flex_row()
         .min_w_0()
         .overflow_x_scroll()
-        .restrict_scroll_to_axis()
-        .child(body)
+        .restrict_scroll_to_axis();
+    let viewport = match handle {
+        Some(handle) => viewport.track_scroll(handle),
+        None => viewport,
+    };
+    viewport.child(body)
 }
 
 /// One column of a diff body: the gutter, the selectable code text, and the
@@ -774,8 +986,12 @@ fn render_column(
     )
 }
 
-fn diff_scroller(child: AnyElement, font_detail: f32) -> impl IntoElement {
-    div()
+fn diff_scroller(
+    child: AnyElement,
+    font_detail: f32,
+    handle: Option<&ScrollHandle>,
+) -> impl IntoElement {
+    let frame = div()
         .id("diff-x-scroll")
         .debug_selector(|| "diff-x-scroll".into())
         .w_full()
@@ -785,7 +1001,26 @@ fn diff_scroller(child: AnyElement, font_detail: f32) -> impl IntoElement {
         .restrict_scroll_to_axis()
         .font_family(fonts::code_font())
         .text_size(px(font_detail))
-        .whitespace_nowrap()
+        .whitespace_nowrap();
+    let frame = match handle {
+        Some(handle) => frame.track_scroll(handle),
+        None => frame,
+    };
+    frame.child(child)
+}
+
+/// The scrolled body's one vertical viewport. It is axis-restricted, so a
+/// horizontal wheel step cannot fall through to the vertical axis the way a
+/// plain `overflow_y_scroll` parent does when the pointer is over a nested
+/// horizontal strip.
+fn vertical_frame(child: AnyElement, handle: &ScrollHandle) -> impl IntoElement {
+    div()
+        .id("diff-y-scroll")
+        .debug_selector(|| "diff-y-scroll".into())
+        .size_full()
+        .overflow_y_scroll()
+        .restrict_scroll_to_axis()
+        .track_scroll(handle)
         .child(child)
 }
 
@@ -931,6 +1166,7 @@ pub fn sniff_lang(text: &str) -> Option<&'static str> {
 
 // ---- diff rendering --------------------------------------------------------
 
+#[derive(Clone)]
 struct RowPaint {
     style: TextStyle,
     number_style: HighlightStyle,

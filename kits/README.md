@@ -8,10 +8,16 @@ suite workspace (root `Cargo.toml`), not a workspace of their own; there is no
 | Crate | Provides |
 | --- | --- |
 | `warpui-kit-core` | the switchable palettes, bundled fonts, type scale, shell, motion, `apply_kit_theme`, a11y, icons, tooltips, the control shapes (`button`, `menu_row`, `popover_card`, `fold_body`), the read-only text menu and the media helpers |
-| `warpui-kit-diff` | `render_diff`, `render_diff_with`, `render_code`, `sniff_lang`, tree-sitter highlighting |
+| `warpui-kit-diff` | `render_diff`, `render_diff_with`, `render_diff_with_scroll`, `render_code`, `sniff_lang`, tree-sitter highlighting |
 | `warpui-kit-markdown` | the live markdown editor, span parser, highlighter and formatting ops |
 | `warpui-kit-picker` | `FilteredPicker`: trigger, filter input, virtualized rows, overlay popups |
 | `warpui-kit-platform` | the gpui-free plumbing every app had re-grown: atomic file replace, file logging; the rust-embed-over-gpui-kit asset source rides behind the `assets` feature |
+
+`render_diff_with_scroll` is the full-pane diff: pass a `DiffScrollHandles`
+and the kit owns the vertical viewport, the per-column horizontal viewports
+and the pinned-bar handles. Wrap mode there is a virtualised list, so a large
+patch builds only its visible rows. The plain `render_diff_with` stays in
+flow for an embedded block.
 
 ## Where a shared shape goes
 

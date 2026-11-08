@@ -1,11 +1,15 @@
 //! A selectable run for the diff body.
 //!
-//! The patch is drawn as one [`StyledText`] so selection can cross lines: the
-//! window selection system needs every line's geometry registered together,
-//! and a row-per-div layout cannot provide that. This element is the diff's
-//! adaptation of gpui-base's `SelectableText`; that one builds its own
-//! unstyled text, while the diff needs the runs that carry token colors and
-//! emphasis, so the `StyledText` is passed in.
+//! The unwrapped diff is one [`StyledText`] per column, so selection crosses
+//! lines; the wrapped diff mounts one of these per row, so selection stays on
+//! its row. This element is the diff's adaptation of gpui-base's
+//! `SelectableText`; that one builds its own unstyled text, while the diff
+//! needs the runs that carry token colors and emphasis, so the `StyledText` is
+//! passed in.
+//!
+//! A selection event refreshes the window instead of notifying the view. A
+//! wrapped body has one participant per row; only the row that owns an
+//! endpoint refreshes, so a mouse move does not rebuild every row.
 
 use std::cell::RefCell;
 use std::ops::Range;
@@ -16,7 +20,9 @@ use gpui::{
     HitboxBehavior, Hsla, InspectorElementId, IntoElement, LayoutId, PaintQuad, Pixels, Point,
     SharedString, StyledText, Window, transparent_black,
 };
-use gpui_kit::base::{TextSelectionHandle, TextSelectionRegistration, TextSelectionRun};
+use gpui_kit::base::{
+    TextSelectionEvent, TextSelectionHandle, TextSelectionRegistration, TextSelectionRun,
+};
 use warpui_kit_core::palette;
 
 /// Per-element state: the selection handle and the shaped text. `StyledText`
@@ -151,16 +157,12 @@ impl Element for SelectableText {
         window: &mut Window,
         cx: &mut App,
     ) -> (LayoutId, Self::RequestLayoutState) {
-        // The participant owns no view of its own, so a drag would only show
-        // when something else re-rendered the page. Notify the current view
-        // on every selection event, the way a TextView does.
-        let view = window.current_view();
         let fallback = self.text.to_string();
         let key = self.key;
         let styled = std::mem::replace(&mut self.styled_text, StyledText::new(""));
         let retained = window.with_element_state(
             global_id.expect("SelectableText must have a stable element id"),
-            |retained: Option<Rc<RefCell<Retained>>>, _| {
+            |retained: Option<Rc<RefCell<Retained>>>, window| {
                 if let Some(retained) = retained
                     && retained.borrow().key == key
                 {
@@ -170,8 +172,32 @@ impl Element for SelectableText {
                 let copy = Rc::new(RefCell::new(String::new()));
                 let copy_for_callback = copy.clone();
                 handle.copy_with(move |_cx| copy_for_callback.borrow().clone(), cx);
+                let my_id = handle.entity_id();
+                let window_handle = window.window_handle();
                 handle
-                    .subscribe(move |_event, cx| cx.notify(view), cx)
+                    .subscribe(
+                        move |event, cx| {
+                            // A wrapped body has one participant per row. Only
+                            // the row that owns an endpoint needs to repaint;
+                            // the rest would otherwise wake the whole view on
+                            // every mouse move.
+                            let refresh = match event {
+                                TextSelectionEvent::SelectionChanged(Some(snapshot)) => {
+                                    let anchor = snapshot.anchor().entity_id();
+                                    let cursor = snapshot.cursor().entity_id();
+                                    anchor.is_none()
+                                        || cursor.is_none()
+                                        || anchor == Some(my_id)
+                                        || cursor == Some(my_id)
+                                }
+                                _ => true,
+                            };
+                            if refresh {
+                                let _ = window_handle.update(cx, |_, window, _| window.refresh());
+                            }
+                        },
+                        cx,
+                    )
                     .detach();
                 let retained = Rc::new(RefCell::new(Retained {
                     key,
