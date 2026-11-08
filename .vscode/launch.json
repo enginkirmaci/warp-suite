@@ -3,19 +3,23 @@
     // (the matching task passes -p) and runs the binary from the shared target
     // dir (.cargo/config.toml: .build/target).
     //
-    // One config per app: "type" cannot be platform-specific in launch.json,
-    // and CodeLLDB (vadimcn.vscode-lldb) wedges at the NVIDIA Vulkan ICD dlopen
-    // under its solib handler, so webfreak.debug's gdb adapter is the one that
-    // works here. Debugging on Windows would need a cppvsdbg entry added on
-    // that machine; launch.json cannot choose the type per OS.
+    // Two configs per app because "type" cannot be platform-specific in
+    // launch.json: Linux uses webfreak.debug's gdb adapter (CodeLLDB wedges at
+    // the NVIDIA Vulkan ICD dlopen under its solib handler), Windows uses the
+    // C/C++ extension's cppvsdbg. F5 reuses the last-selected config per
+    // machine, so each machine only ever sees its own entry after the first
+    // pick. snapit is the exception: it is Windows-only (apps.toml
+    // linux_skip = true; the engine is cfg(windows)), so it has a cppvsdbg
+    // config and no gdb one — on Linux the binary is a stub that only reports
+    // the engine is Windows-only.
     //
-    // webfreak.debug uses non-standard field names: "target" (not "program")
-    // and "arguments" (a string, not "args") — a missing "target" crashes the
-    // adapter with ERR_INVALID_ARG_TYPE.
+    // gdb uses non-standard field names: "target" (not "program") and a string
+    // "arguments" (not "args") — a missing "target" crashes the adapter with
+    // ERR_INVALID_ARG_TYPE.
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Rust: warp-station (gdb)",
+            "name": "Rust: warp-station (Linux — gdb)",
             "type": "gdb",
             "request": "launch",
             "target": "${workspaceFolder}/.build/target/debug/warp-station",
@@ -23,7 +27,7 @@
             "preLaunchTask": "cargo build (warp-station)"
         },
         {
-            "name": "Rust: warp-agent (gdb)",
+            "name": "Rust: warp-agent (Linux — gdb)",
             "type": "gdb",
             "request": "launch",
             "target": "${workspaceFolder}/.build/target/debug/warp-agent",
@@ -31,12 +35,48 @@
             "preLaunchTask": "cargo build (warp-agent)"
         },
         {
-            "name": "Rust: warp-notes (gdb)",
+            "name": "Rust: warp-notes (Linux — gdb)",
             "type": "gdb",
             "request": "launch",
             "target": "${workspaceFolder}/.build/target/debug/warp-notes",
             "cwd": "${workspaceFolder}",
             "preLaunchTask": "cargo build (warp-notes)"
+        },
+        {
+            "name": "Rust: warp-station (Windows — cppvsdbg)",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/.build/target/debug/warp-station.exe",
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "preLaunchTask": "cargo build (warp-station)"
+        },
+        {
+            "name": "Rust: warp-agent (Windows — cppvsdbg)",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/.build/target/debug/warp-agent.exe",
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "preLaunchTask": "cargo build (warp-agent)"
+        },
+        {
+            "name": "Rust: warp-notes (Windows — cppvsdbg)",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/.build/target/debug/warp-notes.exe",
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "preLaunchTask": "cargo build (warp-notes)"
+        },
+        {
+            "name": "Rust: snapit (Windows — cppvsdbg)",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/.build/target/debug/warp-snapit.exe",
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "preLaunchTask": "cargo build (snapit)"
         }
     ]
 }
