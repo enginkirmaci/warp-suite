@@ -1,12 +1,12 @@
 # Plan: warp-notes as a daily-driver notes workspace
 
-Status: steps 1–7 landed (9004760, 3cad60b, a437588, 662f587, 6272a3c,
-7935d19, 35f6a35); steps 8–10 open. The plan turns the current single-note
-viewer into a keyboard-first workspace: safe file management, fast retrieval,
-multiple open notes, and the context a notes app needs. Steps are ordered so
-each one is independently useful and probeable. The §5 entries stay as the
-record of what each slice was meant to prove; trim them as the remaining steps
-land.
+Status: steps 1–9 landed (9004760, 3cad60b, a437588, 662f587, 6272a3c,
+7935d19, 35f6a35, d98484a); step 10 (templates and the daily note) is open.
+The plan turns the current single-note viewer into a keyboard-first
+workspace: safe file management, fast retrieval, multiple open notes, and the
+context a notes app needs. Steps are ordered so each one is independently
+useful and probeable. The §5 entries stay as the record of what each slice
+was meant to prove; trim them as the remaining step lands.
 
 ## 1. Goal
 
