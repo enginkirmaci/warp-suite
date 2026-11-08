@@ -3,51 +3,47 @@ name = "warp-station"
 version.workspace = true
 edition.workspace = true
 description = "Warp Station — repository workbench"
+license.workspace = true
+publish = false
 
-[lib]
-name = "warp_station"
-path = "src/lib.rs"
+# src/lib.rs is the probe boundary (tests/ build the real views); the binary is
+# a thin bootstrap over it. Both targets come from cargo's defaults.
 
-[[bin]]
-name = "warp-station"
-path = "src/main.rs"
+[dependencies]
+# suite crates — the paths live in [workspace.dependencies]
+warp-station-core = { workspace = true }
+warpui-kit-core = { workspace = true }
+warpui-kit-platform = { workspace = true }
+warpui-kit-diff = { workspace = true, features = ["all-languages"] }
+warpui-kit-markdown = { workspace = true }
+warpui-kit-picker = { workspace = true }
+
+# the gpui stack, pinned at the workspace root
+gpui = { workspace = true }
+gpui_platform = { workspace = true }
+gpui-kit = { workspace = true }
+
+# third-party
+anyhow = { workspace = true }
+async-channel = { workspace = true }
+chrono = { workspace = true }
+futures-util = { workspace = true }
+# the Add-Repositories Browse… button; portal backend shares gpui's ashpd
+# stack on Linux (no GTK dependency), IFileDialog on Windows
+rfd = { version = "0.17", default-features = false, features = ["xdg-portal"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-appender = { workspace = true }
+tracing-subscriber = { workspace = true }
 
 [dev-dependencies]
 # headless UI probes (tests/); feature-unifies with the normal gpui-kit dep
 # only under `cargo test`
-gpui-kit = { version = "0.9", features = ["test-support"] }
+gpui-kit = { workspace = true, features = ["test-support"] }
 # the warp watcher cycle test's throwaway endpoint dir
-tempfile = "3"
+tempfile = { workspace = true }
 
 [target.'cfg(windows)'.build-dependencies]
-winresource = "0.1"
-
-[dependencies]
-warp-station-core = { path = "../warp-station-core" }
-
-# gpui-pre: crates.io snapshots of zed's gpui, pinned to the exact rev
-# gpui-kit 0.9 is built against these exact 0.3.11 snapshots. Bump together with gpui-kit.
-gpui = { package = "gpui-pre", version = "=0.3.11" }
-gpui_platform = { package = "gpui-pre-platform", version = "=0.3.11", features = ["wayland", "x11"] }
-gpui-kit = { version = "0.9" }
-
-# the shared component family (local sibling repos; swap to version deps to publish)
-warpui-kit-core = { path = "../../../../kits/warpui-kit-core" }
-warpui-kit-platform = { path = "../../../../kits/warpui-kit-platform" }
-warpui-kit-diff = { path = "../../../../kits/warpui-kit-diff", features = ["all-languages"] }
-warpui-kit-markdown = { path = "../../../../kits/warpui-kit-markdown" }
-warpui-kit-picker = { path = "../../../../kits/warpui-kit-picker" }
-
-anyhow = "1"
-chrono = { version = "0.4", default-features = false, features = ["clock"] }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-async-channel = "2"
-tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "process", "time", "io-util", "net", "sync"] }
-futures-util = "0.3"
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
-tracing-appender = "0.2"
-# the Add-Repositories Browse… button; portal backend shares gpui's ashpd
-# stack on Linux (no GTK dependency), IFileDialog on Windows
-rfd = { version = "0.17", default-features = false, features = ["xdg-portal"] }
+winresource = { workspace = true }

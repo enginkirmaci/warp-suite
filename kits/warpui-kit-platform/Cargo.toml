@@ -1,32 +1,32 @@
 [package]
 name = "warpui-kit-platform"
-version = "0.1.0"
-edition = "2024"
+version.workspace = true
+edition.workspace = true
 description = "The gpui-free platform plumbing every suite app re-grew by hand: atomic file writes, file logging; plus the embedded-asset source under the `assets` feature"
 license = "MIT"
-
-[dependencies]
-anyhow = "1"
-serde = "1"
-serde_json = "1"
-rand = "0.10"
-tracing = { version = "0.1", default-features = false, features = ["std"] }
-tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
-tracing-appender = "0.2"
-
-# `assets`: the rust-embed-over-gpui-kit AssetSource. Feature-scoped so the
-# headless service crates (warp-station-core) can take the io/logging halves
-# without pulling gpui into their "testable without a display" graph.
-gpui = { package = "gpui-pre", version = "=0.3.11", optional = true }
-gpui-kit = { version = "0.9", optional = true }
-# trait only (no derive in this crate); apps derive with their own
-# `debug-embed` feature so dev builds embed assets too
-rust-embed = { version = "8", default-features = false, optional = true }
+repository.workspace = true
 
 [features]
 default = ["assets"]
 assets = ["dep:gpui", "dep:gpui-kit", "dep:rust-embed"]
 
+[dependencies]
+anyhow = { workspace = true }
+# the gpui halves, optional: the headless service crates (warp-station-core)
+# take the io/logging halves without pulling gpui into their
+# "testable without a display" graph
+gpui = { workspace = true, optional = true }
+gpui-kit = { workspace = true, optional = true }
+rand = "0.10"
+# trait only (no derive in this crate); apps derive with their own
+# `debug-embed` feature so dev builds embed assets too
+rust-embed = { workspace = true, optional = true, default-features = false }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true, default-features = false, features = ["std"] }
+tracing-appender = { workspace = true }
+tracing-subscriber = { workspace = true }
+
 [dev-dependencies]
 # the layout migrations are exercised against throwaway home directories
-tempfile = "3"
+tempfile = { workspace = true }

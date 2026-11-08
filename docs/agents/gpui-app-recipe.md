@@ -13,8 +13,8 @@ wrappers over `warpui-kit-platform` and can be copied from
 `apps/warp-notes/src/`.
 
 **Where a new app goes.** Inside warp-suite, under `apps/<name>/`, imported with
-`git subtree add --prefix=apps/<name>` so it keeps its history. The path deps
-below assume that layout (`../../kits/...`). A standalone checkout is the
+`git subtree add --prefix=apps/<name>` so it keeps its history. The workspace
+dependency table below assumes that layout. A standalone checkout is the
 exception now, not the rule.
 
 ## 1. Cargo.toml
@@ -22,64 +22,66 @@ exception now, not the rule.
 ```toml
 [package]
 name = "myapp"
-version = "0.1.0"
-edition = "2024"
+version.workspace = true
+edition.workspace = true
 description = "One line"
+license.workspace = true
+publish = false
 
-# The library boundary exists so the headless probes (tests/) can build the
-# real views; the binary is a thin bootstrap over it.
-[lib]
-name = "myapp"
-path = "src/lib.rs"
-
-[[bin]]
-name = "myapp"
-path = "src/main.rs"
+# src/lib.rs is the probe boundary (tests/ build the real views); the binary is
+# a thin bootstrap over it. Both targets come from cargo's defaults.
 
 [dependencies]
-# the shared component family: a path dep inside the suite checkout
-# (apps/<app>/ -> ../../kits/, apps/warp-station/crates/<crate>/ -> ../../../../kits/).
-warpui-kit-core = { path = "../../kits/warpui-kit-core" }
-warpui-kit-platform = { path = "../../kits/warpui-kit-platform" }
+# suite crates — the paths live in the root [workspace.dependencies]
+warpui-kit-core = { workspace = true }
+warpui-kit-platform = { workspace = true }
 
-# gpui-pre: crates.io snapshots of zed's gpui, pinned to the exact rev
-# gpui-kit 0.9 is built against (=0.3.11). Bump together with gpui-kit.
-gpui = { package = "gpui-pre", version = "=0.3.11" }
-gpui_platform = { package = "gpui-pre-platform", version = "=0.3.11", features = ["wayland", "x11"] }
-gpui-kit = "0.9"
+# the gpui stack, pinned at the workspace root
+gpui = { workspace = true }
+gpui_platform = { workspace = true }
+gpui-kit = { workspace = true }
 
-anyhow = "1"
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
-tracing-appender = "0.2"
+# third-party
+anyhow = { workspace = true }
+tracing = { workspace = true }
+tracing-appender = { workspace = true }
+tracing-subscriber = { workspace = true }
 
 # debug-embed: embed assets at compile time in debug builds too — without it
 # rust-embed resolves "assets" against the process CWD at runtime, so the app
 # only finds its icons when launched from the repo root
-rust-embed = { version = "8", features = ["debug-embed"] }
-
-[target.'cfg(windows)'.build-dependencies]
-winresource = "0.1"
+rust-embed = { workspace = true, features = ["debug-embed"] }
 
 [dev-dependencies]
 # headless UI probes (tests/); feature-unifies with the normal gpui-kit dep
 # only under `cargo test`
-gpui-kit = { version = "0.9", features = ["test-support"] }
+gpui-kit = { workspace = true, features = ["test-support"] }
+
+[target.'cfg(windows)'.build-dependencies]
+winresource = { workspace = true }
 ```
 
 Notes:
 
+- Every shared version, path and universal feature lives in the root
+  `[workspace.dependencies]`; a member writes `{ workspace = true }` and adds
+  only the features it needs. Adding a crate to the suite is an edit there,
+  not per app.
 - `gpui-pre` + `gpui-pre-platform` must match the kit exactly. The suite pins
-  them office-wide (every app and every kit crate): a new member joins the
-  existing pin, it does not introduce a second snapshot. Bump every crate in the
-  same commit, or the workspace fails to resolve.
+  them once, in `[workspace.dependencies]`: a new member joins the existing
+  pin, it does not introduce a second snapshot. Bump the three together in
+  that table, or the workspace fails to resolve.
 - Never add the real crates.io `gpui`. The `gpui` key above is the `gpui-pre`
   remap, and `gpui_kit::application`, `gpui_kit::gpui::…` work without it.
 - Windows-only deps go under `[target.'cfg(windows)'.dependencies]`
   (e.g. the `windows` crate with explicit features, as in
   `apps/warp-snapit/Cargo.toml`).
 - Add `warpui-kit-diff`, `-markdown` or `-picker` when the app shows diffs,
-  edits markdown or needs a filtered picker.
+  edits markdown or needs a filtered picker; the language features hang off
+  the kit (`features = ["all-languages", "mermaid"]`), not off `gpui-kit`.
+- `apps/warp-snapit` is the exception: it keeps
+  `[[bin]] name = "warp-snapit"` with `path = "src/main.rs"` because its
+  package is `snapit`.
 
 ## 2. lib.rs and main.rs — bootstrap order
 

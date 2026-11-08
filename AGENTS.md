@@ -59,9 +59,10 @@ suite's zone snapper. For the user-facing description, see
   `.build/target`. Keep it that way: one GPUI dependency tree is shared by
   every app and kit.
 - The GPUI stack is `gpui-kit 0.9`, `gpui-pre =0.3.11` and
-  `gpui-pre-platform =0.3.11`. Never add the real crates.io `gpui`; it is
-  stale. Bump `gpui-kit`, `gpui-pre` and `gpui-pre-platform` together, across
-  every app and every kit crate, or the workspace will not resolve.
+  `gpui-pre-platform =0.3.11`, declared once in the root
+  `[workspace.dependencies]`. Never add the real crates.io `gpui`; it is
+  stale. Bump `gpui-kit`, `gpui-pre` and `gpui-pre-platform` together there,
+  or the workspace will not resolve.
 - [`apps.toml`](apps.toml) carries per-app build knobs (`package`,
   `linux_build`, `linux_skip`, `icon_prefix`, `scalable_svg`) and contract
   notes. [`scripts/manifest.py`](scripts/manifest.py) is the reader both build
@@ -284,9 +285,11 @@ when one side changes, update the other side in the **same commit**.
    non-default build knobs. Add `package = "..."` when the directory name is
    not the cargo package name.
 3. Add it to the root workspace `members` (both build scripts loop over
-   `apps.toml`, but cargo needs the member).
-4. Add a shared crate to the `kits/` workspace only when it is needed by more
-   than one app; otherwise keep it in the app.
+   `apps.toml`, but cargo needs the member) and, for every dependency more
+   than one member uses, to `[workspace.dependencies]`.
+4. Add a shared crate to `kits/` only when it is needed by more than one app;
+   otherwise keep it in the app. A new kit is a member and a
+   `[workspace.dependencies]` path entry like the others.
 5. Document the cross-app contracts in the README and in this file.
 6. Add `apps/<name>/AGENTS.md` for the app-specific facts.
 

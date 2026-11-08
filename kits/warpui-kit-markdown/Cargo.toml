@@ -1,9 +1,10 @@
 [package]
 name = "warpui-kit-markdown"
-version = "0.1.0"
-edition = "2024"
+version.workspace = true
+edition.workspace = true
 description = "Obsidian-style live markdown engine for gpui-kit editors: span parser, editor highlighter and formatting ops"
 license = "MIT"
+repository.workspace = true
 
 [features]
 # renders ```mermaid blocks as diagrams; without it they stay code blocks
@@ -25,21 +26,22 @@ tree-sitter-yaml = ["warpui-kit-diff/tree-sitter-yaml"]
 all-languages = ["warpui-kit-diff/tree-sitter-bash", "warpui-kit-diff/tree-sitter-c", "warpui-kit-diff/tree-sitter-cpp", "warpui-kit-diff/tree-sitter-css", "warpui-kit-diff/tree-sitter-go", "warpui-kit-diff/tree-sitter-html", "warpui-kit-diff/tree-sitter-javascript", "warpui-kit-diff/tree-sitter-python", "warpui-kit-diff/tree-sitter-rust", "warpui-kit-diff/tree-sitter-toml", "warpui-kit-diff/tree-sitter-tsx", "warpui-kit-diff/tree-sitter-typescript", "warpui-kit-diff/tree-sitter-yaml"]
 
 [dependencies]
-# gpui-pre: crates.io snapshots of zed's gpui, pinned to the exact rev
-# gpui-kit 0.9 is built against these exact 0.3.11 snapshots. Bump together with gpui-kit.
-gpui = { package = "gpui-pre", version = "=0.3.11" }
-gpui-kit = { version = "0.9" }
-warpui-kit-core = { path = "../warpui-kit-core" }
-warpui-kit-diff = { path = "../warpui-kit-diff" }
-unicode-segmentation = "1"
-anyhow = "1"
+warpui-kit-core = { workspace = true }
+warpui-kit-diff = { workspace = true }
+
+# the gpui stack, pinned at the workspace root
+gpui = { workspace = true }
+gpui-kit = { workspace = true }
+
+anyhow = { workspace = true }
 log = "0.4"
 # leaves out the default ELK layout, which is EPL-2.0, and math labels
 merman = { version = "0.9", default-features = false, features = ["svg", "layout-cytoscape", "all-diagrams"], optional = true }
-serde_json = { version = "1", optional = true }
+serde_json = { workspace = true, optional = true }
+unicode-segmentation = { workspace = true }
 
 [dev-dependencies]
 # headless UI probes (tests/); feature-unifies with the normal gpui-kit dep
 # only under `cargo test`
-gpui-kit = { version = "0.9", features = ["test-support"] }
-gpui = { package = "gpui-pre", version = "=0.3.11", features = ["test-support"] }
+gpui = { workspace = true, features = ["test-support"] }
+gpui-kit = { workspace = true, features = ["test-support"] }

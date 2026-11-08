@@ -1,8 +1,9 @@
 # kits
 
-The shared component family the suite's apps build on: one cargo workspace
-under `kits/` for the five `warpui-kit-*` crates, extracted from warp-agent and
-Warp Station.
+The shared component family the suite's apps build on: five `warpui-kit-*`
+crates, extracted from warp-agent and Warp Station. They are members of the
+suite workspace (root `Cargo.toml`), not a workspace of their own; there is no
+`kits/Cargo.lock`.
 
 | Crate | Provides |
 | --- | --- |
@@ -29,10 +30,15 @@ colours.
 ## Working here
 
 ```sh
-cargo test                  # all five crates, headless GPUI probes included
-cargo fmt --check
-cargo clippy --all-targets
+cargo test -p warpui-kit-core -p warpui-kit-diff -p warpui-kit-markdown \
+  -p warpui-kit-picker -p warpui-kit-platform
+cargo fmt --all --check
+cargo clippy --all-targets -p warpui-kit-core -p warpui-kit-diff \
+  -p warpui-kit-markdown -p warpui-kit-picker -p warpui-kit-platform -- -D warnings
 ```
+
+These run from `kits/` too: with no manifest here, cargo walks up to the suite
+workspace.
 
 `warpui-kit-core` is the base: every other crate depends on it. The component
 crates are independent of each other except that `-markdown` uses `-diff` for
@@ -41,15 +47,13 @@ code blocks. `-platform` is the odd one out — no gpui by default, and
 
 ## How the apps consume it
 
-The apps point at this workspace from their own directory:
+The paths live once, in the root `[workspace.dependencies]`, so a member only
+names the crate and the depth of its own directory stops mattering:
 
 ```toml
-warpui-kit-core = { path = "../../kits/warpui-kit-core" }
+warpui-kit-core = { workspace = true }
+warpui-kit-markdown = { workspace = true, features = ["mermaid", "all-languages"] }
 ```
-
-warp-station's crate sits two levels deeper
-(`apps/warp-station/crates/warp-station`), so it uses
-`../../../../kits/...`.
 
 The apps live under `apps/` in this repo, so a release builds from the suite
 checkout alone. The suite commit is the kits' provenance: the Linux bundle's
@@ -57,5 +61,6 @@ checkout alone. The suite commit is the kits' provenance: the Linux bundle's
 step.
 
 Adding a crate: give it a directory with a `Cargo.toml` and `src/`, add it to
-the workspace `members` in `Cargo.toml`, and both release jobs pick it up
-automatically.
+the workspace `members` in the root `Cargo.toml`, and add it to
+`[workspace.dependencies]` as soon as a second member needs it. Both release
+jobs pick it up automatically.

@@ -3,24 +3,31 @@ name = "warp-station-core"
 version.workspace = true
 edition.workspace = true
 description = "Headless Warp Station services — no gpui dependencies"
+license.workspace = true
+publish = false
 
 [dependencies]
-anyhow = "1"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-tracing = "0.1"
-async-channel = "2"
-futures-util = "0.3"
-chrono = { version = "0.4", default-features = false, features = ["clock", "std", "serde"] }
-reqwest = { version = "0.13", default-features = false, features = ["json", "rustls", "stream"] }
-tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "process", "time", "io-util", "sync", "net"] }
-git2 = { version = "0.21", default-features = false }
 # io/logging halves only — default-features keeps gpui out of this crate's
 # "testable without a display" graph
-warpui-kit-platform = { path = "../../../../kits/warpui-kit-platform", default-features = false }
+warpui-kit-platform = { workspace = true, default-features = false }
+
+# third-party
+anyhow = { workspace = true }
+async-channel = { workspace = true }
+chrono = { workspace = true, features = ["std", "serde"] }
+futures-util = { workspace = true }
+git2 = { version = "0.21", default-features = false }
+reqwest = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]
-libc = "0.2"
+libc = { workspace = true }
 
 # WinRT toasts on Windows (Action Center): the crate wraps Windows.UI.Notifications
 # and falls back to PowerShell's whitelisted AppUserModelID, so toasts appear
@@ -29,6 +36,3 @@ libc = "0.2"
 # stays behind cfg(windows).
 [target.'cfg(windows)'.dependencies]
 tauri-winrt-notification = "0.7"
-
-[dev-dependencies]
-tempfile = "3"

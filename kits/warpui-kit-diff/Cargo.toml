@@ -1,9 +1,10 @@
 [package]
 name = "warpui-kit-diff"
-version = "0.1.0"
-edition = "2024"
+version.workspace = true
+edition.workspace = true
 description = "Zed-style unified diff and line-numbered code renderer for gpui-kit applications, tree-sitter highlighted"
 license = "MIT"
+repository.workspace = true
 
 [features]
 # forwarded to gpui-kit's grammar features — enable the languages callers render
@@ -25,15 +26,16 @@ all-languages = ["gpui-kit/tree-sitter-bash", "gpui-kit/tree-sitter-c", "gpui-ki
 tree-sitter-javascript = ["gpui-kit/tree-sitter-javascript"]
 
 [dependencies]
-# gpui-pre: crates.io snapshots of zed's gpui, pinned to the exact rev
-# gpui-kit 0.9 is built against these exact 0.3.11 snapshots. Bump together with gpui-kit.
-gpui = { package = "gpui-pre", version = "=0.3.11" }
-gpui-kit = { version = "0.9" }
-warpui-kit-core = { path = "../warpui-kit-core" }
-serde_json = { version = "1", default-features = false, features = ["std"] }
+warpui-kit-core = { workspace = true }
+
+# the gpui stack, pinned at the workspace root
+gpui = { workspace = true }
+gpui-kit = { workspace = true }
+
+serde_json = { workspace = true, default-features = false, features = ["std"] }
 
 [dev-dependencies]
 # headless UI probes (tests/); feature-unifies with the normal gpui-kit dep
 # only under `cargo test`
-gpui-kit = { version = "0.9", features = ["test-support"] }
-gpui = { package = "gpui-pre", version = "=0.3.11", features = ["test-support"] }
+gpui = { workspace = true, features = ["test-support"] }
+gpui-kit = { workspace = true, features = ["test-support"] }

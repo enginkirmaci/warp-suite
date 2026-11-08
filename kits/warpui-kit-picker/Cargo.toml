@@ -1,18 +1,19 @@
 [package]
 name = "warpui-kit-picker"
-version = "0.1.0"
-edition = "2024"
+version.workspace = true
+edition.workspace = true
 description = "Filtered select-style picker for gpui-kit applications: trigger, filter input, virtualized rows and overlay popups"
 license = "MIT"
+repository.workspace = true
 
 [dependencies]
-# gpui-pre: crates.io snapshots of zed's gpui, pinned to the exact rev
-# gpui-kit 0.9 is built against these exact 0.3.11 snapshots. Bump together with gpui-kit.
-gpui = { package = "gpui-pre", version = "=0.3.11" }
-gpui-kit = { version = "0.9" }
-warpui-kit-core = { path = "../warpui-kit-core" }
+warpui-kit-core = { workspace = true }
+
+# the gpui stack, pinned at the workspace root
+gpui = { workspace = true }
+gpui-kit = { workspace = true }
 
 [dev-dependencies]
 # headless probes (tests/); feature-unifies with the normal gpui-kit dep
 # only under `cargo test`
-gpui-kit = { version = "0.9", features = ["test-support"] }
+gpui-kit = { workspace = true, features = ["test-support"] }
