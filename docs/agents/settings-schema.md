@@ -50,7 +50,7 @@ compatibility rules that must not drift.
 
 Top level: `schema_version`, `nuget_local`, `repos`, `clipboard_password`,
 `snapit`, `keep_awake`, `opencode`, `deepseek`, `warp_agent`, `warp_notes`,
-`general`, `notifications`.
+`general`, `changes`, `notifications`.
 
 - `nuget_local`: `enable_nuget` (true), `watch_folder` (null),
   `nuget_package_filter` (`*.nupkg`), `file_copy_delay_ms` (2000),
@@ -85,6 +85,9 @@ Top level: `schema_version`, `nuget_local`, `repos`, `clipboard_password`,
 - `general`: `start_minimized` (false), `start_at_boot` (false),
   `notes_store_path` (""), `show_tooltips` (true), `text_size` (null),
   `reduce_motion` (false).
+- `changes`: `diff_view` (`unified` default, `split`) and `diff_wrap`
+  (false). The last layout and word-wrap choices from the diff header; global,
+  not per repository. An unknown layout string reads unified.
 - `notifications`: `enabled` (true), `only_when_unfocused` (true),
   `errors` (true), `action_confirmations` (true), `fetch_summaries` (true).
 

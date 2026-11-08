@@ -15,6 +15,7 @@ use gpui_kit::component::input::{InputState, TextareaState};
 use std::cell::RefCell;
 use std::rc::Rc;
 use warp_station_core::model::GitChangedFile;
+use warp_station_core::settings::DiffViewMode;
 use warpui_kit_picker::{
     FilteredPicker, OverlayAnchor, PanelChrome, PickerBody, PickerData, PickerIcons, PickerItem,
     PickerRow, PickerSpec, PickerTarget, Selection, TrailingDelete, TriggerScale,
@@ -78,6 +79,10 @@ pub struct ChangesView {
     pub store: Entity<Store>,
     /// The (path, staged) row the diff shows; its patch loads on selection.
     selected_file: Option<(String, bool)>,
+    /// The persisted diff layout; global, not per repository.
+    diff_view: DiffViewMode,
+    /// Whether long diff rows wrap; persisted with the layout.
+    diff_wrap: bool,
     file_by_repo: std::collections::HashMap<String, (String, bool)>,
     /// The row whose discard took its first click; the second one discards.
     discard_armed: Option<(String, bool)>,
@@ -135,9 +140,13 @@ impl ChangesView {
         let commit_message =
             cx.new(|cx| TextareaState::new(window, cx).placeholder("Describe your changes…"));
         cx.observe(&store, |_, _, cx| cx.notify()).detach();
+        let diff_view = store.read(cx).diff_view();
+        let diff_wrap = store.read(cx).diff_wrap();
         Self {
             store,
             selected_file: None,
+            diff_view,
+            diff_wrap,
             file_by_repo: std::collections::HashMap::new(),
             discard_armed: None,
             discard_all_armed: false,
@@ -486,6 +495,8 @@ impl ChangesView {
         let Some(key) = self.selected_file.clone() else {
             return pane.into_any_element();
         };
+        let split = self.diff_view == DiffViewMode::Split;
+        let show_tooltips = self.store.read(cx).settings().general.show_tooltips;
         // an empty patch is a state, not a one-row diff: a binary file or a
         // mode-only change has nothing textual to draw
         let body: gpui::AnyElement = match self.patches.get(&key) {
@@ -494,9 +505,13 @@ impl ChangesView {
                 .flex_1()
                 .min_h_0()
                 .overflow_y_scroll()
-                .child(warpui_kit_diff::render_diff(
+                .child(warpui_kit_diff::render_diff_with(
                     patch,
                     None,
+                    warpui_kit_diff::DiffOptions {
+                        mode: kit_mode(self.diff_view),
+                        wrap: self.diff_wrap,
+                    },
                     theme::font_control(),
                     window,
                     cx,
@@ -512,13 +527,41 @@ impl ChangesView {
                 .px_4()
                 .flex()
                 .items_center()
+                .justify_between()
+                .gap_3()
                 .bg(theme::panel())
                 .border_b_1()
                 .border_color(theme::hairline())
                 .font_family(theme::code_font())
                 .text_size(px(theme::font_mono_meta()))
                 .text_color(theme::text())
-                .child(key.0),
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .overflow_hidden()
+                        .whitespace_nowrap()
+                        .text_ellipsis()
+                        .child(key.0),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap_1()
+                        .child(diff_wrap_toggle(
+                            self.diff_wrap,
+                            self.store.clone(),
+                            cx.entity(),
+                            show_tooltips,
+                        ))
+                        .child(diff_view_toggle(
+                            split,
+                            self.store.clone(),
+                            cx.entity(),
+                            show_tooltips,
+                        )),
+                ),
         )
         .child(body)
         .into_any_element()
@@ -2147,6 +2190,101 @@ fn diff_state(text: &str) -> gpui::AnyElement {
         .text_color(theme::text_muted())
         .child(text.to_string())
         .into_any_element()
+}
+
+/// The diff header's single icon button. The glyph names the other mode and
+/// the tooltip says the action; a click flips the local view and persists it.
+fn diff_view_toggle(
+    split: bool,
+    store: Entity<Store>,
+    this: Entity<ChangesView>,
+    show_tooltips: bool,
+) -> gpui::AnyElement {
+    let label = if split {
+        "Switch to unified view"
+    } else {
+        "Switch to split view"
+    };
+    let icon_path = if split {
+        "icons/icon-diff-unified.svg"
+    } else {
+        "icons/icon-diff-split.svg"
+    };
+    let button = div()
+        .id("diff-view-toggle")
+        .debug_selector(|| "diff-view-toggle".into())
+        .a11y_button(label)
+        .cursor_pointer()
+        .rounded_md()
+        .p_1()
+        .flex()
+        .items_center()
+        .hover(|s| s.bg(theme::raised()))
+        .on_click(move |_, _, cx| {
+            let next = if split {
+                DiffViewMode::Unified
+            } else {
+                DiffViewMode::Split
+            };
+            store.update(cx, |store, _| store.set_diff_view(next));
+            this.update(cx, |this, cx| {
+                this.diff_view = next;
+                cx.notify();
+            });
+        })
+        .child(icon(
+            icon_path,
+            px(theme::icon_small()),
+            theme::text_muted(),
+        ));
+    crate::ui::with_tooltip(button, show_tooltips, label).into_any_element()
+}
+
+/// The header's word-wrap toggle. The icon button is active while rows wrap;
+/// the choice is persisted with the layout.
+fn diff_wrap_toggle(
+    wrap: bool,
+    store: Entity<Store>,
+    this: Entity<ChangesView>,
+    show_tooltips: bool,
+) -> gpui::AnyElement {
+    let label = "Wrap long lines";
+    let button = div()
+        .id("diff-wrap-toggle")
+        .debug_selector(|| "diff-wrap-toggle".into())
+        .a11y_toggle(label, wrap)
+        .cursor_pointer()
+        .rounded_md()
+        .p_1()
+        .flex()
+        .items_center()
+        .when(wrap, |d| d.bg(theme::raised()))
+        .hover(|d| d.bg(theme::raised()))
+        .on_click(move |_, _, cx| {
+            let next = !wrap;
+            store.update(cx, |store, _| store.set_diff_wrap(next));
+            this.update(cx, |this, cx| {
+                this.diff_wrap = next;
+                cx.notify();
+            });
+        })
+        .child(icon(
+            "icons/icon-wrap.svg",
+            px(theme::icon_small()),
+            if wrap {
+                theme::text()
+            } else {
+                theme::text_muted()
+            },
+        ));
+    crate::ui::with_tooltip(button, show_tooltips, label).into_any_element()
+}
+
+fn kit_mode(mode: DiffViewMode) -> warpui_kit_diff::DiffMode {
+    match mode {
+        DiffViewMode::Unified => warpui_kit_diff::DiffMode::Unified,
+        DiffViewMode::Split => warpui_kit_diff::DiffMode::Split,
+    }
 }
 
 fn status_color(code: &str) -> gpui::Rgba {

@@ -54,6 +54,16 @@ impl DiffRow {
     }
 }
 
+/// One row of the split view: indices into [`DiffHunk::rows`] for each side.
+/// A context row appears on both sides; a deletion only on the left and an
+/// addition only on the right. An unpaired change leaves one side `None`; the
+/// renderer draws a blank filler there so the two columns stay aligned.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SplitRow {
+    pub left: Option<usize>,
+    pub right: Option<usize>,
+}
+
 /// One `@@ ... @@` hunk.
 #[derive(Clone, Debug, PartialEq)]
 pub struct DiffHunk {
@@ -62,21 +72,38 @@ pub struct DiffHunk {
     pub old_start: u32,
     pub new_start: u32,
     /// New-file line count the header declares.
+    ///
+    /// The renderer never draws the header; this is parsed for callers that
+    /// navigate hunks and for the parser's own tests.
     pub new_count: u32,
     pub rows: Vec<DiffRow>,
 }
 
 impl DiffHunk {
-    /// The hunk strip's title. Only the new-file range is shown: the old
-    /// range points at lines the file no longer has, and the strip exists to
-    /// orient a reader in the current file.
-    pub fn title(&self) -> String {
-        let context = self.header.splitn(3, "@@").nth(2).unwrap_or("").trim();
-        if context.is_empty() {
-            format!("@@ +{},{} @@", self.new_start, self.new_count)
-        } else {
-            format!("@@ +{},{} @@ {context}", self.new_start, self.new_count)
+    /// Pair a hunk for the split view: context on both sides, a change block's
+    /// deletions and additions by position, leftovers on one side.
+    pub fn split_rows(&self) -> Vec<SplitRow> {
+        let mut out = Vec::new();
+        let mut i = 0;
+        while i < self.rows.len() {
+            if self.rows[i].kind == RowKind::Context {
+                out.push(SplitRow {
+                    left: Some(i),
+                    right: Some(i),
+                });
+                i += 1;
+                continue;
+            }
+            let (dels, adds, next) = change_block(&self.rows, i);
+            for k in 0..dels.len().max(adds.len()) {
+                out.push(SplitRow {
+                    left: dels.get(k).copied(),
+                    right: adds.get(k).copied(),
+                });
+            }
+            i = next;
         }
+        out
     }
 }
 
@@ -300,6 +327,17 @@ impl DiffDocument {
             .unwrap_or(0)
     }
 
+    /// The largest old-file number any row carries, for split's left gutter.
+    pub fn max_old_number(&self) -> u32 {
+        self.files
+            .iter()
+            .flat_map(|file| &file.hunks)
+            .flat_map(|hunk| &hunk.rows)
+            .filter_map(|row| row.old)
+            .max()
+            .unwrap_or(0)
+    }
+
     /// The language of the first file that names one.
     pub fn language(&self, path_hint: Option<&str>) -> Option<&'static str> {
         self.files
@@ -358,34 +396,47 @@ fn parse_hunk_header(line: &str) -> Option<(u32, u32, u32)> {
     Some((old, new, count))
 }
 
+/// The deletion and addition indices of the change block starting at `start`
+/// (a non-context row), plus the index just past the block. Git's usual shape
+/// is all deletions then all additions, but collecting each kind separately
+/// keeps a malformed block from pairing the wrong rows.
+fn change_block(rows: &[DiffRow], start: usize) -> (Vec<usize>, Vec<usize>, usize) {
+    let mut dels = Vec::new();
+    let mut adds = Vec::new();
+    let mut i = start;
+    while i < rows.len() && rows[i].kind != RowKind::Context {
+        match rows[i].kind {
+            RowKind::Del => dels.push(i),
+            RowKind::Add => adds.push(i),
+            RowKind::Context => unreachable!("the loop stops at context"),
+        }
+        i += 1;
+    }
+    (dels, adds, i)
+}
+
 /// Pairs deletion and addition runs inside a hunk and marks the changed words
-/// on both sides. Runs are the usual shape git emits: all deletions of one
-/// change region, then all of its additions.
+/// on both sides. Pairing follows [`DiffHunk::split_rows`], so the emphasis and
+/// the split columns always name the same rows.
 fn emphasize_hunk(hunk: &mut DiffHunk) {
+    let mut pairs = Vec::new();
     let mut i = 0;
     while i < hunk.rows.len() {
-        if hunk.rows[i].kind != RowKind::Del {
+        if hunk.rows[i].kind == RowKind::Context {
             i += 1;
             continue;
         }
-        let del_start = i;
-        while i < hunk.rows.len() && hunk.rows[i].kind == RowKind::Del {
-            i += 1;
+        let (dels, adds, next) = change_block(&hunk.rows, i);
+        for offset in 0..dels.len().min(adds.len()) {
+            let (old_ranges, new_ranges) =
+                word_emphasis(&hunk.rows[dels[offset]].text, &hunk.rows[adds[offset]].text);
+            pairs.push((dels[offset], adds[offset], old_ranges, new_ranges));
         }
-        let del_end = i;
-        let add_start = i;
-        while i < hunk.rows.len() && hunk.rows[i].kind == RowKind::Add {
-            i += 1;
-        }
-        let pairs = (del_end - del_start).min(i - add_start);
-        for offset in 0..pairs {
-            let (old_ranges, new_ranges) = word_emphasis(
-                &hunk.rows[del_start + offset].text,
-                &hunk.rows[add_start + offset].text,
-            );
-            hunk.rows[del_start + offset].emphasis = old_ranges;
-            hunk.rows[add_start + offset].emphasis = new_ranges;
-        }
+        i = next;
+    }
+    for (del, add, old_ranges, new_ranges) in pairs {
+        hunk.rows[del].emphasis = old_ranges;
+        hunk.rows[add].emphasis = new_ranges;
     }
 }
 
@@ -526,8 +577,85 @@ mod tests {
         assert_eq!(hunk.rows[1].number(), None);
         assert_eq!(hunk.rows[0].number(), Some(3));
         assert_eq!(hunk.rows[2].number(), Some(4));
-        // the strip names the new range only
-        assert_eq!(hunk.title(), "@@ +3,5 @@ fn a() {");
+        assert_eq!(doc.max_old_number(), 5);
+        assert_eq!(doc.max_number(), 6);
+    }
+
+    #[test]
+    fn split_rows_pair_change_blocks() {
+        let doc = DiffDocument::parse("--- a/x\n+++ b/x\n@@ -1,4 +1,3 @@\n a\n-b\n-c\n+x\n d\n");
+        let rows = doc.files[0].hunks[0].split_rows();
+        assert_eq!(rows.len(), 4);
+        assert_eq!(
+            rows[0],
+            SplitRow {
+                left: Some(0),
+                right: Some(0)
+            }
+        );
+        assert_eq!(
+            rows[1],
+            SplitRow {
+                left: Some(1),
+                right: Some(3)
+            }
+        );
+        assert_eq!(
+            rows[2],
+            SplitRow {
+                left: Some(2),
+                right: None
+            }
+        );
+        assert_eq!(
+            rows[3],
+            SplitRow {
+                left: Some(4),
+                right: Some(4)
+            }
+        );
+    }
+
+    #[test]
+    fn split_rows_keep_a_leading_filler() {
+        let doc = DiffDocument::parse("--- a/x\n+++ b/x\n@@ -1,2 +1,4 @@\n a\n+x\n+y\n b\n");
+        let rows = doc.files[0].hunks[0].split_rows();
+        assert_eq!(rows.len(), 4);
+        assert_eq!(
+            rows[1],
+            SplitRow {
+                left: None,
+                right: Some(1)
+            }
+        );
+        assert_eq!(
+            rows[2],
+            SplitRow {
+                left: None,
+                right: Some(2)
+            }
+        );
+        assert_eq!(
+            rows[3],
+            SplitRow {
+                left: Some(3),
+                right: Some(3)
+            }
+        );
+    }
+
+    #[test]
+    fn split_rows_keep_an_unpaired_deletion_tail() {
+        let doc = DiffDocument::parse("--- a/x\n+++ b/x\n@@ -1,4 +1,2 @@\n a\n-b\n-c\n+x\n d\n");
+        let rows = doc.files[0].hunks[0].split_rows();
+        assert_eq!(rows.len(), 4);
+        assert_eq!(
+            rows[2],
+            SplitRow {
+                left: Some(2),
+                right: None
+            }
+        );
     }
 
     #[test]

@@ -113,13 +113,14 @@ fn a_drag_crosses_lines_and_copies_the_code(cx: &mut TestAppContext) {
 
     with_host(cx, ALIGN.to_string(), |vcx| {
         let text = bounds(vcx, "diff-text");
-        // one hunk strip plus four code rows (a, the deletion, the addition, c)
-        let line_height = text.size.height / 5.;
+        // four code rows (a, the deletion, the addition, c); the hunk header
+        // takes no row
+        let line_height = text.size.height / 4.;
         // the selectable text starts after the gutter and its left padding
-        let start = point(text.origin.x + px(8.), text.origin.y + line_height * 2.5);
+        let start = point(text.origin.x + px(8.), text.origin.y + line_height * 1.5);
         let end = point(
             text.origin.x + px(8.) + px(160.),
-            text.origin.y + line_height * 3.5,
+            text.origin.y + line_height * 2.5,
         );
         vcx.simulate_mouse_down(start, gpui::MouseButton::Left, gpui::Modifiers::default());
         vcx.simulate_mouse_move(
@@ -205,6 +206,25 @@ fn file_metadata_takes_no_rows(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::gpui::test]
+fn hunk_headers_take_no_rows(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+    cx.update(apply_theme);
+
+    let one_hunk = "--- a/x.rs\n+++ b/x.rs\n@@ -1,2 +1,2 @@\n a\n b\n";
+    let two_hunks = "--- a/x.rs\n+++ b/x.rs\n@@ -1,1 +1,1 @@\n a\n@@ -10,1 +10,1 @@\n b\n";
+    let one_height = with_host(cx, one_hunk.to_string(), |vcx| {
+        bounds(vcx, "diff-text").size.height
+    });
+    let two_height = with_host(cx, two_hunks.to_string(), |vcx| {
+        bounds(vcx, "diff-text").size.height
+    });
+    assert_eq!(
+        one_height, two_height,
+        "a second @@ header must not add a row"
+    );
+}
+
+#[gpui_kit::gpui::test]
 fn a_blank_source_line_keeps_its_row(cx: &mut TestAppContext) {
     cx.update(gpui_kit::init);
     cx.update(apply_theme);
@@ -237,8 +257,8 @@ fn a_drag_move_repaints_the_view(cx: &mut TestAppContext) {
     vcx.update(|window, cx| drop(window.draw(cx)));
 
     let text = bounds(vcx, "diff-text");
-    let line_height = text.size.height / 5.;
-    let start = point(text.origin.x + px(8.), text.origin.y + line_height * 1.5);
+    let line_height = text.size.height / 4.;
+    let start = point(text.origin.x + px(8.), text.origin.y + line_height * 0.5);
     vcx.simulate_mouse_down(start, gpui::MouseButton::Left, gpui::Modifiers::default());
     vcx.update(|window, cx| drop(window.draw(cx)));
     let before = renders.get();

@@ -176,17 +176,18 @@ instead passes an explicit `.text_size(px(theme::font_note()))` to `LiveEditor`.
 `warpui-kit-diff` draws every diff: the Changes pane, the history detail and
 warp-agent's tool tiles. The rules:
 
-- **One line is one row.** No wrapping. A long line keeps its shape and the
-  body scrolls horizontally; the number column scrolls with it until the
-  virtualized list lands. A wrapped continuation used to start without a
-  gutter and turn a 200-character line into a paragraph.
-- **One code column.** The patch's marker column is consumed, not rendered:
-  context, additions and deletions all start their text on the same x. Hunk
-  strips and state rows align to it through an empty gutter cell.
-- **One number, and it is a line in the file.** Context and additions show
-  the new-file number; deletions show none — their old-file number points at
-  a line the file no longer has. The − marker carries the deletion. Split
-  mode, when it lands, shows each side's own number.
+- **One line is one row by default.** No wrapping; a long line keeps its
+  shape and the body scrolls horizontally. Word wrap is an opt-in, described
+  below.
+- **One code column per side.** The patch's marker column is consumed, not
+  rendered: context, additions and deletions all start their text on the same
+  x. In split the same rule holds inside each column, and one shared gutter
+  width puts both code columns on the same x.
+- **One number per side, and it is a line in the file.** Unified shows the
+  new-file number on context and additions and none on deletions — their
+  old-file number points at a line the file no longer has. Split shows the
+  old-file number in the left column and the new-file number in the right;
+  the −/+ marker and the wash carry the kind.
 - **Two washes, not one band.** The gutter carries the strong wash
   (`DIFF_*_GUTTER_BG`), the code the quiet one (`DIFF_*_BG`), and a 3px bar
   in `ADD`/`DEL` runs down the row's leading edge. Token colors are never
@@ -194,21 +195,38 @@ warp-agent's tool tiles. The rules:
 - **Emphasis is the changed word.** Paired deletions/additions get a word
   diff; the changed span takes `DIFF_*_EMPHASIS`. A span covering most of the
   line is dropped — the row wash already says it.
-- **Metadata is not rows.** `diff --git`, `index`, `---` and `+++` are
-  hidden; the path, status and counts belong to the view's header. Hunk
-  headers are quiet strips on `DIFF_HUNK_BG`.
+- **Metadata and hunk headers are not rows.** `diff --git`, `index`, `---`
+  and `+++` are hidden; the path, status and counts belong to the view's
+  header. The `@@ … @@` header is parsed but never drawn, so the `-U3`
+  context is the only gap between hunks and a copied selection carries no
+  `@@` text.
+- **Split is two aligned columns.** Old file left, new file right; context
+  appears on both, a deletion only left, an addition only right, and the side
+  without a row gets a blank filler so the columns never drift. A 1px
+  `hairline` divider separates them. The columns split the pane evenly and
+  each owns its horizontal scrollbar, so a long line on one side never pushes
+  the other side off screen. A state-only, truncated or multi-file patch
+  stays unified.
+- **Word wrap is a toggle.** On, each source row is an element: the code wraps
+  inside its column, the number stays on the first visual line, and a split
+  row takes the taller side's height so the next row starts together. Wrap
+  mode selects and copies within one row; the unwrapped body keeps the one
+  selection across the whole patch.
 - **States are rows with a word:** loading, binary, no textual change and
   truncation. They never pass through the row renderer.
 - **Size:** `font_control` (14) for the diff body. The block still follows the
   app's text size through the caller's `font_detail`.
-- **The body is selectable.** One selectable text covers every line; the
-  gutter and washes are drawn beside and behind it, so a drag crosses lines
-  and copy gives the patch content without line numbers or +/− markers. The
-  app must mount `gpui_kit::base::TextSelectionLayer` or the drag never
-  registers.
-- **Two texts and two canvases, not a row per div.** The gutter and the code
-  are one text layout each; a canvas per column paints every row's wash. A
-  large diff re-renders without laying out thousands of row divs.
+- **The body is selectable.** Unwrapped unified has one selectable text
+  covering every line; unwrapped split has one per column, so a drag stays on
+  its side and copy gives that side's code. Wrapped rows are separate
+  selectable texts. The gutter and washes are drawn beside and behind the
+  text, so copy never carries line numbers or +/− markers. The app must mount
+  `gpui_kit::base::TextSelectionLayer` or the drag never registers.
+- **Unwrapped is texts and canvases, not a row per div.** The gutter and the
+  code are one text layout each (two of each in split); a canvas per column
+  paints every row's wash. A large unwrapped diff re-renders without laying
+  out thousands of row divs. Wrapped mode is the deliberate exception: one
+  row element per line, because wrapping needs a real row height.
 
 The washes live in `warpui-kit-core::palette`; a new diff color goes there,
 never into an app.

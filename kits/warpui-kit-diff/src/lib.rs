@@ -1,5 +1,5 @@
-//! warpui-kit-diff: Zed-style unified diff and line-numbered code rendering
-//! for gpui-kit applications.
+//! warpui-kit-diff: Zed-style unified and split diff plus line-numbered code
+//! rendering for gpui-kit applications.
 //!
 //! [`render_diff`] turns a unified patch into a [`document::DiffDocument`] and
 //! draws the Zed-style unified view: one line-number column of new-file
@@ -9,15 +9,27 @@
 //! change bar on the row's leading edge, and tree-sitter token colors inside
 //! the lines. Changed words inside a paired deletion/addition are emphasized.
 //!
-//! Rows never wrap: one row is one line, and the body scrolls horizontally so
-//! a long line keeps its shape. The number column currently scrolls with the
-//! row — GPUI's div scroll shares one offset across both axes, and there is
-//! no sticky-position support, so pinning it waits for the virtualized list.
+//! [`render_diff_with`] chooses the layout. [`DiffMode::Unified`] is the
+//! one-column view above; [`DiffMode::Split`] draws the old file on the left
+//! and the new file on the right, paired row for row, with one shared gutter
+//! width and a blank filler where one side has no row. A multi-file patch
+//! stays unified. Hunk headers are parsed but never drawn: the `-U3` context
+//! is the only gap between hunks, and a selection never carries `@@` lines.
 //!
-//! The body is one selectable text: a drag crosses lines and Copy gives the
-//! patch content without the gutter numbers or markers. The gutter and row
-//! washes are drawn beside and behind that text. The host must mount
-//! `gpui_kit::base::TextSelectionLayer` for the drag to register.
+//! By default rows never wrap: one row is one line, and the body scrolls
+//! horizontally so a long line keeps its shape. Split puts its two columns in
+//! separate viewports, each with its own horizontal scrollbar, so a long line
+//! on one side never pushes the other side off screen. `DiffOptions::wrap`
+//! switches to a row-per-line body where the code wraps inside its column and
+//! the number stays on the first visual line; in split a row takes the taller
+//! side's height so both columns stay aligned.
+//!
+//! Unwrapped unified is one selectable text: a drag crosses lines and Copy
+//! gives the patch content without the gutter numbers or markers. Unwrapped
+//! split has one participant per column, so a drag stays on its side. Wrapped
+//! rows are separate selectable texts, so a drag stays on that row. The
+//! gutter and row washes are drawn beside and behind the text. The host must
+//! mount `gpui_kit::base::TextSelectionLayer` for the drag to register.
 //!
 //! [`render_code`] is the same presentation for plain code: a line-number
 //! gutter plus token colors, no washes. Pre-numbered tool output (`   12\t…`
@@ -41,7 +53,7 @@ mod document;
 mod highlight;
 mod selectable;
 
-pub use document::{DiffDocument, DiffFile, DiffHunk, DiffRow, RowKind, lang_from_path};
+pub use document::{DiffDocument, DiffFile, DiffHunk, DiffRow, RowKind, SplitRow, lang_from_path};
 pub use highlight::{CodeBlockHighlighter, highlight_buffer, shared_highlighter};
 use selectable::SelectableText;
 
@@ -52,7 +64,7 @@ use std::sync::Arc;
 
 use gpui::prelude::*;
 use gpui::{
-    AbsoluteLength, AnyElement, App, BorderStyle, Bounds, Corners, Edges, ElementId,
+    AbsoluteLength, AnyElement, App, BorderStyle, Bounds, Corners, Div, Edges, ElementId,
     HighlightStyle, Hsla, PaintQuad, Pixels, StyledText, TextStyle, Window, canvas, div, point, px,
     size, transparent_black,
 };
@@ -68,6 +80,24 @@ thread_local! {
     static DOCUMENT_CACHE: RefCell<Vec<(u64, usize, Rc<DiffDocument>)>> = const { RefCell::new(Vec::new()) };
 }
 
+/// How a patch is laid out: one column (unified) or two (split).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum DiffMode {
+    #[default]
+    Unified,
+    Split,
+}
+
+/// Options for [`render_diff_with`]. `Default` is the unified, unwrapped view.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct DiffOptions {
+    pub mode: DiffMode,
+    /// Wrap long rows instead of scrolling horizontally. A wrapped row keeps
+    /// its number on the first visual line; each row is a real element, so a
+    /// very large wrapped diff costs more layout than the unwrapped body.
+    pub wrap: bool,
+}
+
 /// A unified diff with Zed-style gutter, marker column and two-tone washes.
 /// `path_hint` (the tool's file path) is the fallback language guess when the
 /// patch itself carries no recognizable file paths.
@@ -78,11 +108,32 @@ pub fn render_diff(
     window: &mut Window,
     cx: &App,
 ) -> AnyElement {
+    render_diff_with(
+        text,
+        path_hint,
+        DiffOptions::default(),
+        font_detail,
+        window,
+        cx,
+    )
+}
+
+/// Like [`render_diff`], with a layout mode. Split is honoured for a
+/// single-file patch; a multi-file patch stays unified (the callers that offer
+/// the toggle show one file at a time).
+pub fn render_diff_with(
+    text: &str,
+    path_hint: Option<&str>,
+    options: DiffOptions,
+    font_detail: f32,
+    window: &mut Window,
+    cx: &App,
+) -> AnyElement {
     if text.is_empty() {
         return div().into_any_element();
     }
     let doc = cached_document(text);
-    render_document(&doc, path_hint, font_detail, window, cx)
+    render_document(&doc, path_hint, options, font_detail, window, cx)
 }
 
 /// Draw an already parsed patch. The app can keep the document alongside its
@@ -90,6 +141,7 @@ pub fn render_diff(
 pub fn render_document(
     doc: &DiffDocument,
     path_hint: Option<&str>,
+    options: DiffOptions,
     font_detail: f32,
     window: &mut Window,
     cx: &App,
@@ -97,26 +149,159 @@ pub fn render_document(
     if doc.files.is_empty() {
         return div().into_any_element();
     }
-
     let language = doc.language(path_hint);
-    let gutter_width = doc.max_number().to_string().len().max(4);
     let hl_theme = gpui_kit::component::Theme::global(cx)
         .highlight_theme
         .clone();
+    let paint_style = code_style(window, font_detail, palette::CODE_FG);
+    let number_style = HighlightStyle {
+        color: Some(palette::DIFF_GUTTER.into()),
+        ..Default::default()
+    };
+    let line_height = line_height_px(&paint_style, window);
+
+    let split_file = if options.mode == DiffMode::Split
+        && doc.files.len() == 1
+        && !doc.files[0].binary
+        && !doc.files[0].truncated
+        && !doc.files[0].hunks.is_empty()
+    {
+        Some(&doc.files[0])
+    } else {
+        None
+    };
+
+    if let Some(file) = split_file {
+        if options.wrap {
+            return render_split_wrapped(
+                file,
+                language,
+                &hl_theme,
+                paint_style,
+                number_style,
+                font_detail,
+            );
+        }
+        return render_split(
+            doc,
+            language,
+            &hl_theme,
+            paint_style,
+            number_style,
+            line_height,
+            font_detail,
+        );
+    }
+    if options.wrap {
+        return render_unified_wrapped(
+            doc,
+            language,
+            &hl_theme,
+            paint_style,
+            number_style,
+            font_detail,
+        );
+    }
+    render_unified(
+        doc,
+        language,
+        &hl_theme,
+        paint_style,
+        number_style,
+        line_height,
+        font_detail,
+    )
+}
+
+/// The unified body: every file's rows in one column. File headers and state
+/// rows span the column; metadata and hunk headers take no rows.
+fn render_unified(
+    doc: &DiffDocument,
+    language: Option<&'static str>,
+    hl_theme: &Arc<gpui_kit::component::highlighter::HighlightTheme>,
+    paint_style: TextStyle,
+    number_style: HighlightStyle,
+    line_height: Pixels,
+    font_detail: f32,
+) -> AnyElement {
+    let gutter_width = doc.max_number().to_string().len().max(4);
     let paint = RowPaint {
-        style: code_style(window, font_detail, palette::CODE_FG),
-        number_style: HighlightStyle {
-            color: Some(palette::DIFF_GUTTER.into()),
-            ..Default::default()
-        },
+        style: paint_style,
+        number_style,
         gutter_width,
     };
-    let line_height = line_height_px(&paint.style, window);
+    let lines = unified_lines(doc, language, hl_theme);
+    if lines.is_empty() {
+        return div().into_any_element();
+    }
+    let column = render_column(
+        lines,
+        &paint,
+        line_height,
+        font_detail,
+        &ColumnIds::UNIFIED,
+        ColumnWidth::Full,
+    );
+    diff_scroller(column.into_any_element(), font_detail).into_any_element()
+}
 
-    // One visual line per row: code, hunk headers, state lines and (for a
-    // multi-file patch) file headers. The gutter is drawn beside this text,
-    // not inside it, so copying a selection yields the patch content without
-    // line numbers or +/− markers.
+/// The split body: old file left, new file right, one line per paired row.
+/// Only a single-file patch reaches here; state-only and multi-file patches
+/// stay unified.
+fn render_split(
+    doc: &DiffDocument,
+    language: Option<&'static str>,
+    hl_theme: &Arc<gpui_kit::component::highlighter::HighlightTheme>,
+    paint_style: TextStyle,
+    number_style: HighlightStyle,
+    line_height: Pixels,
+    font_detail: f32,
+) -> AnyElement {
+    let gutter_width = split_gutter_width(&doc.files[0]);
+    let paint = RowPaint {
+        style: paint_style,
+        number_style,
+        gutter_width,
+    };
+    let (left, right) = split_lines(&doc.files[0], language, hl_theme);
+    if left.is_empty() {
+        return div().into_any_element();
+    }
+    let left = render_column(
+        left,
+        &paint,
+        line_height,
+        font_detail,
+        &ColumnIds::LEFT,
+        ColumnWidth::Split,
+    );
+    let right = render_column(
+        right,
+        &paint,
+        line_height,
+        font_detail,
+        &ColumnIds::RIGHT,
+        ColumnWidth::Split,
+    );
+    let body = div()
+        .debug_selector(|| "diff-split".into())
+        .w_full()
+        .flex()
+        .flex_row()
+        .items_stretch()
+        .child(column_viewport(&ColumnIds::LEFT, left))
+        .child(div().flex_shrink_0().w(px(1.)).bg(palette::hairline()))
+        .child(column_viewport(&ColumnIds::RIGHT, right));
+    split_frame(body.into_any_element(), font_detail).into_any_element()
+}
+
+/// The unified body's lines: file headers only for a multi-file patch, then
+/// one line per code row. Metadata and hunk headers take no rows.
+fn unified_lines(
+    doc: &DiffDocument,
+    language: Option<&'static str>,
+    hl_theme: &Arc<gpui_kit::component::highlighter::HighlightTheme>,
+) -> Vec<Line> {
     let mut lines = Vec::new();
     for file in &doc.files {
         if doc.files.len() > 1 {
@@ -131,21 +316,305 @@ pub fn render_document(
             continue;
         }
         for hunk in &file.hunks {
-            lines.push(Line::hunk(hunk));
-            let tokens = highlight_hunk(hunk, language, &hl_theme);
-            for (i, row) in hunk.rows.iter().enumerate() {
-                lines.push(Line::code(row, tokens[i].clone()));
+            let tokens = highlight_hunk(hunk, language, hl_theme);
+            for (index, row) in hunk.rows.iter().enumerate() {
+                let runs = match row.kind {
+                    RowKind::Del => tokens.old[index].clone(),
+                    RowKind::Context | RowKind::Add => tokens.new[index].clone(),
+                };
+                lines.push(Line::code(row, runs));
             }
         }
         if file.truncated {
             lines.push(Line::state("Patch truncated at 64 KB"));
         }
     }
+    lines
+}
+
+/// The paired columns of one file's split body.
+fn split_lines(
+    file: &DiffFile,
+    language: Option<&'static str>,
+    hl_theme: &Arc<gpui_kit::component::highlighter::HighlightTheme>,
+) -> (Vec<Line>, Vec<Line>) {
+    let mut left = Vec::new();
+    let mut right = Vec::new();
+    for hunk in &file.hunks {
+        let tokens = highlight_hunk(hunk, language, hl_theme);
+        for pair in hunk.split_rows() {
+            left.push(match pair.left {
+                Some(index) => {
+                    let row = &hunk.rows[index];
+                    Line::cell(row, row.old, tokens.old[index].clone())
+                }
+                None => Line::fill(),
+            });
+            right.push(match pair.right {
+                Some(index) => {
+                    let row = &hunk.rows[index];
+                    Line::cell(row, row.new, tokens.new[index].clone())
+                }
+                None => Line::fill(),
+            });
+        }
+    }
+    (left, right)
+}
+
+fn split_gutter_width(file: &DiffFile) -> usize {
+    let old = file
+        .hunks
+        .iter()
+        .flat_map(|hunk| &hunk.rows)
+        .filter_map(|row| row.old)
+        .max()
+        .unwrap_or(0);
+    let new = file
+        .hunks
+        .iter()
+        .flat_map(|hunk| &hunk.rows)
+        .filter_map(|row| row.new)
+        .max()
+        .unwrap_or(0);
+    old.max(new).to_string().len().max(4)
+}
+
+/// The wrapped unified body. Each source row is an element so a long line
+/// wraps at the code column; the gutter number stays on its first visual line.
+fn render_unified_wrapped(
+    doc: &DiffDocument,
+    language: Option<&'static str>,
+    hl_theme: &Arc<gpui_kit::component::highlighter::HighlightTheme>,
+    paint_style: TextStyle,
+    number_style: HighlightStyle,
+    font_detail: f32,
+) -> AnyElement {
+    let lines = unified_lines(doc, language, hl_theme);
     if lines.is_empty() {
         return div().into_any_element();
     }
+    let paint = RowPaint {
+        style: paint_style,
+        number_style,
+        gutter_width: doc.max_number().to_string().len().max(4),
+    };
+    let mut body = div()
+        .debug_selector(|| "diff-wrap-body".into())
+        .w_full()
+        .flex()
+        .flex_col();
+    for (index, line) in lines.iter().enumerate() {
+        body = body.child(wrapped_row(line, &paint, font_detail, index));
+    }
+    wrapped_frame(body.into_any_element(), font_detail).into_any_element()
+}
 
-    // One buffer for the whole patch: selection and copy work across lines
+/// The wrapped split body. A row's two cells are siblings of the same flex
+/// row, so the row is as tall as its taller wrapped side and the next row
+/// starts on the same line for both columns.
+fn render_split_wrapped(
+    file: &DiffFile,
+    language: Option<&'static str>,
+    hl_theme: &Arc<gpui_kit::component::highlighter::HighlightTheme>,
+    paint_style: TextStyle,
+    number_style: HighlightStyle,
+    font_detail: f32,
+) -> AnyElement {
+    let (left, right) = split_lines(file, language, hl_theme);
+    if left.is_empty() {
+        return div().into_any_element();
+    }
+    let paint = RowPaint {
+        style: paint_style,
+        number_style,
+        gutter_width: split_gutter_width(file),
+    };
+    let mut body = div()
+        .debug_selector(|| "diff-wrap-body".into())
+        .w_full()
+        .flex()
+        .flex_col();
+    for index in 0..left.len() {
+        body = body.child(wrapped_split_row(
+            &left[index],
+            &right[index],
+            &paint,
+            font_detail,
+            index,
+        ));
+    }
+    wrapped_frame(body.into_any_element(), font_detail).into_any_element()
+}
+
+/// The wrapped frame: the code family, the caller's size and normal white
+/// space. No horizontal scroller: a wrapped row is never wider than its cell.
+fn wrapped_frame(child: AnyElement, font_detail: f32) -> impl IntoElement {
+    div()
+        .w_full()
+        .flex()
+        .flex_col()
+        .font_family(fonts::code_font())
+        .text_size(px(font_detail))
+        .whitespace_normal()
+        .child(child)
+}
+
+fn wrapped_row(line: &Line, paint: &RowPaint, font_detail: f32, index: usize) -> Div {
+    div()
+        .w_full()
+        .flex()
+        .flex_row()
+        .items_stretch()
+        .child(wrapped_cell(line, paint, font_detail, index, "u").w_full())
+}
+
+fn wrapped_split_row(
+    left: &Line,
+    right: &Line,
+    paint: &RowPaint,
+    font_detail: f32,
+    index: usize,
+) -> Div {
+    div()
+        .w_full()
+        .flex()
+        .flex_row()
+        .items_stretch()
+        .child(
+            wrapped_cell(left, paint, font_detail, index, "l")
+                .flex_1()
+                .min_w_0(),
+        )
+        .child(div().flex_shrink_0().w(px(1.)).bg(palette::hairline()))
+        .child(
+            wrapped_cell(right, paint, font_detail, index, "r")
+                .flex_1()
+                .min_w_0(),
+        )
+}
+
+/// One wrapped row's gutter and code cells. The gutter is a single line; the
+/// code text is its own `SelectableText` and wraps at the code cell's width.
+/// Wrap mode therefore selects within a row; the unwrapped body keeps the one
+/// selection across the whole patch.
+fn wrapped_cell(
+    line: &Line,
+    paint: &RowPaint,
+    font_detail: f32,
+    row_index: usize,
+    side: &'static str,
+) -> Div {
+    let wash = line_wash(line.kind);
+    let gutter_text = match line.kind {
+        LineKind::Code(kind) => {
+            let (content, highlights) = gutter_content(line.number, kind, paint);
+            styled_text(&content, &paint.style, &highlights)
+        }
+        _ => {
+            let blank = "\u{00a0}".repeat(paint.gutter_width + 2);
+            styled_text(
+                &blank,
+                &paint.style,
+                &[(0..blank.len(), paint.number_style)],
+            )
+        }
+    };
+    let mut gutter = div()
+        .flex_shrink_0()
+        .relative()
+        .pl(px(11.))
+        .pr_2()
+        .when_some(wash.gutter, |cell, color| cell.bg(color));
+    if let Some(bar) = wash.bar {
+        gutter = gutter.child(
+            div()
+                .absolute()
+                .top_0()
+                .bottom_0()
+                .left_0()
+                .w(px(3.))
+                .bg(bar),
+        );
+    }
+    let gutter = gutter.child(div().whitespace_nowrap().child(gutter_text));
+
+    let runs = merged_runs(
+        line.text.len(),
+        &line.tokens,
+        &line.emphasis,
+        line.emphasis_bg,
+    );
+    let shown = if line.text.is_empty() {
+        "\u{00a0}".to_string()
+    } else {
+        line.text.clone()
+    };
+    let styled = StyledText::new(shown.clone()).with_default_highlights(&paint.style, runs.clone());
+    let key = styled_key(&shown, &runs, font_detail)
+        .wrapping_mul(31)
+        .wrapping_add(row_index as u64)
+        .wrapping_add(match side {
+            "l" => 1,
+            "r" => 2,
+            _ => 0,
+        });
+    let name = match side {
+        "l" => "diff-wrap-left",
+        "r" => "diff-wrap-right",
+        _ => "diff-wrap-unified",
+    };
+    let selectable = SelectableText::new(
+        ElementId::NamedInteger(name.into(), key),
+        shown.into(),
+        styled,
+        key,
+    );
+    let code = div()
+        .flex_1()
+        .min_w_0()
+        .when_some(wash.content, |cell, color| cell.bg(color))
+        .child(
+            div()
+                .debug_selector(move || format!("diff-wrap-code-{row_index}-{side}"))
+                .pl_2()
+                .child(selectable),
+        );
+    div()
+        .flex()
+        .flex_row()
+        .items_stretch()
+        .child(gutter)
+        .child(code)
+}
+
+/// One split column's viewport. The column body keeps at least the viewport's
+/// width and grows with a long line; the viewport scrolls that line on its own
+/// instead of pushing the other column off screen.
+fn column_viewport(ids: &'static ColumnIds, body: Div) -> impl IntoElement {
+    div()
+        .id(ids.viewport)
+        .debug_selector(move || ids.viewport.into())
+        .flex_1()
+        .flex()
+        .flex_row()
+        .min_w_0()
+        .overflow_x_scroll()
+        .restrict_scroll_to_axis()
+        .child(body)
+}
+
+/// One column of a diff body: the gutter, the selectable code text, and the
+/// canvas that paints every row's wash. Unified has one; split has two.
+fn render_column(
+    lines: Vec<Line>,
+    paint: &RowPaint,
+    line_height: Pixels,
+    font_detail: f32,
+    ids: &'static ColumnIds,
+    width: ColumnWidth,
+) -> Div {
+    // One buffer for the whole column: selection and copy work across lines
     // only when the text is one laid-out run.
     let mut text = String::new();
     let mut starts = Vec::with_capacity(lines.len());
@@ -169,7 +638,7 @@ pub fn render_document(
                     runs.push((start + range.start..start + range.end, style));
                 }
             }
-            LineKind::Hunk | LineKind::State => {
+            LineKind::State => {
                 if len > 0 {
                     runs.push((
                         start..start + len,
@@ -180,7 +649,7 @@ pub fn render_document(
                     ));
                 }
             }
-            LineKind::File => {}
+            LineKind::File | LineKind::Fill => {}
         }
     }
     let layout_key = styled_key(&text, &runs, font_detail);
@@ -249,7 +718,7 @@ pub fn render_document(
         match line.kind {
             LineKind::Code(kind) => {
                 let start = gutter_text.len();
-                let (content, highlights) = gutter_content(line.number, kind, &paint);
+                let (content, highlights) = gutter_content(line.number, kind, paint);
                 for (range, style) in highlights {
                     gutter_runs.push((start + range.start..start + range.end, style));
                 }
@@ -265,42 +734,47 @@ pub fn render_document(
 
     let selection_seed = hash_text(&text);
     let selectable = SelectableText::new(
-        ElementId::NamedInteger("diff-selection".into(), selection_seed),
+        ElementId::NamedInteger(ids.selection.into(), selection_seed),
         text.into(),
         styled,
         layout_key,
     );
 
+    let body = div()
+        .debug_selector(move || ids.body.into())
+        .flex()
+        .flex_row();
+    let body = match width {
+        ColumnWidth::Full => body.flex_shrink_0().min_w_full(),
+        ColumnWidth::Split => body.flex_shrink_0().min_w_full(),
+    };
+
     // The code column holds the one selectable text; the canvases sit behind
     // it and behind the gutter.
-    let body = div()
-        .debug_selector(|| "diff-body".into())
-        .flex()
-        .flex_row()
-        .flex_shrink_0()
-        .min_w_full()
-        .child(
-            div()
-                .debug_selector(|| "diff-gutter".into())
-                .relative()
-                .flex_shrink_0()
-                .child(gutter_canvas)
-                .child(div().pl(px(11.)).pr_2().child(gutter_styled)),
-        )
-        .child(
-            div()
-                .debug_selector(|| "diff-code-column".into())
-                .flex_1()
-                .relative()
-                .child(code_canvas)
-                .child(
-                    div()
-                        .debug_selector(|| "diff-text".into())
-                        .pl_2()
-                        .child(selectable),
-                ),
-        );
+    body.child(
+        div()
+            .debug_selector(move || ids.gutter.into())
+            .relative()
+            .flex_shrink_0()
+            .child(gutter_canvas)
+            .child(div().pl(px(11.)).pr_2().child(gutter_styled)),
+    )
+    .child(
+        div()
+            .debug_selector(move || ids.code.into())
+            .flex_1()
+            .relative()
+            .child(code_canvas)
+            .child(
+                div()
+                    .debug_selector(move || ids.text.into())
+                    .pl_2()
+                    .child(selectable),
+            ),
+    )
+}
 
+fn diff_scroller(child: AnyElement, font_detail: f32) -> impl IntoElement {
     div()
         .id("diff-x-scroll")
         .debug_selector(|| "diff-x-scroll".into())
@@ -312,8 +786,65 @@ pub fn render_document(
         .font_family(fonts::code_font())
         .text_size(px(font_detail))
         .whitespace_nowrap()
-        .child(body)
-        .into_any_element()
+        .child(child)
+}
+
+/// The split frame: no whole-body scroll. Each column's viewport owns its
+/// horizontal scroll, so both columns stay visible.
+fn split_frame(child: AnyElement, font_detail: f32) -> impl IntoElement {
+    div()
+        .debug_selector(|| "diff-split-frame".into())
+        .w_full()
+        .flex()
+        .flex_row()
+        .font_family(fonts::code_font())
+        .text_size(px(font_detail))
+        .whitespace_nowrap()
+        .child(child)
+}
+
+#[derive(Clone, Copy)]
+enum ColumnWidth {
+    Full,
+    Split,
+}
+
+/// The element ids and debug selectors of one column. Split needs two
+/// selection participants and two sets of probe selectors.
+struct ColumnIds {
+    body: &'static str,
+    viewport: &'static str,
+    gutter: &'static str,
+    code: &'static str,
+    text: &'static str,
+    selection: &'static str,
+}
+
+impl ColumnIds {
+    const UNIFIED: Self = Self {
+        body: "diff-body",
+        viewport: "diff-viewport",
+        gutter: "diff-gutter",
+        code: "diff-code-column",
+        text: "diff-text",
+        selection: "diff-selection",
+    };
+    const LEFT: Self = Self {
+        body: "diff-left-body",
+        viewport: "diff-left-viewport",
+        gutter: "diff-left-gutter",
+        code: "diff-left-code-column",
+        text: "diff-left-text",
+        selection: "diff-selection-left",
+    };
+    const RIGHT: Self = Self {
+        body: "diff-right-body",
+        viewport: "diff-right-viewport",
+        gutter: "diff-right-gutter",
+        code: "diff-right-code-column",
+        text: "diff-right-text",
+        selection: "diff-selection-right",
+    };
 }
 
 /// Line-numbered code block body (no washes): used for tool detail input /
@@ -446,8 +977,9 @@ fn styled_key(text: &str, runs: &[(Range<usize>, HighlightStyle)], font_detail: 
     hasher.finish()
 }
 
-/// One visual line of the diff. Code lines carry their highlight runs; hunk,
-/// state and file lines are structure. The line's text is the selectable
+/// One visual line of the diff. Code lines carry their highlight runs; state
+/// and file lines are structure; a Fill line keeps one side of a split row
+/// aligned when the other side has no code. The line's text is the selectable
 /// content (no gutter, no +/− marker).
 struct Line {
     text: String,
@@ -461,28 +993,40 @@ struct Line {
 #[derive(Clone, Copy)]
 enum LineKind {
     File,
-    Hunk,
     Code(RowKind),
     State,
+    Fill,
 }
 
 impl Line {
     fn code(row: &DiffRow, tokens: Vec<(Range<usize>, HighlightStyle)>) -> Self {
+        Self::cell(row, row.number(), tokens)
+    }
+
+    /// One side of a split row: `number` is the old number on the left and the
+    /// new number on the right, and the wash still comes from the row kind.
+    fn cell(
+        row: &DiffRow,
+        number: Option<u32>,
+        tokens: Vec<(Range<usize>, HighlightStyle)>,
+    ) -> Self {
         let (_, _, _, emphasis_bg) = row_colors(row.kind);
         Self {
             text: row.text.clone(),
             kind: LineKind::Code(row.kind),
-            number: row.number(),
+            number,
             tokens,
             emphasis: row.emphasis.clone(),
             emphasis_bg,
         }
     }
 
-    fn hunk(hunk: &DiffHunk) -> Self {
+    /// The empty side of an unpaired split row. A non-breaking space keeps the
+    /// line height even when the filler is the last row.
+    fn fill() -> Self {
         Self {
-            text: hunk.title(),
-            kind: LineKind::Hunk,
+            text: "\u{00a0}".to_string(),
+            kind: LineKind::Fill,
             number: None,
             tokens: Vec::new(),
             emphasis: Vec::new(),
@@ -571,17 +1115,12 @@ fn line_wash(kind: LineKind) -> RowWash {
                 content,
             }
         }
-        LineKind::Hunk => RowWash {
-            gutter: Some(palette::DIFF_HUNK_BG),
-            bar: None,
-            content: Some(palette::DIFF_HUNK_BG),
-        },
         LineKind::File => RowWash {
             gutter: Some(palette::surface().into()),
             bar: None,
             content: Some(palette::surface().into()),
         },
-        LineKind::State => RowWash {
+        LineKind::State | LineKind::Fill => RowWash {
             gutter: None,
             bar: None,
             content: None,
@@ -627,6 +1166,14 @@ fn row_colors(kind: RowKind) -> (Option<gpui::Rgba>, Option<Hsla>, Option<Hsla>,
     }
 }
 
+/// Per-row token runs for both sides of a hunk. Unified picks the running
+/// side; split draws the old runs left and the new runs right, so a context
+/// row is styled from the file it is drawn in.
+struct HunkHighlights {
+    old: Vec<Vec<(Range<usize>, HighlightStyle)>>,
+    new: Vec<Vec<(Range<usize>, HighlightStyle)>>,
+}
+
 /// Highlight each side of a hunk separately. Mixing deletions and additions in
 /// one buffer lets a deleted brace or quote change the colors of the lines
 /// that follow it; this keeps the old and new files as their own programs.
@@ -634,8 +1181,11 @@ fn highlight_hunk(
     hunk: &DiffHunk,
     language: Option<&str>,
     theme: &Arc<gpui_kit::component::highlighter::HighlightTheme>,
-) -> Vec<Vec<(Range<usize>, HighlightStyle)>> {
-    let mut out = vec![Vec::new(); hunk.rows.len()];
+) -> HunkHighlights {
+    let mut out = HunkHighlights {
+        old: vec![Vec::new(); hunk.rows.len()],
+        new: vec![Vec::new(); hunk.rows.len()],
+    };
     let Some(language) = language else {
         return out;
     };
@@ -668,12 +1218,25 @@ fn highlight_hunk(
     let old_styles = highlight_buffer(&old, language, theme);
     let new_styles = highlight_buffer(&new, language, theme);
     for (i, row) in hunk.rows.iter().enumerate() {
-        let (styles, span) = match row.kind {
-            RowKind::Del => (&old_styles, old_span[i]),
-            RowKind::Context | RowKind::Add => (&new_styles, new_span[i]),
-        };
-        if let Some((start, len)) = span {
-            out[i] = slice_runs(styles, start, len);
+        match row.kind {
+            RowKind::Del => {
+                if let Some((start, len)) = old_span[i] {
+                    out.old[i] = slice_runs(&old_styles, start, len);
+                }
+            }
+            RowKind::Add => {
+                if let Some((start, len)) = new_span[i] {
+                    out.new[i] = slice_runs(&new_styles, start, len);
+                }
+            }
+            RowKind::Context => {
+                if let Some((start, len)) = old_span[i] {
+                    out.old[i] = slice_runs(&old_styles, start, len);
+                }
+                if let Some((start, len)) = new_span[i] {
+                    out.new[i] = slice_runs(&new_styles, start, len);
+                }
+            }
         }
     }
     out

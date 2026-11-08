@@ -9,7 +9,7 @@ use crate::notices::{self, Notices};
 use gpui::{App, Context};
 use std::sync::Arc;
 use warp_station_core::repo_store::{self, RepoEntry};
-use warp_station_core::settings::{AppSettings, RepoSortMode, SettingsService};
+use warp_station_core::settings::{AppSettings, DiffViewMode, RepoSortMode, SettingsService};
 
 // the toasts' types live beside the notification service; the store re-exports
 // them so every existing `crate::store::NoticeKind` call site stays put
@@ -515,6 +515,26 @@ impl Store {
 
     pub fn settings(&self) -> AppSettings {
         self.settings.get()
+    }
+
+    /// The Changes pane's persisted diff layout.
+    pub fn diff_view(&self) -> DiffViewMode {
+        self.settings().changes.diff_view
+    }
+
+    /// Persist the Changes pane's diff layout; the view repaints itself.
+    pub fn set_diff_view(&mut self, mode: DiffViewMode) {
+        self.update_settings(|s| s.changes.diff_view = mode);
+    }
+
+    /// Whether the Changes diff wraps long rows.
+    pub fn diff_wrap(&self) -> bool {
+        self.settings().changes.diff_wrap
+    }
+
+    /// Persist the word-wrap choice; the view repaints itself.
+    pub fn set_diff_wrap(&mut self, wrap: bool) {
+        self.update_settings(|s| s.changes.diff_wrap = wrap);
     }
 
     // ---- derived-cache change tokens + guarded snapshots ----

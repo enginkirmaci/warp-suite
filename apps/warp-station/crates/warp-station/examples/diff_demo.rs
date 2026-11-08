@@ -1,6 +1,7 @@
-//! Standalone visual fixture for the diff renderer: renders fixed patches
-//! through `render_diff` so the rows, bands and syntax colors can be
-//! screenshotted without touching app state. `cargo run -p warp_station --example diff_demo`
+//! Standalone visual fixture for the diff renderer: renders fixed patches in
+//! unified and split so the rows, bands, fillers and syntax colors can be
+//! screenshotted without touching app state.
+//! `cargo run -p warp_station --example diff_demo`
 
 use gpui::prelude::*;
 use gpui::{
@@ -8,7 +9,7 @@ use gpui::{
 };
 use gpui_platform::application;
 use warp_station::theme;
-use warpui_kit_diff::render_diff;
+use warpui_kit_diff::{DiffMode, DiffOptions, render_diff_with};
 
 const RUST_PATCH: &str = r#"diff --git a/crates/warp-station-core/src/markdown_live.rs b/crates/warp-station-core/src/markdown_live.rs
 index 7c3f9a1..b2e4d55 100644
@@ -90,7 +91,7 @@ struct DiffDemo;
 
 impl Render for DiffDemo {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let mut card = |patch: &'static str| {
+        let mut card = |patch: &'static str, mode: DiffMode| {
             div()
                 .w_full()
                 .rounded_md()
@@ -99,7 +100,14 @@ impl Render for DiffDemo {
                 .border_color(theme::border_light())
                 .py_2()
                 .overflow_hidden()
-                .child(render_diff(patch, None, theme::font_control(), window, cx))
+                .child(render_diff_with(
+                    patch,
+                    None,
+                    DiffOptions { mode, wrap: false },
+                    theme::font_control(),
+                    window,
+                    cx,
+                ))
         };
         div()
             .size_full()
@@ -108,8 +116,9 @@ impl Render for DiffDemo {
             .flex()
             .flex_col()
             .gap_3()
-            .child(card(RUST_PATCH))
-            .child(card(PY_PATCH))
+            .child(card(RUST_PATCH, DiffMode::Unified))
+            .child(card(PY_PATCH, DiffMode::Unified))
+            .child(card(PY_PATCH, DiffMode::Split))
     }
 }
 
@@ -121,7 +130,7 @@ fn main() {
         warpui_kit_core::adopt_text_size(None);
         theme::apply_kit_theme(cx);
         warpui_kit_core::follow_ui_scale(cx, theme::apply_kit_theme);
-        let bounds = Bounds::centered(None, size(px(1000.), px(700.)), cx);
+        let bounds = Bounds::centered(None, size(px(1000.), px(1050.)), cx);
         gpui_kit::open_window(
             WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(bounds)),

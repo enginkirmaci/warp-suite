@@ -20,9 +20,9 @@ const PATCH: &str = "\
  fn c() {}
 ";
 
-/// One hunk strip and three code rows: the `---`/`+++` metadata is no longer
+/// Three code rows: the `---`/`+++` metadata and the `@@` hunk header are not
 /// drawn, and a single-file patch has no file header row.
-const PATCH_ROWS: f32 = 4.;
+const PATCH_ROWS: f32 = 3.;
 
 struct DiffAt {
     font_detail: f32,

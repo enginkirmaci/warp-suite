@@ -71,5 +71,16 @@ mod tests {
             .find(|(name, _)| *name == "icons/icon-deepseek.svg")
             .expect("icons/icon-deepseek.svg embedded");
         assert!(data.starts_with(b"<svg"), "icon-deepseek.svg is not an svg");
+        for name in [
+            "icons/icon-diff-split.svg",
+            "icons/icon-diff-unified.svg",
+            "icons/icon-wrap.svg",
+        ] {
+            let (_, data) = super::EMBEDDED_FILES
+                .iter()
+                .find(|(file, _)| *file == name)
+                .unwrap_or_else(|| panic!("{name} embedded"));
+            assert!(data.starts_with(b"<svg"), "{name} is not an svg");
+        }
     }
 }

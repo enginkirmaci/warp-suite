@@ -33,6 +33,8 @@ pub struct AppSettings {
     #[serde(default)]
     pub general: GeneralSettings,
     #[serde(default)]
+    pub changes: ChangesSettings,
+    #[serde(default)]
     pub notifications: NotificationsSettings,
 }
 
@@ -408,6 +410,45 @@ impl Default for GeneralSettings {
     }
 }
 
+/// The Changes pane's view state that outlives one window — today only the
+/// diff layout. The section is additive: an absent key reads unified.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case", default, deny_unknown_fields)]
+pub struct ChangesSettings {
+    pub diff_view: DiffViewMode,
+    /// Wrap long diff rows instead of scrolling horizontally.
+    pub diff_wrap: bool,
+}
+
+impl Default for ChangesSettings {
+    fn default() -> Self {
+        Self {
+            diff_view: DiffViewMode::Unified,
+            diff_wrap: false,
+        }
+    }
+}
+
+/// How the Changes diff lays its rows out.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DiffViewMode {
+    #[default]
+    Unified,
+    Split,
+}
+
+// a hand-edited or newer value must not invalidate the whole settings file
+impl<'de> Deserialize<'de> for DiffViewMode {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        Ok(match value.as_str() {
+            "split" => Self::Split,
+            _ => Self::Unified,
+        })
+    }
+}
+
 /// Single owner of the settings graph: reads hand out full clones, writes are
 /// serialized and persisted atomically. An unreadable file falls back to
 /// defaults instead of failing startup.
@@ -692,6 +733,33 @@ mod tests {
         assert!(json.contains("\"max_scan_depth\""));
         let back: AppSettings = serde_json::from_str(&json).unwrap();
         assert_eq!(back.repos.sort_mode, s.repos.sort_mode);
+    }
+
+    #[test]
+    fn diff_view_reads_and_falls_back() {
+        let split: AppSettings =
+            serde_json::from_str(r#"{"changes":{"diff_view":"split"}}"#).unwrap();
+        assert_eq!(split.changes.diff_view, DiffViewMode::Split);
+
+        let missing: AppSettings = serde_json::from_str("{}").unwrap();
+        assert_eq!(missing.changes.diff_view, DiffViewMode::Unified);
+        assert!(!missing.changes.diff_wrap);
+
+        let wrapped: AppSettings =
+            serde_json::from_str(r#"{"changes":{"diff_wrap":true}}"#).unwrap();
+        assert!(wrapped.changes.diff_wrap);
+
+        let unknown: AppSettings =
+            serde_json::from_str(r#"{"changes":{"diff_view":"sideways"}}"#).unwrap();
+        assert_eq!(
+            unknown.changes.diff_view,
+            DiffViewMode::Unified,
+            "a stale string falls back instead of failing the page"
+        );
+
+        let json = serde_json::to_string(&split).unwrap();
+        assert!(json.contains(r#""diff_view":"split""#), "{json}");
+        assert!(json.contains(r#""diff_wrap":false"#), "{json}");
     }
 
     #[test]
