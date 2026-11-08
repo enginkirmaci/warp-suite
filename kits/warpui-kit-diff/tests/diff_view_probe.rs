@@ -6,6 +6,7 @@ use gpui::prelude::*;
 use gpui::{Bounds, Context, Pixels, Render, TestAppContext, Window, div, point, px};
 use std::cell::Cell;
 use std::rc::Rc;
+use warpui_kit_core::text_menu::{self, TextMenuAnchor};
 use warpui_kit_core::{AccentColors, active_tokens, apply_kit_theme, palette};
 use warpui_kit_diff::render_diff;
 
@@ -276,4 +277,51 @@ fn a_drag_move_repaints_the_view(cx: &mut TestAppContext) {
         renders.get() > before,
         "a drag move must repaint the selection"
     );
+}
+
+struct MenuHost {
+    patch: String,
+    anchor: gpui::Entity<TextMenuAnchor>,
+}
+
+impl Render for MenuHost {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let focus = self.anchor.read(cx).focus_handle();
+        div()
+            .size_full()
+            .flex()
+            .flex_col()
+            .child(gpui_kit::base::TextSelectionLayer)
+            .child(self.anchor.clone())
+            .child(div().w(px(600.)).flex_shrink_0().child(text_menu::attach(
+                gpui::ElementId::Name("diff-menu-probe".into()),
+                render_diff(&self.patch, Some("x.rs"), 13., window, cx),
+                Some(focus),
+            )))
+    }
+}
+
+#[gpui_kit::gpui::test]
+fn a_right_click_opens_the_diff_copy_menu(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+    cx.update(apply_theme);
+
+    let (_view, vcx) = cx.add_window_view(|_, cx| {
+        let anchor = cx.new(TextMenuAnchor::new);
+        MenuHost {
+            patch: ALIGN.to_string(),
+            anchor,
+        }
+    });
+    vcx.run_until_parked();
+    vcx.update(|window, cx| drop(window.draw(cx)));
+    let text = bounds(vcx, "diff-text");
+    let before = vcx.update(|window, cx| window.focused(cx));
+    let at = text.center();
+    vcx.simulate_mouse_down(at, gpui::MouseButton::Right, gpui::Modifiers::default());
+    vcx.simulate_mouse_up(at, gpui::MouseButton::Right, gpui::Modifiers::default());
+    vcx.run_until_parked();
+    let after = vcx.update(|window, cx| window.focused(cx));
+    assert!(after.is_some(), "the diff context menu took focus");
+    assert_ne!(before, after, "focus moved from the view to the menu");
 }

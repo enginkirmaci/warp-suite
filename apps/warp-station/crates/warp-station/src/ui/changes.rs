@@ -505,16 +505,20 @@ impl ChangesView {
                 .flex_1()
                 .min_h_0()
                 .overflow_y_scroll()
-                .child(warpui_kit_diff::render_diff_with(
-                    patch,
-                    None,
-                    warpui_kit_diff::DiffOptions {
-                        mode: kit_mode(self.diff_view),
-                        wrap: self.diff_wrap,
-                    },
-                    theme::font_control(),
-                    window,
-                    cx,
+                .child(warpui_kit_core::text_menu::attach(
+                    gpui::ElementId::Name("changes-diff-menu".into()),
+                    warpui_kit_diff::render_diff_with(
+                        patch,
+                        None,
+                        warpui_kit_diff::DiffOptions {
+                            mode: kit_mode(self.diff_view),
+                            wrap: self.diff_wrap,
+                        },
+                        theme::font_control(),
+                        window,
+                        cx,
+                    ),
+                    warpui_kit_core::text_menu::focus(cx),
                 ))
                 .into_any_element(),
             Some(_) => diff_state("No textual changes"),
@@ -1401,12 +1405,16 @@ impl ChangesView {
                                 cx.stop_propagation();
                             }
                         })
-                        .child(warpui_kit_diff::render_diff(
-                            patch,
-                            None,
-                            theme::font_control(),
-                            window,
-                            cx,
+                        .child(warpui_kit_core::text_menu::attach(
+                            gpui::ElementId::Name("commit-diff-menu".into()),
+                            warpui_kit_diff::render_diff(
+                                patch,
+                                None,
+                                theme::font_control(),
+                                window,
+                                cx,
+                            ),
+                            warpui_kit_core::text_menu::focus(cx),
                         )),
                 );
             }

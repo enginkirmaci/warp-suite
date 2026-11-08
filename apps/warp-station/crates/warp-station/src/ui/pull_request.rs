@@ -23,6 +23,7 @@ pub fn render(
     store: &Entity<Store>,
     tabbed: bool,
     in_tab: bool,
+    cx: &gpui::App,
 ) -> AnyElement {
     div()
         .debug_selector(|| "pull-request".into())
@@ -32,7 +33,7 @@ pub fn render(
         .flex_col()
         .child(head(repo, open, store, tabbed, in_tab))
         .child(status_strip(open))
-        .child(body(open))
+        .child(body(open, cx))
         .into_any_element()
 }
 
@@ -453,7 +454,8 @@ fn status_strip(open: &OpenPull) -> impl IntoElement + use<> {
         .child(people)
 }
 
-fn body(open: &OpenPull) -> impl IntoElement + use<> {
+fn body(open: &OpenPull, cx: &gpui::App) -> impl IntoElement + use<> {
+    let focus = warpui_kit_core::text_menu::focus(cx);
     let mut thread = div()
         .debug_selector(|| "pull-thread".into())
         .max_w(px(BODY_WIDTH))
@@ -468,6 +470,7 @@ fn body(open: &OpenPull) -> impl IntoElement + use<> {
                 &author,
                 "opened this pull request".into(),
                 &pull.body,
+                focus.clone(),
             ));
         }
         for (ix, note) in pull.comments.iter().enumerate() {
@@ -479,7 +482,13 @@ fn body(open: &OpenPull) -> impl IntoElement + use<> {
                     || "commented".to_string(),
                     |when| format!("commented {when}"),
                 );
-            thread = thread.child(comment(ix + 1, &note.author, verb, &note.body));
+            thread = thread.child(comment(
+                ix + 1,
+                &note.author,
+                verb,
+                &note.body,
+                focus.clone(),
+            ));
         }
         if !pull.checks.is_empty() {
             thread = thread.child(checks_card(pull));
@@ -494,7 +503,13 @@ fn body(open: &OpenPull) -> impl IntoElement + use<> {
         .child(thread)
 }
 
-fn comment(ix: usize, author: &str, verb: String, text: &str) -> impl IntoElement + use<> {
+fn comment(
+    ix: usize,
+    author: &str,
+    verb: String,
+    text: &str,
+    focus: Option<gpui::FocusHandle>,
+) -> impl IntoElement + use<> {
     div()
         .flex()
         .flex_row()
@@ -532,7 +547,8 @@ fn comment(ix: usize, author: &str, verb: String, text: &str) -> impl IntoElemen
                                 .child(verb),
                         ),
                 )
-                .child(
+                .child(warpui_kit_core::text_menu::attach(
+                    gpui::ElementId::Name(format!("pull-comment-menu-{ix}").into()),
                     div().p_4().child(
                         TextView::markdown(
                             gpui::ElementId::Name(format!("pull-comment-{ix}").into()),
@@ -540,7 +556,8 @@ fn comment(ix: usize, author: &str, verb: String, text: &str) -> impl IntoElemen
                         )
                         .selectable(true),
                     ),
-                ),
+                    focus,
+                )),
         )
 }
 

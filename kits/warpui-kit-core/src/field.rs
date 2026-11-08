@@ -150,7 +150,28 @@ pub fn custom(
     build: impl FnOnce(Input) -> Input,
 ) -> Stateful<Div> {
     let handle = state.read(cx).focus_handle(cx);
-    boxed(id, &handle, window, shell::field_height()).child(build(input(state)))
+    let press_state = state.clone();
+    boxed(id, &handle, window, shell::field_height())
+        // the box's 10 px inset is outside the input's hitbox, so a press
+        // there would only focus. Put the caret at the boundary the press is
+        // nearest to, the way a web input's own padding resolves it. A press
+        // above or below the text (inside the input's own x range) still only
+        // focuses.
+        .on_mouse_down(MouseButton::Left, move |event, window, cx| {
+            let input = press_state.read(cx).input_bounds();
+            let range = if event.position.x < input.left() {
+                0..0
+            } else if event.position.x > input.right() {
+                let end = press_state.read(cx).value().len();
+                end..end
+            } else {
+                return;
+            };
+            let handle = press_state.read(cx).focus_handle(cx);
+            window.focus(&handle, cx);
+            press_state.update(cx, |state, cx| state.set_selected_range(range, cx));
+        })
+        .child(build(input(state)))
 }
 
 /// The design's `textarea.area`: the same recessed box, 9/10 padding, 14/20

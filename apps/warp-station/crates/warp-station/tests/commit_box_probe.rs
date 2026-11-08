@@ -3,8 +3,8 @@
 
 use gpui::prelude::*;
 use gpui::{
-    Context, Entity, Focusable, IntoElement, Render, TestAppContext, VisualTestContext, Window,
-    div, px,
+    Context, Entity, Focusable, IntoElement, Modifiers, MouseButton, Render, TestAppContext,
+    VisualTestContext, Window, div, point, px,
 };
 use gpui_kit::component::input::TextareaState;
 use warpui_kit_core::field;
@@ -126,4 +126,31 @@ fn commit_message_area_shows_the_full_draft(cx: &mut TestAppContext) {
         );
     });
     assert_caret_visible(&state, cx);
+}
+
+/// The commit well is a `field::area` inside the card's own row; the frame
+/// must not swallow the drag that the textarea needs for selection.
+#[gpui_kit::gpui::test]
+fn a_drag_selects_in_the_commit_message(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+    cx.update(warp_station::theme::apply_kit_theme);
+
+    let (state, cx) = open(cx, SHORT_DRAFT);
+    let input = cx.read_entity(&state, |state, _| state.input_bounds());
+    let y = input.origin.y + px(6.);
+    let from = point(input.origin.x + px(2.), y);
+    let to = point(input.origin.x + px(140.), y);
+    cx.simulate_mouse_move(from, None, Modifiers::default());
+    cx.simulate_mouse_down(from, MouseButton::Left, Modifiers::default());
+    cx.simulate_mouse_move(to, Some(MouseButton::Left), Modifiers::default());
+    cx.simulate_mouse_up(to, MouseButton::Left, Modifiers::default());
+    cx.run_until_parked();
+
+    let selected = cx.read_entity(&state, |state, _| {
+        state.value()[state.selected_range()].to_string()
+    });
+    assert!(
+        !selected.is_empty(),
+        "the drag selects part of the commit draft"
+    );
 }

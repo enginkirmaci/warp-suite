@@ -97,6 +97,7 @@ pub fn render(
                 entities,
                 tabbed,
                 store.active_repo_tab.is_some(),
+                cx,
             ))
             .into_any_element();
     }

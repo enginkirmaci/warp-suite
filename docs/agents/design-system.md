@@ -27,6 +27,7 @@ palette in warp-agent only; warp-notes and warp-station still pin Copper (see
 | Motion | `warpui_kit_core::motion` | an entrance, spinner, or reduced motion |
 | Settings | `warpui_kit_core::settings` | a settings page needs a row, switch or segment |
 | Controls | `warpui_kit_core::{controls,field}` | a button, menu row, popover, field or keycap |
+| Text menu | `warpui_kit_core::text_menu` | a selectable read-only surface needs a right-click Copy |
 | Kit mapping | `warpui_kit_core::kit` | a kit component renders the wrong tone |
 
 ## Palettes
@@ -345,6 +346,32 @@ Adoption of the shared helpers is partial: `field`, `settings` and `motion` are
 used by all three apps, while `controls::{button, menu_row, popover_card}` are
 warp-agent's so far and notes/station still draw some of those shapes locally.
 Use the core helper for new code rather than adding another copy.
+
+## Text editing
+
+- **Editable fields** are `field::{text, mono, area, mono_area, custom}` over
+  `gpui_kit::component::input::{Input, Textarea}`. Do not build a raw input or
+  a second text box: the field owns the surface, the kit widget owns editing.
+- **Editing is the widget's.** Drag, double-click (word), triple-click (line),
+  shift-click, the selection keys, and Ctrl/Cmd+A/C/X/V come from the widget.
+  Right-click opens Cut / Copy / Paste / Select all: a native OS menu on
+  Windows and macOS, and a drawn `PopupMenu` fallback on Linux through
+  `gpui_base::Root` (which `gpui_kit::open_window` mounts). Keep
+  `gpui_kit::init` in `bootstrap::init`; it installs the overlay the fallback
+  needs.
+- **Read-only selectable text** — the diff body, a PR comment, a transcript
+  message — selects through the window's `TextSelectionLayer` instead. Give it
+  the Copy menu: install `text_menu::install(cx)` once before the first frame,
+  render the returned `TextMenuAnchor` at the root, and wrap the surface in
+  `text_menu::attach(id, element, text_menu::focus(cx))`. The menu is drawn by
+  GPUI, so it matches the family on every platform.
+- **The markdown editor** (`warpui-kit-markdown`) owns its own menu (Cut / Copy
+  / Paste / Select all while editing, Copy / Select all read-only). Do not
+  wrap a `LiveEditor` in `text_menu`; it would open two menus.
+- **Masked, read-only and disabled** states are the widget's to enforce. A
+  masked field must not put its value on the clipboard through either the
+  keyboard shortcut or the menu; a bump of `gpui-kit` gets the probe in
+  `kits/warpui-kit-core/tests/text_editing_probe.rs` first.
 
 ## Where a change goes
 

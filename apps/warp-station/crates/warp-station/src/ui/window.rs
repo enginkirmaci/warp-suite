@@ -18,6 +18,7 @@ use gpui::{
     WindowControlArea, div, px,
 };
 use gpui_kit::component::input::{InputEvent, InputState};
+use warpui_kit_core::text_menu::{self, TextMenuAnchor};
 use warpui_kit_core::{motion, shell};
 
 /// The rail's sections.
@@ -69,6 +70,8 @@ pub struct MainWindow {
     /// This window, for the single-instance door's activation request:
     /// `App::activate` is a no-op on Linux, `Window::activate_window` is not.
     window_handle: gpui::AnyWindowHandle,
+    /// The read-only text menu's action anchor; rendered once at the root.
+    text_menu: Entity<TextMenuAnchor>,
 }
 
 impl MainWindow {
@@ -117,6 +120,7 @@ impl MainWindow {
             Ok("clipboard") => Some(Tool::ClipboardPassword),
             _ => None,
         };
+        let text_menu = text_menu::install(cx);
         let this = Self {
             store,
             // E2E hook: WARP_STATION_PAGE=settings|summary opens that section
@@ -141,6 +145,7 @@ impl MainWindow {
             wand_queue_open: false,
             focus_handle,
             window_handle,
+            text_menu,
         };
         // keep the root focus handle live so Escape / Ctrl+K work before the
         // first input click; inputs take focus back when the user clicks them
@@ -301,6 +306,7 @@ impl Render for MainWindow {
             // kit's global mouse handlers never register and selectable
             // TextViews (README, notes preview) ignore drags entirely
             .child(gpui_kit::base::TextSelectionLayer)
+            .child(self.text_menu.clone())
             .child(self.render_titlebar(window, cx))
             .child(
                 div()

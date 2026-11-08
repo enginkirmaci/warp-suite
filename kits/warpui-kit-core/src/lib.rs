@@ -21,6 +21,7 @@
 //! - [`field`] — the one text box: `.field`, `.area` and the `.kbd` chip
 //! - [`media`] — attachment mime guesses and inline images from bytes
 //! - [`tooltip`] and [`tooltip_overlay`] — the two tooltip mechanisms
+//! - [`text_menu`] — the right-click Copy menu for selectable read-only text
 //!
 //! The component crates (`warpui-kit-diff`, `warpui-kit-markdown`,
 //! `warpui-kit-picker`) build on this crate so every consumer renders in the
@@ -41,6 +42,7 @@ pub mod pump;
 pub mod scale;
 pub mod settings;
 pub mod shell;
+pub mod text_menu;
 pub mod tooltip;
 pub mod tooltip_overlay;
 

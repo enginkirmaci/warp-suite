@@ -18,6 +18,7 @@ The palette is Copper, the warp-suite-v3 design: one lifted warm ramp plus one h
 | `icon` | Tinted svg icon builder |
 | `tooltip` | Attribute-based tooltips (`with_tooltip`) |
 | `tooltip_overlay` | Overlay-based tooltips (`TooltipHost` + `tip`) |
+| `text_menu` | The drawn right-click Copy menu for selectable read-only text (`TextMenuAnchor` + `attach`) |
 
 ## Usage
 
