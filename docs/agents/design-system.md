@@ -171,6 +171,48 @@ app is in rem, so lowering it to shrink kit text shrinks all the spacing too.
 `TextView` inherits 1rem, which is why markdown reads at 16 — the notes editor
 instead passes an explicit `.text_size(px(theme::font_note()))` to `LiveEditor`.
 
+## Diffs
+
+`warpui-kit-diff` draws every diff: the Changes pane, the history detail and
+warp-agent's tool tiles. The rules:
+
+- **One line is one row.** No wrapping. A long line keeps its shape and the
+  body scrolls horizontally; the number column scrolls with it until the
+  virtualized list lands. A wrapped continuation used to start without a
+  gutter and turn a 200-character line into a paragraph.
+- **One code column.** The patch's marker column is consumed, not rendered:
+  context, additions and deletions all start their text on the same x. Hunk
+  strips and state rows align to it through an empty gutter cell.
+- **One number, and it is a line in the file.** Context and additions show
+  the new-file number; deletions show none — their old-file number points at
+  a line the file no longer has. The − marker carries the deletion. Split
+  mode, when it lands, shows each side's own number.
+- **Two washes, not one band.** The gutter carries the strong wash
+  (`DIFF_*_GUTTER_BG`), the code the quiet one (`DIFF_*_BG`), and a 3px bar
+  in `ADD`/`DEL` runs down the row's leading edge. Token colors are never
+  recolored.
+- **Emphasis is the changed word.** Paired deletions/additions get a word
+  diff; the changed span takes `DIFF_*_EMPHASIS`. A span covering most of the
+  line is dropped — the row wash already says it.
+- **Metadata is not rows.** `diff --git`, `index`, `---` and `+++` are
+  hidden; the path, status and counts belong to the view's header. Hunk
+  headers are quiet strips on `DIFF_HUNK_BG`.
+- **States are rows with a word:** loading, binary, no textual change and
+  truncation. They never pass through the row renderer.
+- **Size:** `font_control` (14) for the diff body. The block still follows the
+  app's text size through the caller's `font_detail`.
+- **The body is selectable.** One selectable text covers every line; the
+  gutter and washes are drawn beside and behind it, so a drag crosses lines
+  and copy gives the patch content without line numbers or +/− markers. The
+  app must mount `gpui_kit::base::TextSelectionLayer` or the drag never
+  registers.
+- **Two texts and two canvases, not a row per div.** The gutter and the code
+  are one text layout each; a canvas per column paints every row's wash. A
+  large diff re-renders without laying out thousands of row divs.
+
+The washes live in `warpui-kit-core::palette`; a new diff color goes there,
+never into an app.
+
 ## UI scale
 
 The factor is the text size times the desktop text scaling. The bootstrap runs

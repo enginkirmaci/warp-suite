@@ -448,10 +448,17 @@ pub const CODE_FG: Rgba = TEXT;
 // ---- diffs -----------------------------------------------------------------
 
 pub const DIFF_GUTTER: Rgba = TEXT_FAINT; // line-number gutter text
-/// Full-width bands; the gutter cell over the line numbers paints the same
-/// shade so an edited row reads as one flat band.
-pub const DIFF_ADD_BG: Hsla = hsla(0.388, 0.515, 0.669, 0.13);
-pub const DIFF_DEL_BG: Hsla = hsla(0.009, 0.892, 0.749, 0.13);
+/// The content half of an edited row: quiet enough for token colors to stay
+/// readable on top of it.
+pub const DIFF_ADD_BG: Hsla = hsla(0.388, 0.515, 0.669, 0.10);
+pub const DIFF_DEL_BG: Hsla = hsla(0.009, 0.892, 0.749, 0.10);
+/// The gutter half of an edited row: stronger than the content wash, so the
+/// number and marker carry the change and the code stays legible.
+pub const DIFF_ADD_GUTTER_BG: Hsla = hsla(0.388, 0.515, 0.669, 0.18);
+pub const DIFF_DEL_GUTTER_BG: Hsla = hsla(0.009, 0.892, 0.749, 0.18);
+/// The changed-word band inside a paired deletion/addition row.
+pub const DIFF_ADD_EMPHASIS: Hsla = hsla(0.388, 0.515, 0.669, 0.30);
+pub const DIFF_DEL_EMPHASIS: Hsla = hsla(0.009, 0.892, 0.749, 0.30);
 /// The hunk band: the muted text's warm hue, so it stays on the ramp.
 pub const DIFF_HUNK_BG: Hsla = hsla(0.08, 0.12, 0.6, 0.10);
 
@@ -627,6 +634,18 @@ mod tests {
         (a.max(b) + 0.05) / (a.min(b) + 0.05)
     }
 
+    /// A translucent wash over an opaque surface.
+    fn over(base: Rgba, wash: Hsla) -> Rgba {
+        let wash: Rgba = wash.into();
+        let alpha = wash.a;
+        Rgba {
+            r: base.r * (1. - alpha) + wash.r * alpha,
+            g: base.g * (1. - alpha) + wash.g * alpha,
+            b: base.b * (1. - alpha) + wash.b * alpha,
+            a: 1.,
+        }
+    }
+
     #[test]
     fn ink_holds_aa_on_every_surface() {
         let inks = [
@@ -653,6 +672,39 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn diff_washes_keep_their_ink_readable() {
+        for (gutter, content, emphasis) in [
+            (DIFF_ADD_GUTTER_BG, DIFF_ADD_BG, DIFF_ADD_EMPHASIS),
+            (DIFF_DEL_GUTTER_BG, DIFF_DEL_BG, DIFF_DEL_EMPHASIS),
+        ] {
+            let gutter_bg = over(WELL, gutter);
+            let content_bg = over(WELL, content);
+            let emphasis_bg = over(content_bg, emphasis);
+            assert!(
+                contrast(DIFF_GUTTER, gutter_bg) >= 4.5,
+                "line numbers on the gutter wash are {:.2}:1",
+                contrast(DIFF_GUTTER, gutter_bg)
+            );
+            assert!(
+                contrast(TEXT_FAINT, content_bg) >= 4.5,
+                "comments on the content wash are {:.2}:1",
+                contrast(TEXT_FAINT, content_bg)
+            );
+            assert!(
+                contrast(CODE_FG, content_bg) >= 4.5,
+                "code on the content wash is {:.2}:1",
+                contrast(CODE_FG, content_bg)
+            );
+            assert!(
+                contrast(CODE_FG, emphasis_bg) >= 4.5,
+                "emphasized code is {:.2}:1",
+                contrast(CODE_FG, emphasis_bg)
+            );
+        }
+        assert!(contrast(TEXT_MUTED, over(WELL, DIFF_HUNK_BG)) >= 4.5);
     }
 
     #[test]

@@ -486,11 +486,25 @@ impl ChangesView {
         let Some(key) = self.selected_file.clone() else {
             return pane.into_any_element();
         };
-        let patch = self
-            .patches
-            .get(&key)
-            .map_or("loading patch…", |patch| patch.as_str());
-        let diff = warpui_kit_diff::render_diff(patch, None, theme::font_mono_meta(), window, cx);
+        // an empty patch is a state, not a one-row diff: a binary file or a
+        // mode-only change has nothing textual to draw
+        let body: gpui::AnyElement = match self.patches.get(&key) {
+            Some(patch) if !patch.is_empty() => div()
+                .id("changes-diff-scroll")
+                .flex_1()
+                .min_h_0()
+                .overflow_y_scroll()
+                .child(warpui_kit_diff::render_diff(
+                    patch,
+                    None,
+                    theme::font_control(),
+                    window,
+                    cx,
+                ))
+                .into_any_element(),
+            Some(_) => diff_state("No textual changes"),
+            None => diff_state("Loading patch…"),
+        };
         pane.child(
             div()
                 .flex_shrink_0()
@@ -506,14 +520,7 @@ impl ChangesView {
                 .text_color(theme::text())
                 .child(key.0),
         )
-        .child(
-            div()
-                .id("changes-diff-scroll")
-                .flex_1()
-                .min_h_0()
-                .overflow_y_scroll()
-                .child(diff),
-        )
+        .child(body)
         .into_any_element()
     }
 
@@ -2124,6 +2131,21 @@ fn clean_state(store: &Entity<Store>, cx: &mut gpui::App) -> gpui::AnyElement {
                 .text_color(theme::text_muted())
                 .child(last)
         }))
+        .into_any_element()
+}
+
+/// The diff pane's non-row states: a patch on its way, and a file with no
+/// textual delta (binary, mode-only).
+fn diff_state(text: &str) -> gpui::AnyElement {
+    div()
+        .flex_1()
+        .flex()
+        .items_center()
+        .justify_center()
+        .p_4()
+        .text_size(px(theme::font_body()))
+        .text_color(theme::text_muted())
+        .child(text.to_string())
         .into_any_element()
 }
 

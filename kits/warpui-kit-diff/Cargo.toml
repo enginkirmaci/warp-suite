@@ -33,6 +33,9 @@ gpui = { workspace = true }
 gpui-kit = { workspace = true }
 
 serde_json = { workspace = true, default-features = false, features = ["std"] }
+# word-level emphasis on paired deletion/addition rows; already in the tree
+# through gpui-kit -> gpui-component, so it adds no new build
+similar = { version = "2", default-features = false, features = ["text"] }
 
 [dev-dependencies]
 # headless UI probes (tests/); feature-unifies with the normal gpui-kit dep

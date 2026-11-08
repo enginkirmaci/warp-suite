@@ -20,8 +20,9 @@ const PATCH: &str = "\
  fn c() {}
 ";
 
-/// Eight rows: two meta, one hunk, four content.
-const PATCH_ROWS: f32 = 8.;
+/// One hunk strip and three code rows: the `---`/`+++` metadata is no longer
+/// drawn, and a single-file patch has no file header row.
+const PATCH_ROWS: f32 = 4.;
 
 struct DiffAt {
     font_detail: f32,

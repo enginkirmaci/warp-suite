@@ -8775,6 +8775,7 @@ dependencies = [
  "gpui-kit",
  "gpui-pre",
  "serde_json",
+ "similar",
  "warpui-kit-core",
 ]
 
