@@ -262,6 +262,16 @@ when one side changes, update the other side in the **same commit**.
 5. Document the cross-app contracts in the README and in this file.
 6. Add `apps/<name>/AGENTS.md` for the app-specific facts.
 
+## Plans and proposals
+
+- Write plans, proposals and migration checklists to `plans/<topic>.md`, one
+  file per topic in kebab-case. Do not create `PLAN*.md` at the repo root or
+  inside `apps/<name>/`; `plans/` is repo-wide, so app work files there too.
+- A plan is a working file, not shipped documentation: start with a status line
+  and the decisions that still need settling. Do not restate the code.
+- When the work lands, delete the plan or fold anything still useful into
+  `docs/agents/` or the app's `README.md`. Do not leave finished plans behind.
+
 ## Traps and do-nots
 
 - Do not `git subtree pull` or `git subtree push`. warp-suite is the source of
@@ -288,6 +298,8 @@ when one side changes, update the other side in the **same commit**.
   annotated skeleton for a new GPUI app in this suite.
 - [`docs/agents/testing-and-captures.md`](docs/agents/testing-and-captures.md)
   — probes, env hooks and the hidden-window capture recipe.
+- [`plans/`](plans/) — working design plans and proposals, one file per topic;
+  delete a plan once its work lands.
 - [`kits/README.md`](kits/README.md) — what each kit crate provides and where a
   shared shape belongs.
 - Each app's `README.md` and `AGENTS.md` — app-specific detail.
