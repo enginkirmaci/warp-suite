@@ -623,6 +623,7 @@ impl ChangesView {
             .flex_1()
             .min_h_0()
             .overflow_y_scroll()
+            .restrict_scroll_to_axis()
             .flex()
             .flex_col()
             .py_1();
@@ -1167,6 +1168,7 @@ impl ChangesView {
             .id("commit-detail")
             .size_full()
             .overflow_y_scroll()
+            .restrict_scroll_to_axis()
             .flex()
             .flex_col()
             .p_4()
@@ -1443,6 +1445,7 @@ impl ChangesView {
                         .max_h(px(220.))
                         .overflow_hidden()
                         .overflow_y_scroll()
+                        .restrict_scroll_to_axis()
                         .track_scroll(&handle)
                         // the patch scrolls inside the commit detail's own
                         // scroller: an event it can act on is consumed here,
@@ -2298,7 +2301,7 @@ fn diff_view_toggle(
     crate::ui::with_tooltip(button, show_tooltips, label).into_any_element()
 }
 
-/// Wrap a full-pane selectable surface in the Copy menu. [`text_menu::attach`]
+/// Wrap a full-pane selectable surface in the Copy menu. `text_menu::attach`
 /// sizes to its content, which is right for a text block in flow but collapses
 /// a surface that owns a scroller; this wrapper grows in the pane's flex
 /// column and gives the scroller a definite height.

@@ -173,13 +173,13 @@ fn a_wrapped_list_rows_stay_selectable(cx: &mut TestAppContext) {
         DiffMode::Unified,
         true,
         |vcx, _host| {
-        let row = vcx
-            .debug_bounds("diff-wrap-code-0-u")
-            .expect("the first wrapped row");
-        assert!(
-            row.size.height > px(20.),
-            "the list row wraps at the pane width: {row:?}"
-        );
+            let row = vcx
+                .debug_bounds("diff-wrap-code-0-u")
+                .expect("the first wrapped row");
+            assert!(
+                row.size.height > px(20.),
+                "the list row wraps at the pane width: {row:?}"
+            );
             let start = point(row.origin.x + px(8.), row.origin.y + px(8.));
             let end = point(row.origin.x + px(260.), row.origin.y + px(8.));
             vcx.simulate_mouse_down(start, MouseButton::Left, Modifiers::default());

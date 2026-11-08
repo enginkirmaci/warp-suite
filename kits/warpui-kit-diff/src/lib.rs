@@ -171,8 +171,11 @@ pub fn render_diff_with(
 }
 
 /// Like [`render_diff_with`], but tracks the horizontal viewports in `scroll`
-/// so the caller can draw pinned scrollbars. The handles must outlive the
-/// render and be reused; a fresh set every frame loses the scroll offsets.
+/// so the caller can draw pinned scrollbars, and owns the vertical viewport.
+/// The caller must give the returned element a height-constrained parent (a
+/// pane that fills its column); it does not size to its content. The handles
+/// must outlive the render and be reused; a fresh set every frame loses the
+/// scroll offsets and the wrapped list's measured rows.
 pub fn render_diff_with_scroll(
     text: &str,
     path_hint: Option<&str>,
@@ -617,8 +620,8 @@ fn wrap_list_frame(
 
 /// One persistent list state per patch and font size. A different patch
 /// replaces it; a width change is handled inside the list, which remeasures
-/// its items. Item heights, not just the text, decide this key: the wrapped
-/// row count changes only when the text does.
+/// its items. The key hashes the line text, numbers and font step, the
+/// inputs that change a row's wrapped height.
 fn wrap_list_state(handles: &DiffScrollHandles, key: u64, count: usize) -> ListState {
     let mut slot = handles.wrap_list.borrow_mut();
     if let Some(wrap) = slot.as_ref()
