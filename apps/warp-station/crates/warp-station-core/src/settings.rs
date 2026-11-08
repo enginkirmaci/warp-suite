@@ -54,8 +54,8 @@ pub struct NotificationsSettings {
     /// Mirrors confirmation toasts: merges, commits, agent handoffs,
     /// generation drafts, password copies.
     pub action_confirmations: bool,
-    /// The auto-fetch pass's aggregate ("3 repos behind, 1 fetch failed") —
-    /// the pass itself is silent, so this is desktop-only.
+    /// A fetch pass's aggregate ("3 repos behind, 1 fetch failed") — the pass
+    /// itself is silent, so this is desktop-only.
     pub fetch_summaries: bool,
 }
 
@@ -122,22 +122,6 @@ pub struct ReposSettings {
     /// None = the mode's own default (Name ascending, the rest best-first);
     /// legacy settings files predate the field, so absence stays meaningful.
     pub sort_ascending: Option<bool>,
-    /// Background `git fetch --prune` interval; None = off. Absence-meaningful
-    /// like sort_ascending.
-    pub auto_fetch_minutes: Option<u16>,
-    /// The periodic fetch runs only while some Warp Station window is focused;
-    /// with auto_fetch_minutes off, the gate instead arms a single fetch at
-    /// launch. None/false = fetch regardless. Absence-meaningful like
-    /// auto_fetch_minutes.
-    pub auto_fetch_only_focused: Option<bool>,
-    /// Background list-refresh interval: the repository page's Refresh button
-    /// (fetch + rescan + status probe) on a timer. None = off. Absence-
-    /// meaningful like auto_fetch_minutes.
-    pub auto_refresh_minutes: Option<u16>,
-    /// Regaining focus after the app was unfocused runs one fetch + refresh
-    /// and restarts both periodic timers. None/false = off.
-    /// Absence-meaningful like auto_fetch_minutes.
-    pub sync_on_focus: Option<bool>,
     /// Collapsible folder groups in the repos table; None/false = the flat
     /// list. Absence-meaningful like sort_ascending.
     pub group_repos_by_root: Option<bool>,
@@ -149,7 +133,7 @@ pub struct ReposSettings {
     /// expanded. Absence-meaningful like sort_ascending.
     pub collapsed_groups: Option<Vec<String>>,
     /// Cross-repo ripgrep search in the titlebar popup; None = enabled —
-    /// the absence-tolerant opt-out, like auto_fetch_minutes.
+    /// the absence-tolerant opt-out, like sort_ascending.
     pub enable_code_search: Option<bool>,
     /// The ripgrep binary the code search runs through; None = "rg".
     pub code_search_executable: Option<String>,
@@ -211,10 +195,6 @@ impl Default for ReposSettings {
             excluded_folders: None,
             sort_mode: RepoSortMode::Name,
             sort_ascending: None,
-            auto_fetch_minutes: None,
-            auto_fetch_only_focused: None,
-            auto_refresh_minutes: None,
-            sync_on_focus: None,
             group_repos_by_root: None,
             group_root_depth: None,
             collapsed_groups: None,
@@ -618,62 +598,29 @@ mod tests {
     }
 
     #[test]
-    fn auto_fetch_minutes_round_trips_and_absent_means_off() {
-        // absence (legacy files) = off
-        let legacy: AppSettings = serde_json::from_str("{}").unwrap();
-        assert_eq!(legacy.repos.auto_fetch_minutes, None);
-        assert_eq!(legacy.repos.auto_fetch_only_focused, None);
-        // an explicit interval persists and reads back
-        let on: AppSettings =
-            serde_json::from_str(r#"{"Repos": {"AutoFetchMinutes": 30}}"#).unwrap();
-        assert_eq!(on.repos.auto_fetch_minutes, Some(30));
-        let json = serde_json::to_string_pretty(&on).unwrap();
-        assert!(json.contains("\"AutoFetchMinutes\": 30"));
-        let back: AppSettings = serde_json::from_str(&json).unwrap();
-        assert_eq!(back.repos.auto_fetch_minutes, Some(30));
-    }
-
-    #[test]
-    fn auto_refresh_minutes_round_trips_and_absent_means_off() {
-        // absence (legacy files) = off
-        let legacy: AppSettings = serde_json::from_str("{}").unwrap();
-        assert_eq!(legacy.repos.auto_refresh_minutes, None);
-        // an explicit interval persists and reads back
-        let on: AppSettings =
-            serde_json::from_str(r#"{"Repos": {"AutoRefreshMinutes": 15}}"#).unwrap();
-        assert_eq!(on.repos.auto_refresh_minutes, Some(15));
-        let json = serde_json::to_string_pretty(&on).unwrap();
-        assert!(json.contains("\"AutoRefreshMinutes\": 15"));
-        let back: AppSettings = serde_json::from_str(&json).unwrap();
-        assert_eq!(back.repos.auto_refresh_minutes, Some(15));
-    }
-
-    #[test]
-    fn sync_on_focus_round_trips_and_absent_means_off() {
-        // absence (legacy files) = off
-        let legacy: AppSettings = serde_json::from_str("{}").unwrap();
-        assert_eq!(legacy.repos.sync_on_focus, None);
-        // the opt-in persists and reads back
-        let on: AppSettings = serde_json::from_str(r#"{"Repos": {"SyncOnFocus": true}}"#).unwrap();
-        assert_eq!(on.repos.sync_on_focus, Some(true));
-        let json = serde_json::to_string_pretty(&on).unwrap();
-        assert!(json.contains("\"SyncOnFocus\": true"));
-        let back: AppSettings = serde_json::from_str(&json).unwrap();
-        assert_eq!(back.repos.sync_on_focus, Some(true));
-    }
-
-    #[test]
-    fn auto_fetch_focus_gate_round_trips_and_absent_means_fetch_always() {
-        // absence (legacy files) = fetch regardless of focus
-        let legacy: AppSettings = serde_json::from_str("{}").unwrap();
-        assert_eq!(legacy.repos.auto_fetch_only_focused, None);
-        let gated: AppSettings =
-            serde_json::from_str(r#"{"Repos": {"AutoFetchOnlyFocused": true}}"#).unwrap();
-        assert_eq!(gated.repos.auto_fetch_only_focused, Some(true));
-        let json = serde_json::to_string_pretty(&gated).unwrap();
-        assert!(json.contains("\"AutoFetchOnlyFocused\": true"));
-        let back: AppSettings = serde_json::from_str(&json).unwrap();
-        assert_eq!(back.repos.auto_fetch_only_focused, Some(true));
+    fn retired_fetch_keys_load_and_are_not_written_back() {
+        // a settings file written before the periodic fetch removal still
+        // loads: unknown keys are ignored, and the next save drops them
+        let legacy: AppSettings = serde_json::from_str(
+            r#"{"Repos": {
+                "AutoFetchMinutes": 15,
+                "AutoFetchOnlyFocused": true,
+                "AutoRefreshMinutes": 30,
+                "SyncOnFocus": true,
+                "BranchNamePrefix": "users/x"
+            }}"#,
+        )
+        .unwrap();
+        assert_eq!(legacy.repos.branch_name_prefix, "users/x");
+        let json = serde_json::to_string_pretty(&legacy).unwrap();
+        for key in [
+            "AutoFetchMinutes",
+            "AutoFetchOnlyFocused",
+            "AutoRefreshMinutes",
+            "SyncOnFocus",
+        ] {
+            assert!(!json.contains(key), "{key} must not be written back");
+        }
     }
 
     #[test]

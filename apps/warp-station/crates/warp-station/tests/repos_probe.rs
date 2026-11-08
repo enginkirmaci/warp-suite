@@ -647,366 +647,13 @@ fn wand_done_for_a_switched_away_repo_lands_nothing(cx: &mut TestAppContext) {
     });
 }
 
-/// WARP_STATION_AUTO_FETCH_SECS is process-global and Store construction reads
-/// it, so the auto-fetch probes take turns: a sibling's env window must not
-/// flip another probe's schedule mode.
-static AUTO_FETCH_ENV: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-/// The periodic fetch scheduler: a due schedule sends exactly one FetchAll
-/// carrying only the repos with a remote, the selected repo's folder drops
-/// out while a git mutation runs there, and each fire re-arms the next due
-/// instant. WARP_STATION_AUTO_FETCH_SECS=1 replaces the minutes setting so the
-/// probe runs on the E2E interval.
+/// The Refresh button: a scan first (local), then one fetch pass carrying only
+/// the repos with a remote, so the local refresh never waits for the network.
+/// The button is the only fetch trigger; no timer re-arms behind it.
 #[gpui::test]
-fn auto_fetch_fires_for_remote_repos_and_reschedules(cx: &mut TestAppContext) {
+fn refresh_scans_first_and_fetches_second(cx: &mut TestAppContext) {
     use warp_station::net::NetCommand;
 
-    let _env_turn = AUTO_FETCH_ENV.lock().unwrap_or_else(|e| e.into_inner());
-    cx.update(gpui_kit::init);
-    scratch_home();
-
-    // SAFETY: process-global env, held exclusively via AUTO_FETCH_ENV
-    unsafe { std::env::set_var("WARP_STATION_AUTO_FETCH_SECS", "1") };
-
-    let scratch = std::env::temp_dir().join(format!(
-        "warp-station-auto-fetch-store-{}.json",
-        std::process::id()
-    ));
-    std::fs::write(&scratch, r#"{"Repos": {"AutoFetchMinutes": 30}}"#).expect("scratch settings");
-
-    let (net_tx, net_rx) = async_channel::unbounded();
-    let store = cx.new(|_cx| {
-        let mut store = Store::with_settings(
-            net_tx,
-            std::sync::Arc::new(warp_station_core::settings::SettingsService::at(
-                scratch.clone(),
-            )),
-        );
-        store.replace_repos(vec![
-            entry("alpha", "/probe/alpha", &[]),
-            entry("beta", "/probe/beta", &[]),
-            entry("gamma", "/probe/gamma", &[]),
-        ]);
-        store.repos[1].git_has_remote = false;
-        store
-    });
-    assert!(
-        cx.read_entity(&store, |s, _| s.next_auto_fetch.is_some()),
-        "construction arms the schedule"
-    );
-
-    // force the schedule due, then fire
-    cx.update_entity(&store, |s: &mut Store, _| {
-        s.next_auto_fetch = Some(std::time::Instant::now() - std::time::Duration::from_secs(1));
-    });
-    cx.update_entity(&store, |s: &mut Store, cx| s.check_auto_fetch(cx));
-
-    let mut fetch_all: Option<Vec<PathBuf>> = None;
-    while let Ok(command) = net_rx.try_recv() {
-        if let NetCommand::FetchAll { folders } = command {
-            assert!(fetch_all.is_none(), "exactly one FetchAll went out");
-            fetch_all = Some(folders);
-        }
-    }
-    assert_eq!(
-        fetch_all.expect("the FetchAll command went out"),
-        vec![PathBuf::from("/probe/alpha"), PathBuf::from("/probe/gamma")],
-        "only the repos with a remote are fetched"
-    );
-    cx.read_entity(&store, |s, _| {
-        let due = s.next_auto_fetch.expect("each fire re-arms the schedule");
-        assert!(
-            due > std::time::Instant::now(),
-            "the next due sits in the future"
-        );
-    });
-
-    // a git mutation in the selected repo excludes its folder (index.lock)
-    cx.update_entity(&store, |s: &mut Store, _| {
-        s.selected_repo = Some("/probe/alpha".into());
-        s.git_jobs.insert("/probe/alpha".into(), "pull");
-        s.next_auto_fetch = Some(std::time::Instant::now() - std::time::Duration::from_secs(1));
-    });
-    cx.update_entity(&store, |s: &mut Store, cx| s.check_auto_fetch(cx));
-    while let Ok(command) = net_rx.try_recv() {
-        if let NetCommand::FetchAll { folders } = command {
-            assert_eq!(
-                folders,
-                vec![PathBuf::from("/probe/gamma")],
-                "the busy selected repo is excluded"
-            );
-        }
-    }
-
-    unsafe { std::env::remove_var("WARP_STATION_AUTO_FETCH_SECS") };
-    let _ = std::fs::remove_file(&scratch);
-}
-
-/// The focus gate: with AutoFetchOnlyFocused on, a due schedule holds — no
-/// FetchAll and no re-arm — while no window is focused (this probe opens
-/// none), and flipping the option off lets the held pass fire immediately.
-#[gpui::test]
-fn auto_fetch_focus_gate_holds_the_pass_until_a_window_is_focused(cx: &mut TestAppContext) {
-    use warp_station::net::NetCommand;
-
-    let _env_turn = AUTO_FETCH_ENV.lock().unwrap_or_else(|e| e.into_inner());
-    cx.update(gpui_kit::init);
-    scratch_home();
-
-    let scratch = std::env::temp_dir().join(format!(
-        "warp-station-auto-fetch-focus-{}.json",
-        std::process::id()
-    ));
-    std::fs::write(
-        &scratch,
-        r#"{"Repos": {"AutoFetchMinutes": 30, "AutoFetchOnlyFocused": true}}"#,
-    )
-    .expect("scratch settings");
-
-    let (net_tx, net_rx) = async_channel::unbounded();
-    let store = cx.new(|_cx| {
-        let mut store = Store::with_settings(
-            net_tx,
-            std::sync::Arc::new(warp_station_core::settings::SettingsService::at(
-                scratch.clone(),
-            )),
-        );
-        store.replace_repos(vec![entry("alpha", "/probe/alpha", &[])]);
-        store
-    });
-
-    // force the schedule due with the gate on and no focused window
-    cx.update_entity(&store, |s: &mut Store, _| {
-        s.next_auto_fetch = Some(std::time::Instant::now() - std::time::Duration::from_secs(1));
-    });
-    cx.update_entity(&store, |s: &mut Store, cx| s.check_auto_fetch(cx));
-
-    while let Ok(command) = net_rx.try_recv() {
-        assert!(
-            !matches!(command, NetCommand::FetchAll { .. }),
-            "the gated pass must not fire while unfocused"
-        );
-    }
-    cx.read_entity(&store, |s, _| {
-        let due = s.next_auto_fetch.expect("the schedule stays armed");
-        assert!(
-            due < std::time::Instant::now(),
-            "a held pass is not re-armed"
-        );
-    });
-
-    // the gate turning off releases the held pass on the next tick
-    cx.update_entity(&store, |s: &mut Store, _| {
-        s.update_settings(|settings| settings.repos.auto_fetch_only_focused = None);
-    });
-    cx.update_entity(&store, |s: &mut Store, cx| s.check_auto_fetch(cx));
-    let mut fetched: Option<Vec<PathBuf>> = None;
-    while let Ok(command) = net_rx.try_recv() {
-        if let NetCommand::FetchAll { folders } = command {
-            fetched = Some(folders);
-        }
-    }
-    assert_eq!(
-        fetched.expect("releasing the gate fires the held pass"),
-        vec![PathBuf::from("/probe/alpha")]
-    );
-    cx.read_entity(&store, |s, _| {
-        assert!(
-            s.next_auto_fetch.expect("each fire re-arms") > std::time::Instant::now(),
-            "the fired pass re-arms into the future"
-        );
-    });
-
-    let _ = std::fs::remove_file(&scratch);
-}
-
-/// Fetch-off + focus-gate-on is a one-shot: construction arms an immediate
-/// pass that waits for the first scan to land repos, fires exactly once, and
-/// clears the schedule instead of re-arming.
-#[gpui::test]
-fn auto_fetch_gate_alone_fetches_once(cx: &mut TestAppContext) {
-    use warp_station::net::NetCommand;
-
-    let _env_turn = AUTO_FETCH_ENV.lock().unwrap_or_else(|e| e.into_inner());
-    cx.update(gpui_kit::init);
-    scratch_home();
-
-    let scratch = std::env::temp_dir().join(format!(
-        "warp-station-auto-fetch-once-{}.json",
-        std::process::id()
-    ));
-    std::fs::write(&scratch, r#"{"Repos": {"AutoFetchOnlyFocused": true}}"#)
-        .expect("scratch settings");
-
-    let (net_tx, net_rx) = async_channel::unbounded();
-    let store = cx.new(|_cx| {
-        Store::with_settings(
-            net_tx,
-            std::sync::Arc::new(warp_station_core::settings::SettingsService::at(
-                scratch.clone(),
-            )),
-        )
-    });
-    // a focused window: the one-shot is focus-gated like any other pass
-    let (_view, cx) = cx.add_window_view(|window, cx| MainWindow::new(store.clone(), window, cx));
-    cx.update(|window, _| window.activate_window());
-    cx.run_until_parked();
-    assert!(
-        cx.read_entity(&store, |s, _| s.next_auto_fetch.is_some()),
-        "construction arms the one-shot"
-    );
-
-    // the empty hold: the one-shot must not be consumed before any scan has
-    // landed repos (a fresh install starts with an empty table)
-    cx.update_entity(&store, |s: &mut Store, _| s.replace_repos(vec![]));
-    cx.update_entity(&store, |s: &mut Store, cx| s.check_auto_fetch(cx));
-    while let Ok(command) = net_rx.try_recv() {
-        assert!(
-            !matches!(command, NetCommand::FetchAll { .. }),
-            "an empty table must not consume the one-shot"
-        );
-    }
-    cx.read_entity(&store, |s, _| {
-        assert!(s.next_auto_fetch.is_some(), "the one-shot stays armed");
-    });
-
-    // repos land, the pass fires once and the schedule clears
-    cx.update_entity(&store, |s: &mut Store, _| {
-        s.replace_repos(vec![entry("alpha", "/probe/alpha", &[])]);
-    });
-    cx.update_entity(&store, |s: &mut Store, cx| s.check_auto_fetch(cx));
-    let mut fetched: Option<Vec<PathBuf>> = None;
-    while let Ok(command) = net_rx.try_recv() {
-        if let NetCommand::FetchAll { folders } = command {
-            fetched = Some(folders);
-        }
-    }
-    assert_eq!(
-        fetched.expect("the one-shot fires once repos exist"),
-        vec![PathBuf::from("/probe/alpha")]
-    );
-    cx.read_entity(&store, |s, _| {
-        assert!(s.next_auto_fetch.is_none(), "the one-shot does not re-arm");
-    });
-
-    cx.update_entity(&store, |s: &mut Store, cx| s.check_auto_fetch(cx));
-    while let Ok(command) = net_rx.try_recv() {
-        assert!(
-            !matches!(command, NetCommand::FetchAll { .. }),
-            "no second pass after the one-shot"
-        );
-    }
-
-    let _ = std::fs::remove_file(&scratch);
-}
-
-/// The periodic refresh scheduler: a due schedule runs exactly what the
-/// repository page's Refresh button runs (a Scan carrying the current
-/// settings), re-arms, and holds while a scan is already in flight.
-/// WARP_STATION_AUTO_REFRESH_SECS=1 replaces the minutes setting so the probe
-/// runs on the E2E interval.
-#[gpui::test]
-fn auto_refresh_runs_the_refresh_button_and_reschedules(cx: &mut TestAppContext) {
-    use warp_station::net::NetCommand;
-
-    let _env_turn = AUTO_FETCH_ENV.lock().unwrap_or_else(|e| e.into_inner());
-    cx.update(gpui_kit::init);
-    scratch_home();
-
-    // SAFETY: process-global env, held exclusively via AUTO_FETCH_ENV
-    unsafe { std::env::set_var("WARP_STATION_AUTO_REFRESH_SECS", "1") };
-
-    let scratch = std::env::temp_dir().join(format!(
-        "warp-station-auto-refresh-store-{}.json",
-        std::process::id()
-    ));
-    std::fs::write(&scratch, r#"{"Repos": {"AutoRefreshMinutes": 30}}"#).expect("scratch settings");
-
-    let (net_tx, net_rx) = async_channel::unbounded();
-    let store = cx.new(|_cx| {
-        let mut store = Store::with_settings(
-            net_tx,
-            std::sync::Arc::new(warp_station_core::settings::SettingsService::at(
-                scratch.clone(),
-            )),
-        );
-        store.replace_repos(vec![entry("alpha", "/probe/alpha", &[])]);
-        store
-    });
-    assert!(
-        cx.read_entity(&store, |s, _| s.next_auto_refresh.is_some()),
-        "construction arms the schedule"
-    );
-    // the constructor's own startup scan is still in flight
-    while net_rx.try_recv().is_ok() {}
-
-    cx.update_entity(&store, |s: &mut Store, _| {
-        s.scanning = false;
-        s.next_auto_refresh = Some(std::time::Instant::now() - std::time::Duration::from_secs(1));
-    });
-    cx.update_entity(&store, |s: &mut Store, cx| s.check_auto_refresh(cx));
-
-    let mut scanned = 0;
-    while let Ok(command) = net_rx.try_recv() {
-        if let NetCommand::Scan { .. } = command {
-            scanned += 1;
-        }
-    }
-    assert_eq!(scanned, 1, "exactly one Scan went out");
-    cx.read_entity(&store, |s, _| {
-        assert!(s.scanning, "the Refresh button's scanning state is on");
-        assert!(
-            s.next_auto_refresh.expect("each fire re-arms") > std::time::Instant::now(),
-            "the next due sits in the future"
-        );
-    });
-
-    // a scan in flight is this cycle's refresh: no second Scan is stacked, and
-    // the clock restarts instead of firing the moment it settles
-    cx.update_entity(&store, |s: &mut Store, _| {
-        s.next_auto_refresh = Some(std::time::Instant::now() - std::time::Duration::from_secs(1));
-    });
-    cx.update_entity(&store, |s: &mut Store, cx| s.check_auto_refresh(cx));
-    while let Ok(command) = net_rx.try_recv() {
-        assert!(
-            !matches!(command, NetCommand::Scan { .. }),
-            "no second Scan while one is in flight"
-        );
-    }
-    cx.read_entity(&store, |s, _| {
-        assert!(
-            s.next_auto_refresh.expect("the clock restarts") > std::time::Instant::now(),
-            "an in-flight pass restarts the clock"
-        );
-    });
-
-    // a freshly due tick after the scan settled starts a new pass
-    cx.update_entity(&store, |s: &mut Store, _| {
-        s.scanning = false;
-        s.next_auto_refresh = Some(std::time::Instant::now() - std::time::Duration::from_secs(1));
-    });
-    cx.update_entity(&store, |s: &mut Store, cx| s.check_auto_refresh(cx));
-    let mut scanned = 0;
-    while let Ok(command) = net_rx.try_recv() {
-        if let NetCommand::Scan { .. } = command {
-            scanned += 1;
-        }
-    }
-    assert_eq!(scanned, 1, "a newly due tick starts a fresh pass");
-
-    unsafe { std::env::remove_var("WARP_STATION_AUTO_REFRESH_SECS") };
-    let _ = std::fs::remove_file(&scratch);
-}
-
-/// The Refresh button is local-first: it rescans (a filesystem walk, fast)
-/// before anything network-bound, then queues the fetch pass behind it, and
-/// restarts both periodic clocks so the next automatic pass is a full
-/// interval out.
-#[gpui::test]
-fn refresh_rescans_first_fetches_second_and_restarts_both_timers(cx: &mut TestAppContext) {
-    use warp_station::net::NetCommand;
-
-    let _env_turn = AUTO_FETCH_ENV.lock().unwrap_or_else(|e| e.into_inner());
     cx.update(gpui_kit::init);
     scratch_home();
 
@@ -1014,11 +661,7 @@ fn refresh_rescans_first_fetches_second_and_restarts_both_timers(cx: &mut TestAp
         "warp-station-refresh-sync-{}.json",
         std::process::id()
     ));
-    std::fs::write(
-        &scratch,
-        r#"{"Repos": {"AutoFetchMinutes": 30, "AutoRefreshMinutes": 15}}"#,
-    )
-    .expect("scratch settings");
+    std::fs::write(&scratch, "{}").expect("scratch settings");
 
     let (net_tx, net_rx) = async_channel::unbounded();
     let store = cx.new(|_cx| {
@@ -1034,9 +677,6 @@ fn refresh_rescans_first_fetches_second_and_restarts_both_timers(cx: &mut TestAp
         ]);
         store.repos[1].git_has_remote = false;
         store.scanning = false;
-        store.next_auto_fetch = Some(std::time::Instant::now() - std::time::Duration::from_secs(1));
-        store.next_auto_refresh =
-            Some(std::time::Instant::now() - std::time::Duration::from_secs(1));
         store
     });
     while net_rx.try_recv().is_ok() {}
@@ -1067,18 +707,13 @@ fn refresh_rescans_first_fetches_second_and_restarts_both_timers(cx: &mut TestAp
     cx.read_entity(&store, |s, _| {
         assert!(s.scanning, "the toolbar shows Refreshing");
         assert!(
-            s.next_auto_fetch.expect("the fetch clock is re-armed") > std::time::Instant::now(),
-            "the fetch clock restarts"
-        );
-        assert!(
-            s.next_auto_refresh.expect("the refresh clock is re-armed") > std::time::Instant::now(),
-            "the refresh clock restarts"
+            s.fetch_progress.is_none(),
+            "the pass reports its own progress as it streams"
         );
     });
 
     let _ = std::fs::remove_file(&scratch);
 }
-
 /// A scan that settles after a status probe and a GitHub snapshot landed must
 /// keep their counts: the merge runs against the live list, not against the
 /// snapshot the scan was queued with (the launch queues its activity pass
@@ -1267,7 +902,6 @@ fn activity_failures_keep_counts_and_the_eager_kick_retries(cx: &mut TestAppCont
     use warp_station::net::UiEvent;
     use warp_station_core::github::{GitHubItem, GitHubSnapshot};
 
-    let _env_turn = AUTO_FETCH_ENV.lock().unwrap_or_else(|e| e.into_inner());
     cx.update(gpui_kit::init);
     scratch_home();
 
@@ -1321,20 +955,18 @@ fn activity_failures_keep_counts_and_the_eager_kick_retries(cx: &mut TestAppCont
     };
 
     // nothing has landed yet: the eager set is due
-    cx.update_entity(&store, |s: &mut Store, cx| s.refresh_fetched_stale(cx));
+    cx.update_entity(&store, |s: &mut Store, _| s.kick_eager_activity(false));
     assert!(drained_a_github_pass(&net_rx), "the first eager kick asks");
-    cx.update_entity(&store, |s: &mut Store, _| s.scanning = false);
 
     // a failed pass must not stamp the freshness gate
     cx.update_entity(&store, |s: &mut Store, cx| {
         s.on_net_event(settle("/probe/alpha", snapshot(false, 0, 0)), cx);
     });
-    cx.update_entity(&store, |s: &mut Store, cx| s.refresh_fetched_stale(cx));
+    cx.update_entity(&store, |s: &mut Store, _| s.kick_eager_activity(false));
     assert!(
         drained_a_github_pass(&net_rx),
         "a failed probe leaves the eager set due"
     );
-    cx.update_entity(&store, |s: &mut Store, _| s.scanning = false);
 
     // a good pass fills the counts and counts as the fresh answer
     cx.update_entity(&store, |s: &mut Store, cx| {
@@ -1344,12 +976,11 @@ fn activity_failures_keep_counts_and_the_eager_kick_retries(cx: &mut TestAppCont
         assert_eq!(s.repos[0].github_pr_count, 2);
         assert_eq!(s.repos[0].github_issue_count, 1);
     });
-    cx.update_entity(&store, |s: &mut Store, cx| s.refresh_fetched_stale(cx));
+    cx.update_entity(&store, |s: &mut Store, _| s.kick_eager_activity(false));
     assert!(
         !drained_a_github_pass(&net_rx),
-        "a fresh snapshot is not re-asked by the focus sync"
+        "a fresh snapshot is not re-asked by the next kick"
     );
-    cx.update_entity(&store, |s: &mut Store, _| s.scanning = false);
 
     // a later failure keeps the counts it cannot replace
     cx.update_entity(&store, |s: &mut Store, cx| {
@@ -1430,139 +1061,6 @@ fn an_unprobed_row_says_checking_instead_of_clean(cx: &mut TestAppContext) {
     assert!(cx.debug_bounds("repo-checking-0").is_none());
 }
 
-/// The focus-regain sync: the first observation primes the edge (a focused
-/// launch must not double the startup pass), a later focus regain runs the
-/// local-first refresh but fetches only the repos whose status is stale,
-/// restarting both clocks; a pass already in flight only restarts the
-/// clocks, and the switch being off sends nothing.
-#[gpui::test]
-fn focus_regain_syncs_once_and_restarts_both_timers(cx: &mut TestAppContext) {
-    use warp_station::net::NetCommand;
-
-    let _env_turn = AUTO_FETCH_ENV.lock().unwrap_or_else(|e| e.into_inner());
-    cx.update(gpui_kit::init);
-    scratch_home();
-
-    let scratch = std::env::temp_dir().join(format!(
-        "warp-station-focus-sync-{}.json",
-        std::process::id()
-    ));
-    std::fs::write(
-        &scratch,
-        r#"{"Repos": {"AutoFetchMinutes": 30, "AutoRefreshMinutes": 15, "SyncOnFocus": true}}"#,
-    )
-    .expect("scratch settings");
-
-    let (net_tx, net_rx) = async_channel::unbounded();
-    let store = cx.new(|_cx| {
-        let mut store = Store::with_settings(
-            net_tx,
-            std::sync::Arc::new(warp_station_core::settings::SettingsService::at(
-                scratch.clone(),
-            )),
-        );
-        store.replace_repos(vec![
-            entry("alpha", "/probe/alpha", &[]),
-            entry("beta", "/probe/beta", &[]),
-        ]);
-        store.repos[1].git_has_remote = false;
-        store.scanning = false;
-        store
-    });
-    while net_rx.try_recv().is_ok() {}
-
-    // the first observation primes the edge: no sync
-    cx.update_entity(&store, |s: &mut Store, cx| s.on_focus_changed(true, cx));
-    assert!(
-        !drained_a_sync(&net_rx),
-        "a focused launch is not a focus regain"
-    );
-
-    // losing focus is not an event either
-    cx.update_entity(&store, |s: &mut Store, cx| s.on_focus_changed(false, cx));
-    assert!(!drained_a_sync(&net_rx));
-
-    // a scan already in flight: the focus only restarts the clocks
-    cx.update_entity(&store, |s: &mut Store, _| {
-        s.scanning = true;
-        s.next_auto_fetch = Some(std::time::Instant::now() - std::time::Duration::from_secs(1));
-        s.next_auto_refresh = Some(std::time::Instant::now() - std::time::Duration::from_secs(1));
-    });
-    cx.update_entity(&store, |s: &mut Store, cx| s.on_focus_changed(true, cx));
-    assert!(
-        !drained_a_sync(&net_rx),
-        "no pass is stacked behind the in-flight scan"
-    );
-    cx.read_entity(&store, |s, _| {
-        assert!(
-            s.next_auto_fetch.expect("the fetch clock is restarted") > std::time::Instant::now()
-        );
-        assert!(
-            s.next_auto_refresh.expect("the refresh clock is restarted")
-                > std::time::Instant::now()
-        );
-    });
-
-    // the normal edge: rescan + one stale fetch, both clocks restarted
-    cx.update_entity(&store, |s: &mut Store, _| s.scanning = false);
-    cx.update_entity(&store, |s: &mut Store, cx| s.on_focus_changed(false, cx));
-    cx.update_entity(&store, |s: &mut Store, cx| s.on_focus_changed(true, cx));
-    let mut fetched: Option<Vec<PathBuf>> = None;
-    let mut scans = 0;
-    while let Ok(command) = net_rx.try_recv() {
-        match command {
-            NetCommand::FetchAll { folders } => fetched = Some(folders),
-            NetCommand::Scan { .. } => scans += 1,
-            _ => {}
-        }
-    }
-    assert_eq!(
-        fetched.expect("the focus regain fetches"),
-        vec![PathBuf::from("/probe/alpha")],
-        "never-fetched repos count as stale"
-    );
-    assert_eq!(scans, 1, "and rescans once");
-    cx.read_entity(&store, |s, _| {
-        assert!(
-            s.next_auto_fetch.expect("the fetch clock is restarted") > std::time::Instant::now()
-        );
-        assert!(
-            s.next_auto_refresh.expect("the refresh clock is restarted")
-                > std::time::Instant::now()
-        );
-    });
-
-    // a fresh pre-focus status is trusted: two minutes old stays short of
-    // the stale window, so the focus regain scans but sends no fetch or
-    // activity pass
-    cx.update_entity(&store, |s, _| {
-        s.repos[0].git_last_fetch_at = Some(chrono::Local::now() - chrono::Duration::seconds(120));
-    });
-    cx.update_entity(&store, |s: &mut Store, cx| s.on_focus_changed(false, cx));
-    cx.update_entity(&store, |s: &mut Store, cx| s.on_focus_changed(true, cx));
-    while let Ok(command) = net_rx.try_recv() {
-        assert!(
-            !matches!(
-                command,
-                NetCommand::FetchAll { .. }
-                    | NetCommand::GitHubPass { .. }
-                    | NetCommand::AzurePass { .. }
-            ),
-            "a fresh repo keeps the focus pass to a scan"
-        );
-    }
-
-    // switch off: a focus regain sends nothing
-    cx.update_entity(&store, |s: &mut Store, _| {
-        s.update_settings(|settings| settings.repos.sync_on_focus = None);
-    });
-    cx.update_entity(&store, |s: &mut Store, cx| s.on_focus_changed(false, cx));
-    cx.update_entity(&store, |s: &mut Store, cx| s.on_focus_changed(true, cx));
-    assert!(!drained_a_sync(&net_rx), "the switch is off");
-
-    let _ = std::fs::remove_file(&scratch);
-}
-
 /// Opens a fake `gh` executable so the pass kickers resolve deterministically
 /// (the real `gh` on PATH would leak in through the same code path).
 fn fake_gh_executable(tag: &str) -> PathBuf {
@@ -1585,7 +1083,6 @@ fn fake_gh_executable(tag: &str) -> PathBuf {
 fn activity_passes_sweep_the_live_list_and_skip_archived(cx: &mut TestAppContext) {
     use warp_station::net::NetCommand;
 
-    let _env_turn = AUTO_FETCH_ENV.lock().unwrap_or_else(|e| e.into_inner());
     cx.update(gpui_kit::init);
     scratch_home();
 
@@ -1688,7 +1185,6 @@ fn activity_passes_sweep_the_live_list_and_skip_archived(cx: &mut TestAppContext
 fn refresh_kicks_the_eager_github_and_azure_set_only(cx: &mut TestAppContext) {
     use warp_station::net::NetCommand;
 
-    let _env_turn = AUTO_FETCH_ENV.lock().unwrap_or_else(|e| e.into_inner());
     cx.update(gpui_kit::init);
     scratch_home();
 
@@ -1780,7 +1276,6 @@ fn refresh_kicks_the_eager_github_and_azure_set_only(cx: &mut TestAppContext) {
 fn fetch_pass_reports_progress_per_repo(cx: &mut TestAppContext) {
     use warp_station::net::UiEvent;
 
-    let _env_turn = AUTO_FETCH_ENV.lock().unwrap_or_else(|e| e.into_inner());
     cx.update(gpui_kit::init);
     scratch_home();
 
@@ -1852,22 +1347,6 @@ fn fetch_pass_reports_progress_per_repo(cx: &mut TestAppContext) {
     });
 
     let _ = std::fs::remove_file(&scratch);
-}
-
-/// Drains the store's net channel, reporting whether a fetch or a scan was
-/// queued (the two commands a refresh and a focus sync emit).
-fn drained_a_sync(net_rx: &async_channel::Receiver<warp_station::net::NetCommand>) -> bool {
-    let mut found = false;
-    while let Ok(command) = net_rx.try_recv() {
-        if matches!(
-            command,
-            warp_station::net::NetCommand::FetchAll { .. }
-                | warp_station::net::NetCommand::Scan { .. }
-        ) {
-            found = true;
-        }
-    }
-    found
 }
 
 /// Drains the store's net channel for LoadChanges requests.

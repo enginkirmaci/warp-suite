@@ -780,7 +780,7 @@ async fn background_loop(rx: Receiver<NetCommand>, evt_tx: Sender<UiEvent>) {
                             let outcome = warp_station_core::git::cli::fetch(&folder).await;
                             if !outcome.ok {
                                 tracing::warn!(
-                                    "auto fetch failed in {}: {}",
+                                    "fetch failed in {}: {}",
                                     folder.display(),
                                     outcome.error.as_deref().unwrap_or("git rejected it")
                                 );

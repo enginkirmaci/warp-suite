@@ -92,8 +92,7 @@ cargo build -p warp-station
 - Probes that write settings use a scratch `HOME`/`USERPROFILE` and a lock.
   `WARP_STATION_IPC_DIR` redirects the single-instance endpoint for probes.
 - The env hooks (`WARP_STATION_PAGE`, `_SHEET`, `_SELECT`, `_TOOLS_OPEN`,
-  `_GROUPS`, `_NOTES`, `_AUTO_FETCH_SECS`, `_AUTO_REFRESH_SECS`, `_IPC_DIR`)
-  are read once at window construction; see
+  `_GROUPS`, `_NOTES`, `_IPC_DIR`) are read once at window construction; see
   [`../../docs/agents/testing-and-captures.md`](../../docs/agents/testing-and-captures.md).
 
 ## Platform notes

@@ -9,7 +9,7 @@ use crate::notices::{self, Notices};
 use gpui::{App, Context};
 use std::sync::Arc;
 use warp_station_core::repo_store::{self, RepoEntry};
-use warp_station_core::settings::{AppSettings, RepoSortMode, ReposSettings, SettingsService};
+use warp_station_core::settings::{AppSettings, RepoSortMode, SettingsService};
 
 // the toasts' types live beside the notification service; the store re-exports
 // them so every existing `crate::store::NoticeKind` call site stays put
@@ -25,10 +25,6 @@ const ACTIVITY_REFRESH_SECS: u64 = 15 * 60;
 /// How long a repo's GitHub/Azure snapshot stays trusted: opening the repo
 /// or a refresh's eager set re-asks once the snapshot is older.
 const ACTIVITY_TTL: std::time::Duration = std::time::Duration::from_secs(10 * 60);
-/// The focus-regain sync fetches only repos whose status is older than this:
-/// a pre-focus status younger is fresh enough to trust, and the pass stays a
-/// trickle instead of a blast.
-const FOCUS_STALE_SECS: i64 = 5 * 60;
 
 pub struct Store {
     pub net: async_channel::Sender<NetCommand>,
@@ -183,20 +179,6 @@ pub struct Store {
     /// Drill-down for the selected history commit, drained by the view.
     pub commit_details: Option<warp_station_core::model::GitCommitDetails>,
     pub commit_file_patch: Option<(String, String)>,
-    /// When the next periodic `git fetch --prune` fires; None = the feature is
-    /// off. Armed by [Self::refresh_auto_fetch_schedule], checked on the UI's
-    /// once-per-second tick.
-    pub next_auto_fetch: Option<std::time::Instant>,
-    /// The interval (seconds) the fetch schedule was armed with; a settings
-    /// save that leaves it alone keeps the running countdown.
-    auto_fetch_armed_secs: Option<u64>,
-    /// When the next periodic list refresh fires (the repository page's
-    /// Refresh button on a timer); None = the feature is off. Armed by
-    /// [Self::refresh_auto_refresh_schedule], checked on the same tick.
-    pub next_auto_refresh: Option<std::time::Instant>,
-    /// The interval (seconds) the refresh schedule was armed with; a settings
-    /// save that leaves it alone keeps the running countdown.
-    auto_refresh_armed_secs: Option<u64>,
     /// When the next full-list GitHub/Azure activity pass fires: the rail's
     /// PR/issue counts cadence, deliberately slower than the fetch/refresh
     /// clocks it no longer rides on. Armed by
@@ -205,10 +187,6 @@ pub struct Store {
     /// The running fetch pass's streaming progress, straight from the
     /// per-repo settle events: the Refresh button's Fetching k/n stage.
     pub fetch_progress: Option<(u32, u32)>,
-    /// True while the running pass belongs to a user-visible refresh; the
-    /// bulk timers (auto fetch) stream their badges without touching the
-    /// button label.
-    fetch_visible: bool,
     /// The queued fetch pass's per-folder behind counts, read at queue time:
     /// [Self::summarize_fetch_pass] compares the final counts against this
     /// once the pass's last repo lands.
@@ -223,8 +201,8 @@ pub struct Store {
     /// The harness a user-driven catalog refresh is waiting on; the answer's
     /// `fresh` flag decides whether it becomes "updated" or a cache notice.
     pub models_refresh_requested: Option<String>,
-    /// Last focus state the tick observed; None before the first observation,
-    /// so a launch that starts focused does not look like a focus regain.
+    /// Last focus state the tick observed, for the notification gate; None
+    /// before the first observation reads as visible.
     window_focused: Option<bool>,
     /// A second launch asked this instance to come forward; the window clears
     /// it from its store observer (the single-instance door).
@@ -363,13 +341,8 @@ impl Store {
             home_tab: WorkspaceTab::default(),
             commit_details: None,
             commit_file_patch: None,
-            next_auto_fetch: None,
-            auto_fetch_armed_secs: None,
-            next_auto_refresh: None,
-            auto_refresh_armed_secs: None,
             next_activity_refresh: None,
             fetch_progress: None,
-            fetch_visible: false,
             fetch_baseline: None,
             fetch_probe_coverage: None,
             activity_landed_at: std::collections::HashMap::new(),
@@ -409,8 +382,6 @@ impl Store {
             store.detail_tab = store.home_tab;
         }
         store.reproject();
-        store.arm_auto_fetch_at_launch();
-        store.refresh_auto_refresh_schedule();
         // the launch just queued the full GitHub/Azure pass below, so the
         // activity clock starts a whole cadence out
         store.next_activity_refresh =
@@ -549,62 +520,31 @@ impl Store {
     /// re-probing each repo as its own fetch lands (per-repo badges). The
     /// eager set (favorites + the selected repo) re-asks even when its
     /// snapshots are still inside [ACTIVITY_TTL]: an explicit ask outranks
-    /// the clock. A pass also restarts both periodic clocks, since it just
-    /// did their work. While a scan is already in flight that pass is this
-    /// ask: the clocks restart, nothing is queued behind it.
+    /// the clock. While a scan is already in flight that pass is this ask:
+    /// nothing is queued behind it.
     pub fn refresh(&mut self, cx: &mut Context<Self>) {
-        self.refresh_inner(cx, false, true);
+        self.refresh_inner(cx, true);
     }
 
-    /// The focus-regain form: the same local-first refresh, but only repos
-    /// whose status is older than [FOCUS_STALE_SECS] are fetched, so the
-    /// synthesis is a trickle. `last_fetch_at` unset counts as stale.
-    pub fn refresh_fetched_stale(&mut self, cx: &mut Context<Self>) {
-        self.refresh_inner(cx, true, false);
-    }
-
-    /// Shared body for [Self::refresh] and [Self::refresh_fetched_stale]:
-    /// scan first (local), fetch queued after it, `stale_only` shrinking the
-    /// fetch list to repos whose last fetch predates the stale window.
+    /// The refresh body: scan first (local), fetch queued after it.
     /// `force_activity` re-asks the eager set even inside its TTL.
-    fn refresh_inner(&mut self, cx: &mut Context<Self>, stale_only: bool, force_activity: bool) {
+    fn refresh_inner(&mut self, cx: &mut Context<Self>, force_activity: bool) {
         if self.scanning {
-            self.reset_auto_schedules();
             cx.notify();
             return;
         }
         let settings = self.settings();
-        let mut folders = self.fetchable_folders();
-        if stale_only {
-            let stale_at = chrono::Local::now() - chrono::Duration::seconds(FOCUS_STALE_SECS);
-            let fetched_at: std::collections::HashMap<String, chrono::DateTime<chrono::Local>> =
-                self.repos
-                    .iter()
-                    .filter_map(|repo| {
-                        repo.git_last_fetch_at
-                            .map(|at| (repo.folder_path.to_string_lossy().to_string(), at))
-                    })
-                    .collect();
-            // None = never probed with a fetch seed: count it stale
-            folders.retain(|folder| {
-                fetched_at
-                    .get(folder.to_string_lossy().as_ref())
-                    .map(|at| *at < stale_at)
-                    .unwrap_or(true)
-            });
-        }
+        let folders = self.fetchable_folders();
         self.kick_scan(&settings);
-        self.queue_fetch(&folders, true);
+        self.queue_fetch(&folders);
         self.kick_eager_activity(force_activity);
-        self.reset_auto_schedules();
         cx.notify();
     }
 
     /// Queues the fetch pass and records which folders it re-probes itself,
     /// so the scan's settle only probes the complement. An empty list is no
-    /// coverage and no pass. `visible` marks the pass user-visible: the
-    /// button label tracks k/n only then (the auto-fetch timer stays quiet).
-    fn queue_fetch(&mut self, folders: &[std::path::PathBuf], visible: bool) {
+    /// coverage and no pass.
+    fn queue_fetch(&mut self, folders: &[std::path::PathBuf]) {
         if folders.is_empty() {
             self.fetch_probe_coverage = None;
             return;
@@ -627,8 +567,7 @@ impl Store {
                 })
                 .collect(),
         );
-        // a new pass resets the previous one's state
-        self.fetch_visible = visible;
+        // a new pass resets the previous one's progress
         self.fetch_progress = None;
         self.net
             .send_blocking(NetCommand::FetchAll {
@@ -701,16 +640,12 @@ impl Store {
                 }
                 // a fetch pass streams one repo at a time: the settled badge
                 // goes up as each fetch lands, and the toolbar tracks k/n
-                // while the pass belongs to a user-visible refresh
                 if after_fetch && let Some((done, total)) = progress {
-                    if self.fetch_visible {
-                        self.fetch_progress = Some((done, total));
-                    }
+                    self.fetch_progress = Some((done, total));
                     // the pass's wake-up summary is a pass aggregate: only
                     // computed once the last repo's probe landed, compared
                     // against the behind counts read at queue time
                     if done >= total {
-                        self.fetch_visible = false;
                         self.fetch_progress = None;
                         self.summarize_fetch_pass();
                     }
@@ -1199,9 +1134,11 @@ impl Store {
         self.kick_azure_pass(&due);
     }
 
-    /// The refresh's eager activity set: favorites and the selected repo,
-    /// skipped when their snapshots are still fresh unless `force`.
-    fn kick_eager_activity(&mut self, force: bool) {
+    /// Kicks the eager activity set (favorites + the selected repo) through
+    /// the freshness gate; the Refresh button forces it, the open/select paths
+    /// do not. Public so a probe can exercise the gate without the scan/fetch
+    /// side effects of a full refresh.
+    pub fn kick_eager_activity(&mut self, force: bool) {
         let folders = self.eager_activity_folders();
         self.maybe_activity_kick(&folders, force);
     }
@@ -1224,8 +1161,8 @@ impl Store {
 
     /// The tick's activity check: when due, run the full-list GitHub/Azure
     /// passes and re-arm a whole cadence out. The first scan and status pass
-    /// must land first (the same hold the auto fetch uses; an empty list has
-    /// nothing to sweep).
+    /// must land first (the same hold a refresh's fetch pass uses; an empty
+    /// list has nothing to sweep).
     pub fn check_activity_refresh(&mut self, cx: &mut Context<Self>) {
         let Some(due) = self.next_activity_refresh else {
             return;
@@ -1704,11 +1641,10 @@ impl Store {
         }
     }
 
-    /// The auto-fetch pass's aggregate, desktop-only: the store's background
-    /// events are silent in-app (their results land in the repos list, visible
-    /// on return), so the service gets no toast to mirror and routes straight
-    /// to the desktop gate — same unfocused rule, same dedup as everything
-    /// else.
+    /// A fetch pass's aggregate, desktop-only: the store's background events
+    /// are silent in-app (their results land in the repos list, visible on
+    /// return), so the service gets no toast to mirror and routes straight to
+    /// the desktop gate — same unfocused rule, same dedup as everything else.
     pub fn notify_fetch_summary(&mut self, text: impl Into<String>) {
         let settings = self.settings().notifications;
         let focused = self.window_focused;
@@ -1717,87 +1653,7 @@ impl Store {
         }
     }
 
-    // ---- periodic fetch and refresh -----------------------------------------
-
-    /// The effective auto-fetch interval in seconds:
-    /// WARP_STATION_AUTO_FETCH_SECS=<secs> (E2E hook, mirrors the other
-    /// WARP_STATION_* launch hooks) replaces the minutes setting; None = off.
-    fn auto_fetch_seconds(repos: &ReposSettings) -> Option<u64> {
-        if let Ok(secs) = std::env::var("WARP_STATION_AUTO_FETCH_SECS")
-            && let Ok(secs) = secs.parse::<u64>()
-        {
-            return Some(secs);
-        }
-        repos
-            .auto_fetch_minutes
-            .map(|minutes| u64::from(minutes) * 60)
-    }
-
-    fn auto_fetch_interval(repos: &ReposSettings) -> Option<std::time::Duration> {
-        Self::auto_fetch_seconds(repos).map(std::time::Duration::from_secs)
-    }
-
-    /// The interval pass's first due instant after a launch: the oldest known
-    /// fetch plus one interval, so restarting the app does not reset the clock
-    /// and postpone the pass a whole interval. A list that has never been
-    /// fetched, or one already overdue, fires after a short grace — which also
-    /// gives the startup scan/probe time to land.
-    fn auto_fetch_due(&self, interval: std::time::Duration) -> std::time::Instant {
-        const GRACE: std::time::Duration = std::time::Duration::from_secs(5);
-        // a short grace, but never longer than the interval itself (the E2E
-        // hook may arm seconds, not minutes)
-        let grace = GRACE.min(interval);
-        let now = std::time::Instant::now();
-        let oldest = self
-            .repos
-            .iter()
-            .filter(|repo| !repo.is_archived())
-            .filter_map(|repo| repo.git_last_fetch_at)
-            .min();
-        let Some(oldest) = oldest else {
-            return now + grace;
-        };
-        let elapsed = chrono::Local::now()
-            .signed_duration_since(oldest)
-            .to_std()
-            .unwrap_or_default();
-        if elapsed >= interval {
-            now + grace
-        } else {
-            now + (interval - elapsed)
-        }
-    }
-
-    /// Re-arms the periodic fetch from the current settings; call wherever a
-    /// settings load or save can change the interval. A save that left the
-    /// interval alone keeps the running countdown instead of pushing the pass
-    /// a whole interval further out. Fetch-off + focus-gate-on arms a single
-    /// immediate pass instead (one fetch, held for focus).
-    pub fn refresh_auto_fetch_schedule(&mut self) {
-        let repos = self.settings().repos;
-        let seconds = Self::auto_fetch_seconds(&repos);
-        if seconds == self.auto_fetch_armed_secs && self.next_auto_fetch.is_some() {
-            return;
-        }
-        self.auto_fetch_armed_secs = seconds;
-        self.next_auto_fetch = if let Some(secs) = seconds {
-            Some(std::time::Instant::now() + std::time::Duration::from_secs(secs))
-        } else if repos.auto_fetch_only_focused.unwrap_or(false) {
-            Some(std::time::Instant::now())
-        } else {
-            None
-        };
-    }
-
-    /// Launch arming: the countdown a restart would have left behind — if the
-    /// oldest fetch is older than the interval, the pass fires after the grace
-    /// instead of waiting a fresh interval.
-    fn arm_auto_fetch_at_launch(&mut self) {
-        self.refresh_auto_fetch_schedule();
-        if let Some(secs) = Self::auto_fetch_seconds(&self.settings().repos) {
-            self.next_auto_fetch = Some(self.auto_fetch_due(std::time::Duration::from_secs(secs)));
-        }
-    }
+    // ---- focus and the fetch pass ------------------------------------------
 
     /// Whether any open window is the focused one. The notes window counts,
     /// so the user reading notes still counts as "looking at Warp Station".
@@ -1825,143 +1681,12 @@ impl Store {
             .collect()
     }
 
-    /// The tick's check: when the schedule is due, fetch every repo with a
-    /// remote — except the selected repo's folder while a git mutation runs
-    /// there (index.lock conflict avoidance) — then re-arm into the future
-    /// (an interval) or clear (the launch one-shot).
-    pub fn check_auto_fetch(&mut self, cx: &mut Context<Self>) {
-        let Some(due) = self.next_auto_fetch else {
-            return;
-        };
-        if std::time::Instant::now() < due {
-            return;
-        }
-        // the setting may have been turned off since this was armed
-        let interval = Self::auto_fetch_interval(&self.settings().repos);
-        let gated = self
-            .settings()
-            .repos
-            .auto_fetch_only_focused
-            .unwrap_or(false);
-        if interval.is_none() && !gated {
-            self.next_auto_fetch = None;
-            self.auto_fetch_armed_secs = None;
-            return;
-        }
-        // the focus gate holds the pass — and the schedule — until a
-        // window regains focus; no re-arm, so focusing fires it right away
-        if gated && !Self::any_window_focused(cx) {
-            return;
-        }
-        // hold until the first scan and status pass land: an empty table has
-        // nothing to fetch, and an unprobed one would filter every repo out
-        // (git_has_remote is false until its status arrives), consuming the
-        // pass — a launch catch-up included. Both land seconds after startup.
-        if self.repos.is_empty() || self.repos.iter().all(|repo| !repo.git_status_loaded) {
-            return;
-        }
-        let folders = self.fetchable_folders();
-        // an interval re-arms into the future; the one-shot clears instead
-        self.next_auto_fetch = interval.map(|i| std::time::Instant::now() + i);
-        if interval.is_none() {
-            self.auto_fetch_armed_secs = None;
-        }
-        if !folders.is_empty() {
-            self.queue_fetch(&folders, false);
-        }
-    }
-
-    /// The effective auto-refresh interval in seconds:
-    /// WARP_STATION_AUTO_REFRESH_SECS=<secs> (E2E hook, mirrors the other
-    /// WARP_STATION_* launch hooks) replaces the minutes setting; None = off.
-    fn auto_refresh_seconds(repos: &ReposSettings) -> Option<u64> {
-        if let Ok(secs) = std::env::var("WARP_STATION_AUTO_REFRESH_SECS")
-            && let Ok(secs) = secs.parse::<u64>()
-        {
-            return Some(secs);
-        }
-        repos
-            .auto_refresh_minutes
-            .map(|minutes| u64::from(minutes) * 60)
-    }
-
-    /// Re-arms the periodic list refresh from the current settings; a save
-    /// that left the interval alone keeps the running countdown.
-    pub fn refresh_auto_refresh_schedule(&mut self) {
-        let repos = self.settings().repos;
-        let seconds = Self::auto_refresh_seconds(&repos);
-        if seconds == self.auto_refresh_armed_secs && self.next_auto_refresh.is_some() {
-            return;
-        }
-        self.auto_refresh_armed_secs = seconds;
-        self.next_auto_refresh =
-            seconds.map(|secs| std::time::Instant::now() + std::time::Duration::from_secs(secs));
-    }
-
-    /// The tick's refresh check: when due, run a full refresh (fetch + rescan +
-    /// probe, the same pass as the Refresh button). An in-flight scan counts as
-    /// this cycle's refresh, so the clock restarts instead of stacking a pass.
-    pub fn check_auto_refresh(&mut self, cx: &mut Context<Self>) {
-        let Some(due) = self.next_auto_refresh else {
-            return;
-        };
-        if std::time::Instant::now() < due {
-            return;
-        }
-        if Self::auto_refresh_seconds(&self.settings().repos).is_none() {
-            self.next_auto_refresh = None;
-            self.auto_refresh_armed_secs = None;
-            return;
-        }
-        // the shared body restarts both clocks itself, and an in-flight scan
-        // counts as this cycle's pass; the timer does not force the eager
-        // activity set — the fifteen-minute activity clock owns that
-        self.refresh_inner(cx, false, false);
-    }
-
-    /// Restarts both periodic clocks from now: a full refresh just ran, so the
-    /// next automatic pass is a whole interval out. With auto fetch off, this
-    /// also consumes the focus-gate one-shot — the pass fetched.
-    fn reset_auto_schedules(&mut self) {
-        let repos = self.settings().repos;
-        let now = std::time::Instant::now();
-        let fetch_secs = Self::auto_fetch_seconds(&repos);
-        self.auto_fetch_armed_secs = fetch_secs;
-        self.next_auto_fetch = fetch_secs.map(|secs| now + std::time::Duration::from_secs(secs));
-        let refresh_secs = Self::auto_refresh_seconds(&repos);
-        self.auto_refresh_armed_secs = refresh_secs;
-        self.next_auto_refresh =
-            refresh_secs.map(|secs| now + std::time::Duration::from_secs(secs));
-    }
-
-    /// One focus edge, fed by [Self::check_focus_sync]: regaining focus after
-    /// the app was unfocused runs the local-first refresh, fetching only the
-    /// repos whose status is stale ([FOCUS_STALE_SECS]) when `SyncOnFocus` is
-    /// on, then restarts both periodic clocks. The first observation only
-    /// primes the edge, so a launch that starts focused does not duplicate
-    /// the startup pass.
-    pub fn on_focus_changed(&mut self, focused: bool, cx: &mut Context<Self>) {
-        let was = self.window_focused.replace(focused);
-        let Some(was) = was else {
-            return;
-        };
-        if !focused || was {
-            return;
-        }
-        if !self.settings().repos.sync_on_focus.unwrap_or(false) {
-            return;
-        }
-        // the stale-first shrink keeps the pass a trickle; refresh_inner
-        // restarts both clocks, and an in-flight scan counts as the sync
-        self.refresh_fetched_stale(cx);
-    }
-
-    /// The tick's focus poll: [Self::on_focus_changed] with the live window
-    /// state. Any open Warp Station window counts as focused, so moving
-    /// between the main window and Notes is not a focus regain.
-    pub fn check_focus_sync(&mut self, cx: &mut Context<Self>) {
-        let focused = Self::any_window_focused(cx);
-        self.on_focus_changed(focused, cx);
+    /// The tick's focus poll: keeps `window_focused` current for the
+    /// notification gate (desktop toasts only while the app is unfocused).
+    /// Any open Warp Station window counts as focused, so moving between the
+    /// main window and Notes does not look like a focus loss.
+    pub fn check_window_focus(&mut self, cx: &mut App) {
+        self.window_focused = Some(Self::any_window_focused(cx));
     }
 
     // ---- list shaping ------------------------------------------------------
@@ -3411,73 +3136,6 @@ mod tests {
             s.notifications.enabled = false;
         });
         assert!(!store.settings().notifications.enabled);
-        let _ = std::fs::remove_file(&scratch);
-    }
-
-    /// A launch keeps the fetch clock: the first pass is armed from the oldest
-    /// known FETCH_HEAD, so restarting the app does not postpone it a whole
-    /// interval; a never-fetched or overdue list fires after the grace.
-    #[test]
-    fn a_restart_keeps_the_fetch_clock_instead_of_restarting_it() {
-        let (tx, _rx) = async_channel::unbounded();
-        let scratch = std::env::temp_dir().join(format!(
-            "warp-station-fetch-clock-{}.json",
-            std::process::id()
-        ));
-        std::fs::write(&scratch, "{}").expect("scratch settings");
-        let mut store = Store::with_settings(tx, Arc::new(SettingsService::at(scratch.clone())));
-        let interval = std::time::Duration::from_secs(15 * 60);
-        let repo = |minutes_ago: Option<i64>| RepoEntry {
-            name: "r".into(),
-            folder_path: std::path::PathBuf::from("/probe/r"),
-            solution_path: None,
-            tags: Vec::new(),
-            git_branch_name: None,
-            git_modified_count: 0,
-            git_to_push_count: 0,
-            git_to_pull_count: 0,
-            git_last_commit_at: None,
-            git_last_fetch_at: minutes_ago
-                .map(|m| chrono::Local::now() - chrono::Duration::minutes(m)),
-            git_has_remote: true,
-            git_branch_published: false,
-            git_status_loaded: true,
-            github_pr_count: 0,
-            github_issue_count: 0,
-        };
-        let grace = std::time::Duration::from_secs(5);
-        let remaining = |store: &Store| {
-            store
-                .auto_fetch_due(interval)
-                .saturating_duration_since(std::time::Instant::now())
-        };
-
-        // never fetched: the launch pass waits only the grace
-        store.repos = vec![repo(None)];
-        assert!(remaining(&store) <= grace, "a fresh list fires early");
-
-        // fetched 14 minutes ago: a minute left, not a fresh 15
-        store.repos = vec![repo(Some(14))];
-        let left = remaining(&store);
-        assert!(
-            left >= std::time::Duration::from_secs(50)
-                && left <= std::time::Duration::from_secs(70),
-            "the restart keeps the clock (got {left:?})"
-        );
-
-        // overdue: fire after the grace instead of waiting another interval
-        store.repos = vec![repo(Some(120))];
-        assert!(remaining(&store) <= grace, "an overdue list fires early");
-
-        // archived repos do not hold the clock back
-        let mut archived = repo(Some(120));
-        archived.tags = vec![repo_store::ARCHIVED_TAG.into()];
-        store.repos = vec![repo(Some(14)), archived];
-        assert!(
-            remaining(&store) >= std::time::Duration::from_secs(50),
-            "an archived stale fetch is ignored"
-        );
-
         let _ = std::fs::remove_file(&scratch);
     }
 }

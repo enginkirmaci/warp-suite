@@ -84,7 +84,6 @@ construction. Use them instead of clicking through a hidden window.
 | Warp Station | `WARP_STATION_TOOLS_OPEN` | `formatters`, `nuget`, `clipboard` |
 | Warp Station | `WARP_STATION_GROUPS` | `1` to group the repo list by root |
 | Warp Station | `WARP_STATION_NOTES` | `1` to open the Notes panel on launch |
-| Warp Station | `WARP_STATION_AUTO_FETCH_SECS`, `WARP_STATION_AUTO_REFRESH_SECS` | seconds, for background-refresh captures |
 | Warp Station | `WARP_STATION_IPC_DIR` | override the agent-door directory |
 | warp-agent | `WARP_AGENT_PAGE` | `settings`, `settings-chat`, `settings-permissions`, `settings-server` |
 | warp-notes | `WARP_NOTES_PAGE` | `settings` |

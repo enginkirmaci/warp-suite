@@ -99,8 +99,8 @@ fn main() {
                 }
             });
 
-            // toasts expire on a once-per-second beat; the same beat polls the
-            // focus edge and the periodic fetch/refresh/activity schedules
+            // toasts expire on a once-per-second beat; the same beat tracks the
+            // window focus the notification gate needs and the activity clock
             let notice_store = store.downgrade();
             cx.spawn(async move |cx| {
                 loop {
@@ -110,9 +110,7 @@ fn main() {
                     if let Some(store) = notice_store.upgrade() {
                         store.update(cx, |s, cx| {
                             s.tick_notices(cx);
-                            s.check_focus_sync(cx);
-                            s.check_auto_fetch(cx);
-                            s.check_auto_refresh(cx);
+                            s.check_window_focus(cx);
                             s.check_activity_refresh(cx);
                         });
                     } else {

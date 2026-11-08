@@ -121,9 +121,10 @@ impl Notices {
         )
     }
 
-    /// The desktop-only summary of a background pass (the auto-fetch result):
-    /// no toast, since an unfocused window's stack is not on screen it would
-    /// have expired by the time the window returns. Same gate, same dedup.
+    /// The desktop-only summary of a background pass (a refresh's fetch
+    /// result): no toast, since an unfocused window's stack is not on screen
+    /// and would have expired by the time the window returns. Same gate, same
+    /// dedup.
     pub fn push_desktop_only(
         &mut self,
         text: impl Into<String>,

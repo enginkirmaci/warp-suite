@@ -103,7 +103,7 @@ pub enum Category {
     Errors,
     /// "Merged #12", "Password copied …" — the `ActionConfirmations` toggle.
     ActionConfirmations,
-    /// The auto-fetch aggregate — the `FetchSummaries` toggle.
+    /// A fetch pass's aggregate — the `FetchSummaries` toggle.
     FetchSummaries,
 }
 

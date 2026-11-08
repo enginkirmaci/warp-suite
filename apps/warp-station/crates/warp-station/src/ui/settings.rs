@@ -69,12 +69,7 @@ const SECTIONS: [(Section, &str, &str, &str); 8] = [
         "Repository scanning",
         "Folders, patterns and grouping",
     ),
-    (
-        Section::Git,
-        "settings-git",
-        "Git",
-        "Branches, fetch and refresh",
-    ),
+    (Section::Git, "settings-git", "Git", "Branch naming"),
     (
         Section::ExternalTools,
         "settings-tools",
@@ -119,10 +114,6 @@ pub struct SettingsPage {
     group_depth: usize,
     // Git
     branch_name_prefix: Entity<InputState>,
-    auto_fetch_minutes: Option<u16>,
-    auto_fetch_only_focused: bool,
-    auto_refresh_minutes: Option<u16>,
-    sync_on_focus: bool,
     // External tools
     vscode_executable: Entity<InputState>,
     vscode_profile: Entity<InputState>,
@@ -308,10 +299,6 @@ impl SettingsPage {
             group_by_root: repos.group_repos_by_root.unwrap_or(false),
             group_depth: repos.group_root_depth.unwrap_or(1).clamp(1, 4) as usize,
             branch_name_prefix: field(window, cx, &repos.branch_name_prefix),
-            auto_fetch_minutes: repos.auto_fetch_minutes,
-            auto_fetch_only_focused: repos.auto_fetch_only_focused.unwrap_or(false),
-            auto_refresh_minutes: repos.auto_refresh_minutes,
-            sync_on_focus: repos.sync_on_focus.unwrap_or(false),
             vscode_executable: field(window, cx, &repos.vscode_executable),
             vscode_profile: field(window, cx, &repos.vscode_profile),
             terminal_executable: field(window, cx, &repos.terminal_executable),
@@ -476,12 +463,6 @@ impl SettingsPage {
         let warp_notes_enabled = self.warp_notes_enabled;
         let warp_notes_exe = Self::value(&self.warp_notes_executable, cx);
         let branch_prefix = Self::value(&self.branch_name_prefix, cx);
-        let auto_fetch_minutes = self.auto_fetch_minutes;
-        // absence = fetch always; the only meaningful write is the opt-in
-        let auto_fetch_only_focused = self.auto_fetch_only_focused;
-        let auto_refresh_minutes = self.auto_refresh_minutes;
-        // absence = off; the only meaningful write is the opt-in
-        let sync_on_focus = self.sync_on_focus;
         let group_by_root = self.group_by_root;
         let group_depth = self.group_depth;
         let code_search_enabled = self.enable_code_search;
@@ -513,10 +494,6 @@ impl SettingsPage {
                 s.repos.platform_folder_name = platform;
                 s.repos.max_scan_depth = max_scan_depth;
                 s.repos.branch_name_prefix = branch_prefix;
-                s.repos.auto_fetch_minutes = auto_fetch_minutes;
-                s.repos.auto_fetch_only_focused = auto_fetch_only_focused.then_some(true);
-                s.repos.auto_refresh_minutes = auto_refresh_minutes;
-                s.repos.sync_on_focus = sync_on_focus.then_some(true);
                 s.repos.group_repos_by_root = Some(group_by_root);
                 s.repos.group_root_depth = Some(group_depth as u8);
                 // enabled stays absent: absence IS the enabled state, so the
@@ -555,9 +532,6 @@ impl SettingsPage {
                 s.notifications.action_confirmations = notifications.3;
                 s.notifications.fetch_summaries = notifications.4;
             });
-            // the intervals may have changed: re-arm both periodic passes
-            store.refresh_auto_fetch_schedule();
-            store.refresh_auto_refresh_schedule();
             // grouping only reshapes the list: re-project, never rescan —
             // the repos and their folders did not change
             store.set_group_by_root(group_by_root);
@@ -1059,34 +1033,6 @@ impl SettingsPage {
                     rows.is_empty(),
                     window,
                     cx,
-                ));
-                rows.push(auto_fetch_row(self, cx, rows.is_empty()));
-                rows.push(kit_settings::switch_row_with_desc(
-                    "set-fetch-active",
-                    "Only fetch while active",
-                    "settings-row-Only fetch while active".to_string(),
-                    "Pauses the fetch while no window has focus",
-                    self.auto_fetch_only_focused,
-                    rows.is_empty(),
-                    cx.listener(|this, _, _, cx| {
-                        this.auto_fetch_only_focused = !this.auto_fetch_only_focused;
-                        this.save(cx);
-                        cx.notify();
-                    }),
-                ));
-                rows.push(auto_refresh_row(self, cx, rows.is_empty()));
-                rows.push(kit_settings::switch_row_with_desc(
-                    "set-sync-on-focus",
-                    "Sync when window activates",
-                    "settings-row-Sync when window activates".to_string(),
-                    "Fetches only the repos five or more minutes stale on focus regain, and restarts both auto timers",
-                    self.sync_on_focus,
-                    rows.is_empty(),
-                    cx.listener(|this, _, _, cx| {
-                        this.sync_on_focus = !this.sync_on_focus;
-                        this.save(cx);
-                        cx.notify();
-                    }),
                 ));
             }
             Section::ExternalTools => {
@@ -1695,93 +1641,6 @@ fn group_depth_row(
             });
         });
     kit_settings::row("group-depth-row", "Group depth", control, first)
-}
-
-/// One periodic-interval picker: Off/15m/30m/60m, the design's segmented
-/// control (a `well` trough, the choice on `raised`); None = off. `prefix`
-/// names the buttons (`auto-fetch-30`), `id` names the row.
-fn interval_setting_row(
-    selected: Option<u16>,
-    prefix: &'static str,
-    label: &'static str,
-    desc: Option<&'static str>,
-    first: bool,
-    commit: fn(&mut SettingsPage, Option<u16>),
-    cx: &mut Context<SettingsPage>,
-) -> gpui::AnyElement {
-    let options: [(Option<u16>, &'static str); 4] = [
-        (None, "Off"),
-        (Some(15), "15m"),
-        (Some(30), "30m"),
-        (Some(60), "60m"),
-    ];
-    let choices = options
-        .iter()
-        .map(|(value, name)| {
-            // the key is the minute count, so the button's id reads
-            // `auto-fetch-30` while its label reads "30m"
-            let key = match value {
-                Some(minutes) => minutes.to_string(),
-                None => "off".to_string(),
-            };
-            kit_settings::Choice::new(key, *name, selected == *value)
-        })
-        .collect();
-    let entity = cx.entity();
-    let control = kit_settings::segmented(prefix, choices, move |key, _, cx: &mut gpui::App| {
-        let picked = if key.as_ref() == "off" {
-            None
-        } else {
-            key.parse::<u16>().ok()
-        };
-        entity.update(cx, |this, cx| {
-            commit(this, picked);
-            this.save(cx);
-            cx.notify();
-        });
-    });
-    // the prefix names the row too: `auto-fetch` -> `auto-fetch-row`
-    let id = format!("{prefix}-row");
-    if let Some(desc) = desc {
-        kit_settings::row_with_desc(id, label, desc, control, first)
-    } else {
-        kit_settings::row(id, label, control, first)
-    }
-}
-
-/// The periodic fetch picker: Off/15m/30m/60m; None = off.
-fn auto_fetch_row(
-    this: &SettingsPage,
-    cx: &mut Context<SettingsPage>,
-    first: bool,
-) -> gpui::AnyElement {
-    interval_setting_row(
-        this.auto_fetch_minutes,
-        "auto-fetch",
-        "Auto fetch",
-        None,
-        first,
-        |this, picked| this.auto_fetch_minutes = picked,
-        cx,
-    )
-}
-
-/// The periodic list refresh picker: exactly what the repository page's
-/// Refresh button does (fetch + rescan + status probe) on a timer; None = off.
-fn auto_refresh_row(
-    this: &SettingsPage,
-    cx: &mut Context<SettingsPage>,
-    first: bool,
-) -> gpui::AnyElement {
-    interval_setting_row(
-        this.auto_refresh_minutes,
-        "auto-refresh",
-        "Auto refresh",
-        Some("Fetches and rescans, then re-checks status — like the Refresh button"),
-        first,
-        |this, picked| this.auto_refresh_minutes = picked,
-        cx,
-    )
 }
 
 impl SettingsPage {
