@@ -19,7 +19,7 @@ Rust bridge is a workspace member.
 | warp-agent | `warp-agent` | `apps/warp-agent/` | Chat client over `opencode serve` and `dsh web` (Rust/GPUI) |
 | warp-snapit | `warp-snapit` | `apps/warp-snapit/` | Windows-only zone snapper (Win32, no GPUI/kit) |
 | warp-notes | `warp-notes` | `apps/warp-notes/` | Per-repo markdown notes with a live editor (Rust/GPUI) |
-| warp-android-scribe | `warp-android-scribe-bridge` | `android-apps/warp-android-scribe/` | Compact Android IME over Superwhisper S1-Voice (Kotlin/Compose + Rust bridge) |
+| warp-android-scribe | `warp-android-scribe-bridge` | `android-apps/warp-android-scribe/` | Android dictation IME with a full QWERTY keyboard over Superwhisper S1-Voice (Kotlin/Compose + Rust bridge) |
 
 ## Before you edit
 
@@ -207,8 +207,8 @@ when one side changes, update the other side in the **same commit**.
   text) and serializes requests because the daemon has one active session.
   The bearer scheme, JSON field names and status codes are the Android client's
   contract: change both sides in the same commit. Android 17 LAN sockets need
-  `ACCESS_LOCAL_NETWORK`; the app requests it and offers an HTTPS/Cloudflare
-  preset. The APK is sideloaded; the bridge is installed by hand on the NAS
+  `ACCESS_LOCAL_NETWORK`; the app requests it and offers Local/Remote modes.
+  The APK is sideloaded; the bridge is installed by hand on the NAS
   from `android-apps/warp-android-scribe/deploy/`.
 
 ## GPUI Kit app conventions

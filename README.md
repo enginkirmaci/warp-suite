@@ -13,7 +13,7 @@ Currently in the suite:
 | warp-agent | `apps/warp-agent` | Chat client over `opencode serve` (Rust/GPUI) |
 | warp-snapit | `apps/warp-snapit` | Rust port of the SnapIt zone snapper (Windows-only, portable zip) |
 | warp-notes | `apps/warp-notes` | Per-repo markdown notes with a live editor (Rust/GPUI) |
-| warp-android-scribe | `android-apps/warp-android-scribe` | Compact Android IME over Superwhisper S1-Voice (Kotlin/Compose + Rust bridge) |
+| warp-android-scribe | `android-apps/warp-android-scribe` | Android dictation IME with a full QWERTY keyboard over Superwhisper S1-Voice (Kotlin/Compose + Rust bridge) |
 
 The C#/.NET SnapIt repo ([enginkirmaci/SnapIt](https://github.com/enginkirmaci/SnapIt))
 stays excluded — the Rust port above is the suite's zone snapper.
@@ -170,7 +170,7 @@ together. When one changes, update the other side in the **same** commit.
   Cloudflare Tunnel -> Nginx Proxy Manager -> 8787. The bearer scheme, field
   names and status codes are one contract: change the bridge and the Android
   client in the same commit. Android 17 needs `ACCESS_LOCAL_NETWORK` for LAN;
-  the app requests it and has an HTTPS/Cloudflare preset. The APK is sideloaded;
+  the app requests it and has Local/Remote modes. The APK is sideloaded;
   the bridge is a systemd user service installed from
   `android-apps/warp-android-scribe/deploy/`.
 
