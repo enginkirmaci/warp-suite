@@ -8,7 +8,9 @@
 //! color comes from [`LiveColors`], so the app's preset owns the look.
 
 use super::display::{Band, Decor};
-use super::frame::{Frame, LaidBox, LaidLine, Rect, TableStrip};
+use super::frame::{
+    DEFAULT_MAX_COLUMN_EM, DEFAULT_TOP_MARGIN_EM, Frame, LaidBox, LaidLine, Rect, TableStrip,
+};
 use super::icons::{self, Icon};
 use super::layout::{Piece, link_icon_width, remove_gap};
 use super::state::{self, CodeBlock, KEY_CONTEXT, LiveEditorState, OpenUrlHandler, PasteHandler};
@@ -74,6 +76,28 @@ pub struct LiveEditor {
     read_only: Option<bool>,
     fit_content: Option<bool>,
     code_overlay: Option<CodeOverlay>,
+    column: ColumnWidth,
+    top_margin: TopMargin,
+}
+
+/// How a host measures the text column.
+#[derive(Clone, Copy, Default)]
+enum ColumnWidth {
+    /// The engine's readable line length.
+    #[default]
+    Readable,
+    /// Fill the width the host gives the element.
+    Full,
+}
+
+/// How a host sets the space above the first line.
+#[derive(Clone, Copy, Default)]
+enum TopMargin {
+    /// The engine's own space.
+    #[default]
+    Default,
+    /// The host's value, in em.
+    Em(f32),
 }
 
 /// A host element for a code block's top-right corner, read-only mode only:
@@ -92,6 +116,8 @@ impl LiveEditor {
             read_only: None,
             fit_content: None,
             code_overlay: None,
+            column: ColumnWidth::default(),
+            top_margin: TopMargin::default(),
         }
     }
 
@@ -154,6 +180,20 @@ impl LiveEditor {
         self
     }
 
+    /// Use the host's full width instead of the engine's readable line
+    /// length: for a document embedded in a card that already bounds it.
+    pub fn unbounded_column(mut self) -> Self {
+        self.column = ColumnWidth::Full;
+        self
+    }
+
+    /// Replace the engine's space above the first line, in em. A card that
+    /// pads its own surface uses this to drop the doubled top gap.
+    pub fn top_margin_em(mut self, top: f32) -> Self {
+        self.top_margin = TopMargin::Em(top);
+        self
+    }
+
     /// One element per code block, placed in its band's top-right corner —
     /// a copy button. Read-only mode only: the live editor has no corners a
     /// host would decorate. The block's language label shifts left of the
@@ -179,6 +219,8 @@ impl RenderOnce for LiveEditor {
             read_only,
             fit_content,
             code_overlay,
+            column,
+            top_margin,
         } = self;
         state.update(cx, |editor, cx| {
             editor.set_paste_handler(paste_handler);
@@ -193,6 +235,20 @@ impl RenderOnce for LiveEditor {
             if let Some(fit_content) = fit_content {
                 editor.set_fit_content(fit_content, cx);
             }
+            editor.set_max_column_em(
+                match column {
+                    ColumnWidth::Readable => Some(DEFAULT_MAX_COLUMN_EM),
+                    ColumnWidth::Full => None,
+                },
+                cx,
+            );
+            editor.set_top_margin_em(
+                match top_margin {
+                    TopMargin::Default => DEFAULT_TOP_MARGIN_EM,
+                    TopMargin::Em(top) => top,
+                },
+                cx,
+            );
         });
         let editor = state.read(cx);
         let read_only = editor.read_only();

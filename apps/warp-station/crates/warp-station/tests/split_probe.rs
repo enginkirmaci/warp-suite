@@ -1490,8 +1490,15 @@ fn the_tab_strip_switches_the_panel(cx: &mut TestAppContext) {
     click(cx, "detail-tab-issues");
     assert!(cx.debug_bounds("issue-list").is_some(), "so do the issues");
 
-    click(cx, "detail-tab-readme");
-    assert!(cx.debug_bounds("readme-pane").is_some());
+    click(cx, "detail-tab-overview");
+    assert!(
+        cx.debug_bounds("readme-card").is_some(),
+        "the README card lives on Overview"
+    );
+    assert!(
+        cx.debug_bounds("detail-tab-readme").is_none(),
+        "there is no README tab"
+    );
 
     click(cx, "detail-tab-pipelines");
     assert!(cx.debug_bounds("detail-tab-pipelines-panel").is_some());
@@ -2199,8 +2206,11 @@ fn a_readme_draft_saves_or_discards_from_its_tab(cx: &mut TestAppContext) {
     let folder = repo_dir.to_string_lossy().to_string();
     let (store, _net_rx) = scratch_store(cx, "readme", vec![entry("alpha", &folder)]);
     let cx = open_window(&store, cx);
-    click(cx, "detail-tab-readme");
     draw(cx);
+    assert!(
+        cx.debug_bounds("readme-card").is_some(),
+        "the README card is on Overview"
+    );
     assert!(
         cx.debug_bounds("readme-save").is_none(),
         "nothing to save without a draft"
@@ -2227,6 +2237,36 @@ fn a_readme_draft_saves_or_discards_from_its_tab(cx: &mut TestAppContext) {
         "the draft is spent once saved"
     );
 
+    let _ = std::fs::remove_dir_all(&repo_dir);
+}
+
+/// A press on the README card selects text; it must not take the window down.
+#[gpui::test]
+fn clicking_the_readme_card_keeps_the_window_alive(cx: &mut TestAppContext) {
+    let repo_dir = std::env::temp_dir().join(format!(
+        "warp-station-probe-split-readme-click-{}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&repo_dir).expect("scratch repo");
+    std::fs::write(
+        repo_dir.join("README.md"),
+        "# Alpha\n\nSome words to select.\n",
+    )
+    .expect("seed README");
+
+    let folder = repo_dir.to_string_lossy().to_string();
+    let (store, _net_rx) = scratch_store(cx, "readme-click", vec![entry("alpha", &folder)]);
+    let cx = open_window(&store, cx);
+    draw(cx);
+
+    let bounds = cx.debug_bounds("readme-pane").expect("the card draws");
+    cx.simulate_click(bounds.center(), gpui::Modifiers::default());
+    draw(cx);
+
+    assert!(
+        cx.debug_bounds("readme-card").is_some(),
+        "the card survives the press"
+    );
     let _ = std::fs::remove_dir_all(&repo_dir);
 }
 
@@ -2351,7 +2391,7 @@ fn a_repo_opens_in_a_tab_with_the_list_out_of_the_way(cx: &mut TestAppContext) {
 fn each_view_keeps_its_own_detail_tab(cx: &mut TestAppContext) {
     let (store, cx) = two_repos(cx);
     click(cx, "detail-open-tab");
-    click(cx, "detail-tab-readme");
+    click(cx, "detail-tab-changes");
     click(cx, "repo-tab-home");
     assert!(
         cx.debug_bounds("detail-tab-overview-panel").is_some(),
@@ -2360,8 +2400,8 @@ fn each_view_keeps_its_own_detail_tab(cx: &mut TestAppContext) {
 
     click(cx, "repo-strip-tab-0");
     assert!(
-        cx.debug_bounds("detail-tab-readme-panel").is_some(),
-        "the tab stayed on its README"
+        cx.debug_bounds("detail-tab-changes-panel").is_some(),
+        "the tab stayed on its Changes"
     );
     assert_eq!(selected(&store, cx).as_deref(), Some("/probe/alpha"));
 }

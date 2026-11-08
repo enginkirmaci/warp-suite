@@ -79,7 +79,7 @@ construction. Use them instead of clicking through a hidden window.
 | App | Variable | Values |
 | --- | --- | --- |
 | Warp Station | `WARP_STATION_PAGE` | `settings`, `summary`, `tools` |
-| Warp Station | `WARP_STATION_SHEET` | tab label, case-insensitive: `Overview`, `Changes`, `History`, `Pull requests`, `Issues`, `Pipelines`, `README` |
+| Warp Station | `WARP_STATION_SHEET` | tab label, case-insensitive: `Overview`, `Changes`, `History`, `Pull requests`, `Issues`, `Pipelines` |
 | Warp Station | `WARP_STATION_SELECT` | a name or index in the list |
 | Warp Station | `WARP_STATION_TOOLS_OPEN` | `formatters`, `nuget`, `clipboard` |
 | Warp Station | `WARP_STATION_GROUPS` | `1` to group the repo list by root |

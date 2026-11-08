@@ -128,7 +128,8 @@ pub struct Store {
     pub commit_message_draft: Option<String>,
     /// Set when a commit succeeded: the view drains it to empty the box.
     pub commit_message_clear: bool,
-    /// The README wand's draft, rendered by the README tab with Save/Discard.
+    /// The README wand's draft, rendered by the Overview's README card with
+    /// Save/Discard.
     pub readme_draft: Option<String>,
     /// warp-agent's harness options; the door is the source, with a built-in
     /// fallback until its first answer or a cache exists.
@@ -2294,10 +2295,7 @@ impl Store {
             .filter(|tab| match tab {
                 WorkspaceTab::PullRequests | WorkspaceTab::Issues => settings.repos.enable_git_hub,
                 WorkspaceTab::Pipelines => azure,
-                WorkspaceTab::Overview
-                | WorkspaceTab::Changes
-                | WorkspaceTab::History
-                | WorkspaceTab::Readme => true,
+                WorkspaceTab::Overview | WorkspaceTab::Changes | WorkspaceTab::History => true,
             })
             .collect()
     }
@@ -3142,7 +3140,6 @@ pub enum WorkspaceTab {
     PullRequests,
     Issues,
     Pipelines,
-    Readme,
 }
 
 /// A pull request open in the detail pane. It stays on `item`, the list's row,
@@ -3165,14 +3162,13 @@ pub struct RepoTab {
 }
 
 impl WorkspaceTab {
-    pub const ALL: [WorkspaceTab; 7] = [
+    pub const ALL: [WorkspaceTab; 6] = [
         WorkspaceTab::Overview,
         WorkspaceTab::Changes,
         WorkspaceTab::History,
         WorkspaceTab::PullRequests,
         WorkspaceTab::Issues,
         WorkspaceTab::Pipelines,
-        WorkspaceTab::Readme,
     ];
 
     pub fn label(self) -> &'static str {
@@ -3183,7 +3179,6 @@ impl WorkspaceTab {
             WorkspaceTab::PullRequests => "Pull requests",
             WorkspaceTab::Issues => "Issues",
             WorkspaceTab::Pipelines => "Pipelines",
-            WorkspaceTab::Readme => "README",
         }
     }
 
@@ -3196,7 +3191,6 @@ impl WorkspaceTab {
             WorkspaceTab::PullRequests => "detail-tab-pulls",
             WorkspaceTab::Issues => "detail-tab-issues",
             WorkspaceTab::Pipelines => "detail-tab-pipelines",
-            WorkspaceTab::Readme => "detail-tab-readme",
         }
     }
 

@@ -32,9 +32,16 @@ pub fn attach<C: 'static>(
     });
     let owner = cx.entity().downgrade();
     cx.observe(&editor, move |_, _, cx| {
-        if let Some(owner) = owner.upgrade() {
-            owner.update(cx, |_, cx| cx.notify());
-        }
+        // defer: the editor notifies while its host is often still on the
+        // update stack (a click inside the document, a layout pass), and
+        // updating the host from here re-enters its lease. The effect runs
+        // after the current update, where notifying is safe.
+        let owner = owner.clone();
+        cx.defer(move |cx| {
+            if let Some(owner) = owner.upgrade() {
+                owner.update(cx, |_, cx| cx.notify());
+            }
+        });
     })
     .detach();
     editor
@@ -55,15 +62,28 @@ pub fn feed<C: gpui::AppContext>(
 /// The laid-out editor: sized to its content (the surrounding pane scrolls;
 /// the editor never becomes an inner scroll area).
 pub fn render_read_only(editor: &Entity<LiveEditorState>, cx: &gpui::App) -> AnyElement {
+    render(editor, cx, false)
+}
+
+/// Like [`render_read_only`], but for a document embedded in a card: the
+/// card already bounds the width, so the engine's readable measure and top
+/// margin only add blank space around the content.
+pub fn render_read_only_card(editor: &Entity<LiveEditorState>, cx: &gpui::App) -> AnyElement {
+    render(editor, cx, true)
+}
+
+fn render(editor: &Entity<LiveEditorState>, cx: &gpui::App, in_card: bool) -> AnyElement {
     let height = editor.read(cx).content_height().max(1.);
+    let mut element = LiveEditor::new(editor)
+        .read_only(true)
+        .fit_content(true)
+        .text_size(px(theme::font_body()));
+    if in_card {
+        element = element.unbounded_column().top_margin_em(0.5);
+    }
     div()
         .w_full()
         .h(px(height))
-        .child(
-            LiveEditor::new(editor)
-                .read_only(true)
-                .fit_content(true)
-                .text_size(px(theme::font_body())),
-        )
+        .child(element)
         .into_any_element()
 }

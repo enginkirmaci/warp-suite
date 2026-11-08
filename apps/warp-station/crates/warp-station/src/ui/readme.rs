@@ -7,6 +7,7 @@ use crate::store::Store;
 use crate::theme;
 use crate::ui::A11y;
 use crate::ui::icon;
+use crate::ui::overview::{card, section_title};
 use gpui::prelude::*;
 use gpui::{Context, Entity, FontWeight, SharedString, Window, div, px};
 use warpui_kit_markdown::LiveEditorState;
@@ -88,19 +89,16 @@ impl Render for ReadmeView {
             }
         }
 
-        let header = div()
-            .id("readme-header")
+        let actions = div()
+            .id("readme-actions")
             .flex()
             .flex_row()
             .items_center()
+            .flex_shrink_0()
             .gap_2()
-            .px_4()
-            .py_2()
-            .border_b_1()
-            .border_color(theme::border_light())
             .child(
                 div()
-                    .text_size(px(theme::font_body()))
+                    .text_size(px(theme::font_meta()))
                     .text_color(theme::text_muted())
                     .child(if has_draft {
                         "README.md (unsaved)"
@@ -108,7 +106,6 @@ impl Render for ReadmeView {
                         "README.md"
                     }),
             )
-            .child(div().flex_1())
             .when(has_draft, |row| {
                 let folder_save = folder.clone();
                 row.child(
@@ -225,22 +222,15 @@ impl Render for ReadmeView {
         let pane = div()
             .id("readme-pane")
             .debug_selector(|| "readme-pane".into())
-            .flex_1()
             .min_w_0()
-            .min_h_0()
-            .overflow_y_scroll()
-            .px_5()
-            .py_4()
+            // the markdown engine owns its own reading margins; the card is
+            // already the measure, so no second inset or width cap here
+            .pb_2()
             .when(shown.is_some(), |pane| {
-                // reading content keeps the design's 760 measure
-                pane.child(
-                    div()
-                        .max_w(px(warpui_kit_core::shell::READING_WIDTH))
-                        .child(md::render_read_only(
-                            self.editor.as_ref().expect("editor fed above"),
-                            cx,
-                        )),
-                )
+                pane.child(md::render_read_only_card(
+                    self.editor.as_ref().expect("editor fed above"),
+                    cx,
+                ))
             })
             .when(shown.is_none(), |pane| {
                 pane.child(
@@ -250,7 +240,8 @@ impl Render for ReadmeView {
                         .items_center()
                         .justify_center()
                         .gap_2()
-                        .h_full()
+                        .px_4()
+                        .py_8()
                         .child(icon(
                             "icons/icon-note.svg",
                             px(theme::icon_large() + 10.),
@@ -302,12 +293,9 @@ impl Render for ReadmeView {
                 )
             });
 
-        div()
-            .size_full()
-            .flex()
-            .flex_col()
-            .min_h_0()
-            .child(header)
+        card(section_title("README".to_string()).child(actions))
+            .debug_selector(|| "readme-card".into())
+            .w_full()
             .child(pane)
     }
 }

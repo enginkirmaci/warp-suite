@@ -18,11 +18,11 @@ use std::ops::Range;
 use std::rc::Rc;
 
 /// The readable line length, Obsidian's 700px at the default 16px.
-const MAX_COLUMN_EM: f32 = 43.75;
+pub(crate) const DEFAULT_MAX_COLUMN_EM: f32 = 43.75;
 /// Side margins of the text column.
 const MARGIN_X_EM: f32 = 2.;
 /// Space above the first line.
-const MARGIN_TOP_EM: f32 = 2.;
+pub(crate) const DEFAULT_TOP_MARGIN_EM: f32 = 2.;
 /// Past the last line the view keeps scrolling by this share of its height,
 /// so the end of a note can sit in the middle of the screen.
 const TAIL_SHARE: f32 = 0.5;
@@ -241,6 +241,10 @@ impl ShapeCache {
 /// The fixed inputs of one layout.
 pub struct Style<'a> {
     pub em: f32,
+    /// The widest text column, in em; `None` lets it fill the width.
+    pub max_column_em: Option<f32>,
+    /// Space above the first line, in em.
+    pub top_margin_em: f32,
     pub fonts: &'a Fonts,
     pub colors: &'a LiveColors,
 }
@@ -256,12 +260,13 @@ pub fn build(
     window: &mut Window,
 ) -> Frame {
     let em = style.em;
-    let column_width = (width - MARGIN_X_EM * em * 2.)
-        .min(MAX_COLUMN_EM * em)
-        .max(em * 4.);
+    let mut column_width = (width - MARGIN_X_EM * em * 2.).max(em * 4.);
+    if let Some(max) = style.max_column_em {
+        column_width = column_width.min(max * em).max(em * 4.);
+    }
     let column_x = ((width - column_width) / 2.).max(0.);
     let mut lines = Vec::with_capacity(views.len());
-    let mut y = MARGIN_TOP_EM * em;
+    let mut y = style.top_margin_em * em;
     let mut columns: HashMap<usize, Vec<f32>> = HashMap::new();
     let mut tables: Vec<LaidTable> = Vec::new();
 

@@ -274,6 +274,8 @@ struct FrameKey {
     selection: Option<Range<usize>>,
     size: gpui::Size<Pixels>,
     em: f32,
+    max_column_em: Option<f32>,
+    top_margin_em: f32,
     colors: LiveColors,
 }
 
@@ -354,6 +356,10 @@ pub struct LiveEditorState {
     /// The property row the context menu was opened on.
     menu_property: Option<usize>,
     em: f32,
+    /// The widest text column, in em; `None` lets it fill the width.
+    max_column_em: Option<f32>,
+    /// Space above the first line, in em.
+    top_margin_em: f32,
     placeholder: SharedString,
     base_dir: Option<PathBuf>,
     paste_handler: Option<PasteHandler>,
@@ -452,6 +458,8 @@ impl LiveEditorState {
             draft: None,
             menu_property: None,
             em: 16.,
+            max_column_em: Some(frame::DEFAULT_MAX_COLUMN_EM),
+            top_margin_em: frame::DEFAULT_TOP_MARGIN_EM,
             placeholder: SharedString::default(),
             base_dir: None,
             paste_handler: None,
@@ -486,6 +494,27 @@ impl LiveEditorState {
         if self.em != size.as_f32() {
             self.em = size.as_f32();
             self.views_revision = u64::MAX;
+            cx.notify();
+        }
+    }
+
+    /// The widest text column, in em. `None` fills the width the host gives
+    /// the element; the default caps the measure at a readable line length.
+    pub fn set_max_column_em(&mut self, max: Option<f32>, cx: &mut Context<Self>) {
+        if self.max_column_em != max {
+            self.max_column_em = max;
+            self.frame_key = None;
+            self.views_revision = u64::MAX;
+            cx.notify();
+        }
+    }
+
+    /// Space above the first line, in em: a host that already pads its
+    /// surface can drop the engine's own top margin.
+    pub fn set_top_margin_em(&mut self, top: f32, cx: &mut Context<Self>) {
+        if self.top_margin_em != top {
+            self.top_margin_em = top;
+            self.frame_key = None;
             cx.notify();
         }
     }
@@ -958,6 +987,8 @@ impl LiveEditorState {
             selection: selection.clone(),
             size: bounds.size,
             em: self.em,
+            max_column_em: self.max_column_em,
+            top_margin_em: self.top_margin_em,
             colors,
         };
         let reusable = self
@@ -984,6 +1015,8 @@ impl LiveEditorState {
                 );
                 let style = frame::Style {
                     em: self.em,
+                    max_column_em: self.max_column_em,
+                    top_margin_em: self.top_margin_em,
                     fonts: &fonts,
                     colors: &colors,
                 };

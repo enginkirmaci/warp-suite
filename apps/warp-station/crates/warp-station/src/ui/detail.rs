@@ -24,6 +24,7 @@ pub struct DetailViews {
     pulls: Entity<ItemListView>,
     issues: Entity<ItemListView>,
     pipelines: Entity<AzureView>,
+    /// The Overview's README card.
     readme: Entity<ReadmeView>,
 }
 
@@ -59,7 +60,6 @@ impl DetailViews {
             WorkspaceTab::PullRequests => self.pulls.clone().into_any_element(),
             WorkspaceTab::Issues => self.issues.clone().into_any_element(),
             WorkspaceTab::Pipelines => self.pipelines.clone().into_any_element(),
-            WorkspaceTab::Readme => self.readme.clone().into_any_element(),
         })
     }
 }
@@ -189,7 +189,15 @@ pub fn render(
         .min_h_0()
         .child(match views.panel(active) {
             Some(panel) => panel,
-            None => overview::render(store, entities, page, props.tag_draft, window, cx),
+            None => overview::render(
+                store,
+                entities,
+                page,
+                props.tag_draft,
+                &views.readme,
+                window,
+                cx,
+            ),
         });
     // keyed on what is shown, so a redraw never replays it
     let view = SharedString::from(format!("detail-enter-{folder}-{}", active.selector()));

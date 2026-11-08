@@ -9,6 +9,7 @@ use crate::theme;
 use crate::ui::A11y;
 use crate::ui::icon;
 use crate::ui::launchers::{self, Launcher};
+use crate::ui::readme::ReadmeView;
 use crate::ui::repos::ReposPage;
 use gpui::prelude::*;
 use gpui::{
@@ -45,12 +46,13 @@ pub struct HeadState {
 
 /// The Overview tab for the selected repo: what needs a person, where to open
 /// it, then its status and what GitHub says about it, as cards in two columns
-/// that stack when the pane gets narrow.
+/// that stack when the pane gets narrow, with the README as a card below them.
 pub fn render(
     store: &Store,
     entities: &Entity<Store>,
     page: &Entity<ReposPage>,
     tag_draft: Option<&Entity<InputState>>,
+    readme: &Entity<ReadmeView>,
     window: &Window,
     cx: &App,
 ) -> AnyElement {
@@ -92,11 +94,18 @@ pub fn render(
             .max_w(px(warpui_kit_core::shell::GRID_WIDTH))
             .p(px(warpui_kit_core::shell::DETAIL_PADDING))
             .flex()
-            .flex_wrap()
-            .items_start()
+            .flex_col()
             .gap_4()
-            .child(left)
-            .child(right),
+            .child(
+                div()
+                    .flex()
+                    .flex_wrap()
+                    .items_start()
+                    .gap_4()
+                    .child(left)
+                    .child(right),
+            )
+            .child(readme.clone()),
     )
     .into_any_element()
 }
@@ -963,7 +972,7 @@ fn open_tab(entities: &Entity<Store>, tab: WorkspaceTab) -> Action {
 }
 
 /// A card: the base surface on the detail's panel, its head on top.
-fn card(head: gpui::Div) -> gpui::Div {
+pub(crate) fn card(head: gpui::Div) -> gpui::Div {
     div()
         .flex()
         .flex_col()
@@ -976,7 +985,7 @@ fn card(head: gpui::Div) -> gpui::Div {
 }
 
 /// A card's head: its title in sentence case.
-fn section_title(label: String) -> gpui::Div {
+pub(crate) fn section_title(label: String) -> gpui::Div {
     div()
         .flex()
         .items_center()
