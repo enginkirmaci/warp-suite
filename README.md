@@ -162,17 +162,20 @@ together. When one changes, update the other side in the **same** commit.
 
 - **warp-android-scribe bridge** (LAN `<nas-lan>:8787`, public
   `https://<nas-host>`): the Android IME posts a 16 kHz mono WAV to
-  `POST /transcribe?lang=tr|auto` with `Authorization: Bearer <token>` and
-  receives `{"text","language","duration"}`. `GET /health` is the
-  token-checked server test. The bridge turns the request into
-  `superwhisper transcribe` plus `status` polling on the NAS and serializes
-  requests because the daemon has one active session. The public route is
-  Cloudflare Tunnel -> Nginx Proxy Manager -> 8787. The bearer scheme, field
-  names and status codes are one contract: change the bridge and the Android
-  client in the same commit. Android 17 needs `ACCESS_LOCAL_NETWORK` for LAN;
-  the app requests it and has Local/Remote modes. The APK is sideloaded;
-  the bridge is a systemd user service installed from
-  `android-apps/warp-android-scribe/deploy/`.
+  `POST /transcribe?lang=tr|auto&tone=semi-formal|formal|…` with
+  `Authorization: Bearer <token>` and receives
+  `{"text","language","duration"}`. `GET /health` is the token-checked server
+  test; `GET /settings`, `PUT /settings/vocabulary` and
+  `POST /settings/processing` read and edit the NAS profile (language list,
+  tone, words, processing mode and model downloads). The bridge turns the
+  request into `superwhisper transcribe` plus `status` polling on the NAS and
+  serializes requests because the daemon has one active session; language and
+  tone are set inside that mutex. The public route is Cloudflare Tunnel ->
+  Nginx Proxy Manager -> 8787. The bearer scheme, field names and status codes
+  are one contract: change the bridge and the Android client in the same
+  commit. Android 17 needs `ACCESS_LOCAL_NETWORK` for LAN; the app requests it
+  and has Local/Remote modes. The APK is sideloaded; the bridge is a systemd
+  user service installed from `android-apps/warp-android-scribe/deploy/`.
 
 ## Adding an app
 

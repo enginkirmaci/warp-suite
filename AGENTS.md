@@ -200,11 +200,18 @@ when one side changes, update the other side in the **same commit**.
 - **warp-android-scribe bridge** (`android-apps/warp-android-scribe`): LAN
   `http://<nas-lan>:8787` (UFW `<nas-subnet>`) and public
   `https://<nas-host>` through Cloudflare Tunnel -> Nginx Proxy
-  Manager -> 8787. `POST /transcribe?lang=tr|auto` with raw `audio/wav` and
-  `Authorization: Bearer <token>` answers `{"text","language","duration"}`;
-  `GET /health` is the phone's token-checked server test. The bridge owns the
-  Superwhisper CLI flow (transcribe → poll `status` for the same session id →
-  text) and serializes requests because the daemon has one active session.
+  Manager -> 8787. `POST /transcribe?lang=tr|auto&tone=formal|casual|…` with
+  raw `audio/wav` and `Authorization: Bearer <token>` answers
+  `{"text","language","duration"}`; `GET /health` is the phone's token-checked
+  server test. `GET /settings` returns the Superwhisper profile (language
+  list, tone, vocabulary, processing modes and download progress),
+  `PUT /settings/vocabulary` replaces the word/replacement lists, and
+  `POST /settings/processing` selects Cloud/Offline/Offline Lite and downloads
+  missing models in the background. The bridge owns the Superwhisper CLI flow
+  (transcribe → poll `status` for the same session id → text) and serializes
+  requests because the daemon has one active session; the language and tone
+  pins are set inside that session mutex. The phone sends its tone on every
+  request, so it overrides the NAS profile's tone.
   The bearer scheme, JSON field names and status codes are the Android client's
   contract: change both sides in the same commit. Android 17 LAN sockets need
   `ACCESS_LOCAL_NETWORK`; the app requests it and offers Local/Remote modes.
@@ -265,10 +272,12 @@ when one side changes, update the other side in the **same commit**.
 - Warp Station's `changes_probe` and `git_parity` read this repository's own
   git history; CI checks that job out with `fetch-depth: 0`. Do not shallow-
   clone it locally.
-- The Android bridge has two integration probes: `api_probe` (auth, limits,
-  temp-file cleanup, gateway errors) and `superwhisper_cli_probe` (a fake
-  `superwhisper` shell script: session polling, refusal, timeout). The Android
-  Gradle project has no CI job; build it locally with `assembleDebug`.
+- The Android bridge has three integration probes: `api_probe` (auth, limits,
+  temp-file cleanup, gateway errors), `settings_probe` (a fake `superwhisper`
+  shell script for the profile, vocabulary diff and processing download) and
+  `superwhisper_cli_probe` (session polling, refusal, warming retry, timeout).
+  The Android Gradle project has no CI job; build it locally with
+  `assembleDebug`.
 
 ## Platform rules
 
