@@ -618,8 +618,14 @@ fn repo_row(
         .a11y_button(repo.name.clone())
         .relative()
         .cursor_pointer()
-        .on_click(move |_, _, cx| {
-            select_target.update(cx, |s, cx| s.pick_repo(&select_folder, cx));
+        .on_click(move |event: &gpui::ClickEvent, _, cx| {
+            // a second press keeps the repo: it gets a tab of its own, the
+            // explorer's double click
+            if event.click_count() > 1 {
+                select_target.update(cx, |s, cx| s.open_repo_tab(&select_folder, cx));
+            } else {
+                select_target.update(cx, |s, cx| s.pick_repo(&select_folder, cx));
+            }
         })
         .on_mouse_down(gpui::MouseButton::Middle, {
             let store = store.clone();

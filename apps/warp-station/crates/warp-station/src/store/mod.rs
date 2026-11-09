@@ -2350,7 +2350,9 @@ impl Store {
         }
     }
 
-    /// Gives a repository its own tab, or goes to the one it has.
+    /// Gives a repository its own tab, or goes to the one it has. A row's
+    /// double click, its middle button and its "Open in tab" verb land here;
+    /// a single press stays a preview in the Repositories tab.
     pub fn open_repo_tab(&mut self, folder: &str, cx: &mut Context<Self>) {
         if !self.repo_tabs.iter().any(|tab| tab.folder == folder) {
             let tab = if self.selected_repo.as_deref() == Some(folder) {

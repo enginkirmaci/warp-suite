@@ -43,6 +43,49 @@ fn click(cx: &mut gpui::VisualTestContext, selector: &'static str) {
     draw(cx);
 }
 
+/// A double click: the platform's second press and release carry
+/// `click_count: 2`, so both clicks reach the row.
+fn double_click(cx: &mut gpui::VisualTestContext, selector: &'static str) {
+    let bounds = cx
+        .debug_bounds(selector)
+        .unwrap_or_else(|| panic!("{selector} renders"));
+    let center = bounds.center();
+    for click_count in 1..=2 {
+        cx.simulate_event(gpui::MouseDownEvent {
+            position: center,
+            modifiers: gpui::Modifiers::default(),
+            button: gpui::MouseButton::Left,
+            click_count,
+            first_mouse: false,
+        });
+        cx.simulate_event(gpui::MouseUpEvent {
+            position: center,
+            modifiers: gpui::Modifiers::default(),
+            button: gpui::MouseButton::Left,
+            click_count,
+        });
+        draw(cx);
+    }
+}
+
+fn middle_click(cx: &mut gpui::VisualTestContext, selector: &'static str) {
+    let bounds = cx
+        .debug_bounds(selector)
+        .unwrap_or_else(|| panic!("{selector} renders"));
+    let center = bounds.center();
+    cx.simulate_mouse_down(
+        center,
+        gpui::MouseButton::Middle,
+        gpui::Modifiers::default(),
+    );
+    cx.simulate_mouse_up(
+        center,
+        gpui::MouseButton::Middle,
+        gpui::Modifiers::default(),
+    );
+    draw(cx);
+}
+
 fn selected(store: &gpui::Entity<Store>, cx: &mut gpui::VisualTestContext) -> Option<String> {
     cx.read_entity(store, |s, _| s.selected_repo.clone())
 }
@@ -2465,6 +2508,53 @@ fn a_row_goes_to_its_tab_from_inside_a_tab_and_previews_otherwise(cx: &mut TestA
     });
     assert_eq!(active_tab(&store, cx), None, "one without previews");
     assert_eq!(selected(&store, cx).as_deref(), Some("/probe/beta"));
+}
+
+/// The explorer's gestures on a repo row: one press previews the repo in the
+/// Repositories tab, a second press (a double click) keeps it in a tab of its
+/// own, and the middle button opens a tab without a preview step.
+#[gpui::test]
+fn a_double_click_keeps_a_repo_and_the_middle_click_opens_its_tab(cx: &mut TestAppContext) {
+    let (store, cx) = two_repos(cx);
+    draw(cx);
+
+    double_click(cx, "repo-row-1");
+    assert_eq!(
+        active_tab(&store, cx).as_deref(),
+        Some("/probe/beta"),
+        "the second press keeps the repo in its own tab"
+    );
+    assert_eq!(cx.read_entity(&store, |s, _| s.repo_tabs.len()), 1);
+
+    click(cx, "repo-tab-home");
+    assert_eq!(active_tab(&store, cx), None, "back on the list");
+
+    middle_click(cx, "repo-row-0");
+    assert_eq!(
+        active_tab(&store, cx).as_deref(),
+        Some("/probe/alpha"),
+        "the middle button opens a tab"
+    );
+    assert_eq!(cx.read_entity(&store, |s, _| s.repo_tabs.len()), 2);
+}
+
+/// The same second press works from inside a tab: the first press previews
+/// the repo back in the Repositories tab, the second keeps it.
+#[gpui::test]
+fn a_double_click_inside_a_tab_still_keeps_the_repo(cx: &mut TestAppContext) {
+    let (store, cx) = two_repos(cx);
+    cx.simulate_keystrokes("ctrl-t");
+    draw(cx);
+    assert_eq!(active_tab(&store, cx).as_deref(), Some("/probe/alpha"));
+    click(cx, "list-toggle");
+
+    double_click(cx, "repo-row-1");
+    assert_eq!(
+        active_tab(&store, cx).as_deref(),
+        Some("/probe/beta"),
+        "the second press keeps beta in its own tab"
+    );
+    assert_eq!(cx.read_entity(&store, |s, _| s.repo_tabs.len()), 2);
 }
 
 #[gpui::test]
