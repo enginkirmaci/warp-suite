@@ -317,12 +317,7 @@ impl Engine {
                 continue;
             }
 
-            let current = match self.hover {
-                Some((hovered, _)) if hovered == index => Some(index),
-                _ => None,
-            };
-
-            if let Some(zone) = overlay.hit_test(point.0, point.1, current) {
+            if let Some(zone) = overlay.hit_test(point.0, point.1) {
                 if let Some(rect) = overlay.target(zone) {
                     found = Some((index, zone, rect, overlay.monitor.dpi));
                 }

@@ -164,24 +164,18 @@ impl MonitorZones {
         }
     }
 
-    /// Visual hit test. Overlays are drawn above areas, so they win; among
-    /// mini overlays the last one added is on top. All mini overlays sit above
-    /// every full overlay in the .NET visual tree (`MainFullOverlay` is below
-    /// `MainOverlay`), so minis are tested first. `current_overlay` keeps a
-    /// hovered merged zone selected while the pointer is anywhere in its full
-    /// area.
-    pub fn hit_test(&self, x: i32, y: i32, current_overlay: Option<usize>) -> Option<ZoneRef> {
+    /// Visual hit test. Overlays are drawn above areas, so they win, and all
+    /// mini overlays sit above every full overlay in the .NET visual tree
+    /// (`MainFullOverlay` is below `MainOverlay`), so only the minis are
+    /// tested. The mini is the merged zone's pointer affordance: once the
+    /// pointer leaves it the overlay must stop winning, otherwise an overlay
+    /// whose `full` rect spans whole snap areas (a merged column or band)
+    /// would swallow the areas underneath it.
+    pub fn hit_test(&self, x: i32, y: i32) -> Option<ZoneRef> {
         for (index, overlay) in self.overlays.iter().enumerate().rev() {
             if overlay.mini.contains(x, y) {
                 return Some(ZoneRef::Overlay(index));
             }
-        }
-
-        if let Some(index) = current_overlay
-            && let Some(overlay) = self.overlays.get(index)
-            && overlay.full.contains(x, y)
-        {
-            return Some(ZoneRef::Overlay(index));
         }
 
         self.areas
@@ -489,7 +483,7 @@ mod tests {
     }
 
     #[test]
-    fn overlays_win_over_areas_and_full_area_keeps_hover() {
+    fn overlays_win_over_areas_only_on_their_mini() {
         let layout = shipped_layout();
         let zones = MonitorZones::build(2752, 1104, Some(&layout));
 
@@ -497,15 +491,30 @@ mod tests {
         let mini = zones.overlays[0].mini;
         let x = mini.left + mini.width() / 2;
         let y = mini.top + mini.height() / 2;
-        assert_eq!(zones.hit_test(x, y, None), Some(ZoneRef::Overlay(0)));
+        assert_eq!(zones.hit_test(x, y), Some(ZoneRef::Overlay(0)));
 
-        // A point in the full overlay but outside the mini only stays selected
-        // while that overlay is the current one.
+        // A point in the full overlay but outside the mini belongs to the
+        // snap area underneath it.
         let full = zones.overlays[0].full;
         let x = full.left + 5;
         let y = full.bottom - 5;
-        assert_eq!(zones.hit_test(x, y, None), Some(ZoneRef::Area(3)));
-        assert_eq!(zones.hit_test(x, y, Some(0)), Some(ZoneRef::Overlay(0)));
+        assert_eq!(zones.hit_test(x, y), Some(ZoneRef::Area(3)));
+    }
+
+    #[test]
+    fn a_merged_column_does_not_swallow_its_cells() {
+        let zones = MonitorZones {
+            areas: vec![Rect::new(0, 0, 100, 50), Rect::new(0, 50, 100, 100)],
+            overlays: vec![OverlayZone {
+                full: Rect::new(0, 0, 100, 100),
+                mini: Rect::new(10, 10, 40, 30),
+            }],
+            ..MonitorZones::default()
+        };
+
+        assert_eq!(zones.hit_test(25, 20), Some(ZoneRef::Overlay(0)));
+        assert_eq!(zones.hit_test(25, 70), Some(ZoneRef::Area(1)));
+        assert_eq!(zones.hit_test(80, 20), Some(ZoneRef::Area(0)));
     }
 
     #[test]
@@ -525,9 +534,9 @@ mod tests {
             ..MonitorZones::default()
         };
 
-        // (42, 42) is inside overlay 0's mini and overlay 1's (current) full
-        // area; the mini is visually on top in the .NET control tree.
-        assert_eq!(zones.hit_test(42, 42, Some(1)), Some(ZoneRef::Overlay(0)));
+        // (42, 42) is inside overlay 0's mini and overlay 1's full area; the
+        // mini is visually on top in the .NET control tree.
+        assert_eq!(zones.hit_test(42, 42), Some(ZoneRef::Overlay(0)));
     }
 
     #[test]

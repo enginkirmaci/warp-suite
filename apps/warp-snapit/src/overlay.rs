@@ -80,7 +80,7 @@ impl Overlay {
     }
 
     /// `x`/`y` are screen coordinates.
-    pub fn hit_test(&self, x: i32, y: i32, current_overlay: Option<usize>) -> Option<ZoneRef> {
+    pub fn hit_test(&self, x: i32, y: i32) -> Option<ZoneRef> {
         let local_x = x - self.monitor.work.left;
         let local_y = y - self.monitor.work.top;
         if local_x < 0
@@ -90,7 +90,7 @@ impl Overlay {
         {
             return None;
         }
-        self.zones.hit_test(local_x, local_y, current_overlay)
+        self.zones.hit_test(local_x, local_y)
     }
 
     /// Converts a local zone target to screen coordinates.

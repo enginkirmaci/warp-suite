@@ -157,6 +157,21 @@ Native SnapIt files are snake_case and versioned like the rest of the suite:
   (`"x,y"`), `layout_lines` (`point`, `size`, `split_direction`
   `vertical`/`horizontal`), `layout_overlays`, `area_padding`.
 
+`size` is the design canvas. Set it to the target monitor's work area so the
+scale is 1.0 and thirds/halves land exactly; other monitors scale the two axes
+independently, so a different aspect ratio stretches the layout. `layout_lines`
+segments must meet at their endpoints. The zone finder splits only at segment
+endpoints (its intersection test uses truncated integer division), so a
+full-height vertical crossed by a full-width horizontal yields three
+overlapping areas instead of four. Draw a 3x2 grid as four vertical segments
+and three horizontal segments, each ending on a junction.
+
+Layout selection: `screens_layouts` maps a monitor key (the display-interface
+path first, then `\\.\DISPLAY1`) to a layout `guid`; an empty value or no
+matching entry means the first layout by name, so adding a layout file does not
+select it. Layouts are read once at startup, so a change needs a companion
+restart.
+
 The old .NET-shaped `Settings.json`, `ExcludedApplicationSettings.json` and
 PascalCase layouts are importer input. They are read once, rewritten native,
 and the old file is retired. Warp Station's layout preview reads both shapes
