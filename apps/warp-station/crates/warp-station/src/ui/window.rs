@@ -14,8 +14,8 @@ use crate::ui::summary::SummaryPage;
 use crate::ui::windows_tools::{KeepAwakePage, SnapItPage};
 use gpui::prelude::*;
 use gpui::{
-    App, Context, Entity, Focusable as _, FontWeight, MouseButton, Render, SharedString, Window,
-    WindowControlArea, div, px,
+    App, ClipboardItem, Context, Entity, Focusable as _, FontWeight, MouseButton, Render,
+    SharedString, Window, WindowControlArea, div, px,
 };
 use gpui_kit::component::input::{InputEvent, InputState};
 use warpui_kit_core::text_menu::{self, TextMenuAnchor};
@@ -203,6 +203,32 @@ impl Render for MainWindow {
             .on_key_down(cx.listener(|this, event: &gpui::KeyDownEvent, window, cx| {
                 let modifiers = event.keystroke.modifiers;
                 let key = event.keystroke.key.as_str();
+                // Copy for the read-only text: the README card and the summary
+                // render through the markdown engine, which takes no focus so
+                // a click never steals the keyboard from a field — but that
+                // also means their Copy action never dispatches. Hand the
+                // selection (the document's, or a selectable text's) to the
+                // clipboard here; a focused field keeps its own Copy.
+                if modifiers.control
+                    && !modifiers.shift
+                    && key == "c"
+                    && !window
+                        .context_stack()
+                        .iter()
+                        .any(|context| context.contains("Input"))
+                {
+                    let selected = {
+                        let text = gpui_kit::base::TextSelection::selected_text(window, cx);
+                        (!text.is_empty())
+                            .then_some(text)
+                            .or_else(|| warpui_kit_markdown::read_only_selection_text(cx))
+                    };
+                    if let Some(text) = selected.filter(|text| !text.is_empty()) {
+                        cx.write_to_clipboard(ClipboardItem::new_string(text));
+                        cx.stop_propagation();
+                        return;
+                    }
+                }
                 if modifiers.control && modifiers.shift && key == "v" {
                     let message = copy_stored_password(&this.store, cx);
                     let kind = crate::store::NoticeKind::for_copy_message(message);

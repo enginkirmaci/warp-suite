@@ -387,6 +387,11 @@ Use the core helper for new code rather than adding another copy.
 - **The markdown editor** (`warpui-kit-markdown`) owns its own menu (Cut / Copy
   / Paste / Select all while editing, Copy / Select all read-only). Do not
   wrap a `LiveEditor` in `text_menu`; it would open two menus.
+- **Keyboard copy** of a read-only selection is the host's. Neither surface
+  takes focus, so Ctrl/Cmd+C never dispatches to it: the window's key handler
+  copies the window selection (`TextSelection::selected_text`) or the
+  document's (`read_only_selection_text`), and leaves the key alone while an
+  `Input` context owns it (Warp Station's `MainWindow` is the reference).
 - **Masked, read-only and disabled** states are the widget's to enforce. A
   masked field must not put its value on the clipboard through either the
   keyboard shortcut or the menu; a bump of `gpui-kit` gets the probe in
