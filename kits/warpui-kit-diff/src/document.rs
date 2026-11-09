@@ -501,6 +501,90 @@ fn trim_span(text: &str, mut range: Range<usize>) -> Option<Range<usize>> {
     (range.start < range.end).then_some(range)
 }
 
+/// One applied change a tool reports as text: the file it touched and the
+/// before/after text of one hunk, context included. `old` is `None` for a pure
+/// insertion or a file the call created.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct HunkText<'a> {
+    pub path: &'a str,
+    pub old: Option<&'a str>,
+    pub new: &'a str,
+}
+
+/// Build a unified patch from hunks a tool reports as text pairs.
+///
+/// Some backends carry an applied change as the before/after text of each hunk
+/// instead of patch text (dsh's `write`, `edit` and `apply_patch` results do),
+/// so a chat that only renders patches would show nothing for them. Re-diffing
+/// each pair into the unified form [`DiffDocument::parse`] reads keeps one
+/// renderer for git patches and tool hunks alike.
+///
+/// Consecutive hunks for one path share a file header. The carrier has no file
+/// offsets, so a path's hunks number from 1 and each following hunk continues
+/// where the previous one ended: the numbers order the rows inside the change,
+/// they are not the file's real line numbers.
+pub fn patch_from_hunks(hunks: &[HunkText<'_>]) -> String {
+    let mut patch = String::new();
+    let mut index = 0;
+    while index < hunks.len() {
+        let path = hunks[index].path;
+        let first = index;
+        while index < hunks.len() && hunks[index].path == path {
+            index += 1;
+        }
+        let group = &hunks[first..index];
+        // a lone null-old hunk is a whole created file, not a hunk of one
+        let created = group.len() == 1 && group[0].old.is_none();
+        if created {
+            patch.push_str("--- /dev/null\n");
+        } else {
+            patch.push_str("--- a/");
+            patch.push_str(path);
+            patch.push('\n');
+        }
+        patch.push_str("+++ b/");
+        patch.push_str(path);
+        patch.push('\n');
+        let mut old_start = if created { 0 } else { 1 };
+        let mut new_start = 1;
+        for hunk in group {
+            let body = hunk_body(hunk);
+            let old_count = body.iter().filter(|row| row.0 != '+').count();
+            let new_count = body.iter().filter(|row| row.0 != '-').count();
+            patch.push_str(&format!(
+                "@@ -{old_start},{old_count} +{new_start},{new_count} @@\n"
+            ));
+            for (marker, line) in body {
+                patch.push(marker);
+                patch.push_str(line);
+                patch.push('\n');
+            }
+            old_start += old_count as u32;
+            new_start += new_count as u32;
+        }
+    }
+    patch
+}
+
+/// The rows of one hunk as (marker, text) in unified order.
+fn hunk_body<'a>(hunk: &HunkText<'a>) -> Vec<(char, &'a str)> {
+    let Some(old) = hunk.old else {
+        // no before-image: every line of the after-text is an addition
+        return hunk.new.lines().map(|line| ('+', line)).collect();
+    };
+    TextDiff::from_lines(old, hunk.new)
+        .iter_all_changes()
+        .map(|change| {
+            let marker = match change.tag() {
+                ChangeTag::Delete => '-',
+                ChangeTag::Insert => '+',
+                ChangeTag::Equal => ' ',
+            };
+            (marker, change.value().trim_end_matches(['\r', '\n']))
+        })
+        .collect()
+}
+
 /// Language names the kit's SyntaxHighlighter accepts, restricted to the
 /// grammars the family enables (see Cargo.toml).
 pub fn lang_from_path(path: &str) -> Option<&'static str> {
@@ -736,5 +820,104 @@ mod tests {
             Some("python")
         );
         assert_eq!(lang_from_path("note.md"), None);
+    }
+
+    #[test]
+    fn a_tool_hunk_becomes_a_patch_the_parser_reads() {
+        let hunks = [HunkText {
+            path: "src/lib.rs",
+            old: Some("fn a() {\n    one\n}\n"),
+            new: "fn a() {\n    two\n}\n",
+        }];
+        let patch = patch_from_hunks(&hunks);
+        let doc = DiffDocument::parse(&patch);
+        assert_eq!(doc.files.len(), 1);
+        assert_eq!(doc.files[0].path(), Some("src/lib.rs"));
+        assert_eq!((doc.added(), doc.removed()), (1, 1));
+        let rows: Vec<(RowKind, &str)> = doc.files[0].hunks[0]
+            .rows
+            .iter()
+            .map(|row| (row.kind, row.text.as_str()))
+            .collect();
+        assert_eq!(
+            rows,
+            [
+                (RowKind::Context, "fn a() {"),
+                (RowKind::Del, "    one"),
+                (RowKind::Add, "    two"),
+                (RowKind::Context, "}"),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_created_file_is_one_addition_block() {
+        let hunks = [HunkText {
+            path: "notes/new.md",
+            old: None,
+            new: "# hi\nbody\n",
+        }];
+        let patch = patch_from_hunks(&hunks);
+        assert!(
+            patch.starts_with("--- /dev/null\n+++ b/notes/new.md\n@@ -0,0 +1,2 @@\n+# hi\n+body\n"),
+            "{patch:?}"
+        );
+        let doc = DiffDocument::parse(&patch);
+        assert_eq!((doc.added(), doc.removed()), (2, 0));
+        assert_eq!(doc.files[0].path(), Some("notes/new.md"));
+    }
+
+    #[test]
+    fn consecutive_hunks_of_one_file_share_a_header_and_number_forward() {
+        let hunks = [
+            HunkText {
+                path: "a.rs",
+                old: Some("x\n"),
+                new: "y\n",
+            },
+            HunkText {
+                path: "a.rs",
+                old: Some("p\n"),
+                new: "q\n",
+            },
+        ];
+        let patch = patch_from_hunks(&hunks);
+        assert!(patch.contains("@@ -1,1 +1,1 @@"), "{patch:?}");
+        assert!(patch.contains("@@ -2,1 +2,1 @@"), "{patch:?}");
+        let doc = DiffDocument::parse(&patch);
+        assert_eq!(doc.files.len(), 1, "one file header for one path");
+        assert_eq!(doc.files[0].hunks.len(), 2);
+    }
+
+    #[test]
+    fn separate_paths_keep_their_own_headers() {
+        let hunks = [
+            HunkText {
+                path: "a.rs",
+                old: Some("x\n"),
+                new: "y\n",
+            },
+            HunkText {
+                path: "b.rs",
+                old: None,
+                new: "z\n",
+            },
+        ];
+        let doc = DiffDocument::parse(&patch_from_hunks(&hunks));
+        assert_eq!(doc.files.len(), 2);
+        assert_eq!(doc.max_number(), 1);
+    }
+
+    #[test]
+    fn a_blank_context_line_keeps_its_marker() {
+        let hunks = [HunkText {
+            path: "a.rs",
+            old: Some("first\n\nlast\n"),
+            new: "first\n\nLAST\n",
+        }];
+        let rows = &DiffDocument::parse(&patch_from_hunks(&hunks)).files[0].hunks[0].rows;
+        assert_eq!(rows[1].kind, RowKind::Context);
+        assert_eq!(rows[1].text, "");
+        assert_eq!(rows.len(), 4, "context, blank context, delete, add");
     }
 }

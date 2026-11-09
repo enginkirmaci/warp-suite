@@ -44,6 +44,11 @@
 //! prefixes) gets its prefixes lifted into the real gutter instead of
 //! double-numbering.
 //!
+//! [`patch_from_hunks`] is the entry for a backend that reports an applied
+//! change as before/after text per hunk instead of patch text (dsh's `write`
+//! and `edit` results do): it re-diffs each pair into the unified form the
+//! parser above reads, so the same renderer draws git patches and tool hunks.
+//!
 //! Both renderers pin the code family and the caller's `font_detail` size on
 //! the block's own root element. GPUI shapes a `StyledText` at the *ambient*
 //! text style (a `TextRun` carries a font, never a size), so a style built
@@ -61,7 +66,10 @@ mod document;
 mod highlight;
 mod selectable;
 
-pub use document::{DiffDocument, DiffFile, DiffHunk, DiffRow, RowKind, SplitRow, lang_from_path};
+pub use document::{
+    DiffDocument, DiffFile, DiffHunk, DiffRow, HunkText, RowKind, SplitRow, lang_from_path,
+    patch_from_hunks,
+};
 pub use highlight::{CodeBlockHighlighter, highlight_buffer, shared_highlighter};
 use selectable::SelectableText;
 
