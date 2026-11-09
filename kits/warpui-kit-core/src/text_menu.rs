@@ -6,10 +6,11 @@
 //! and that system has no menu of its own. This module adds the missing half:
 //!
 //! - [`TextMenuAnchor`] is a zero-sized, focusable element rendered once per
-//!   window. It carries the [`CopySelection`] action, which writes the
-//!   window's selected text to the clipboard.
-//! - [`menu`] builds the drawn context menu whose Copy item dispatches to that
-//!   anchor.
+//!   window. The menu names it as the focus to return to when it closes.
+//! - [`menu`] builds the drawn context menu. Its Copy item carries the text
+//!   the window had selected when the menu opened: the press that activates an
+//!   item drops the window selection first, so a handler that read it at click
+//!   time would copy nothing.
 //! - [`attach`] wraps a selectable surface in the menu and the layout it
 //!   needs. It is a no-op when no host was installed, so a probe or a second
 //!   window without the host still renders.
@@ -26,19 +27,9 @@ use gpui::{
     Render, Window, div, px,
 };
 use gpui_kit::base::TextSelection;
-use gpui_kit::component::menu::{ContextMenuExt as _, PopupMenu};
+use gpui_kit::component::menu::{ContextMenuExt as _, PopupMenu, PopupMenuItem};
 
-gpui::actions!(text_menu, [CopySelection]);
-
-/// Copy the window's current text selection.
-fn copy_selected(_: &CopySelection, window: &mut Window, cx: &mut App) {
-    let text = TextSelection::selected_text(window, cx);
-    if !text.is_empty() {
-        cx.write_to_clipboard(ClipboardItem::new_string(text));
-    }
-}
-
-/// The zero-sized action anchor a window renders once.
+/// The zero-sized focus anchor a window renders once.
 pub struct TextMenuAnchor {
     focus: FocusHandle,
 }
@@ -60,7 +51,7 @@ impl TextMenuAnchor {
 impl Render for TextMenuAnchor {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         // zero-sized and absolute, so no pointer can land inside it: the
-        // menu focuses this handle only to dispatch its action
+        // menu only names this handle as the focus to return to
         div()
             .id("text-menu-anchor")
             .track_focus(&self.focus)
@@ -68,7 +59,6 @@ impl Render for TextMenuAnchor {
             .top_0()
             .left_0()
             .size(px(0.))
-            .on_action(copy_selected)
     }
 }
 
@@ -105,17 +95,23 @@ pub fn focus(cx: &App) -> Option<FocusHandle> {
 
 /// The drawn context menu: Copy, disabled while the window has no selection.
 ///
-/// `focus` is the action target; it must be the handle of a
+/// `focus` is the focus the menu returns to; it must be the handle of a
 /// [`TextMenuAnchor`] rendered in the same window.
 pub fn menu(
     focus: FocusHandle,
 ) -> impl Fn(PopupMenu, &mut Window, &mut Context<PopupMenu>) -> PopupMenu + 'static {
     move |menu, window, cx| {
-        let copyable = TextSelection::has_selection(window, cx);
-        menu.action_context(focus.clone()).menu_with_disabled(
-            "Copy",
-            Box::new(CopySelection),
-            !copyable,
+        // Take the text now, while the menu is built on the selection it was
+        // opened on: the left press that activates the item clears the window
+        // selection before the item's handler runs.
+        let text = TextSelection::selected_text(window, cx);
+        let disabled = text.is_empty();
+        menu.action_context(focus.clone()).item(
+            PopupMenuItem::new("Copy")
+                .disabled(disabled)
+                .on_click(move |_, _, cx| {
+                    cx.write_to_clipboard(ClipboardItem::new_string(text.clone()));
+                }),
         )
     }
 }

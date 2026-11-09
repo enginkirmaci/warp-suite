@@ -15,7 +15,7 @@ use gpui::{
 };
 use gpui_kit::component::input::{InputState, TextareaState};
 use warpui_kit_core::field;
-use warpui_kit_core::text_menu::{self, CopySelection, TextMenuAnchor};
+use warpui_kit_core::text_menu::{self, TextMenuAnchor};
 
 // ---- single-line field ------------------------------------------------------
 
@@ -262,21 +262,14 @@ impl Render for ReadOnly {
 
 #[gpui_kit::gpui::test]
 fn the_read_only_menu_copies_the_selection(cx: &mut TestAppContext) {
-    use std::cell::RefCell;
-    use std::rc::Rc;
-
     cx.update(gpui_kit::init);
-    let slot: Rc<RefCell<Option<Entity<TextMenuAnchor>>>> = Rc::new(RefCell::new(None));
-    let build_slot = slot.clone();
-    let root = cx.add_window(move |window, cx| {
+    let root = cx.add_window(|window, cx| {
         let anchor = cx.new(TextMenuAnchor::new);
-        *build_slot.borrow_mut() = Some(anchor.clone());
         let view = cx.new(|_| ReadOnly { anchor });
         gpui_kit::base::Root::new(view, window, cx)
     });
     let cx = VisualTestContext::from_window(*root.deref(), cx).into_mut();
     cx.run_until_parked();
-    let anchor = slot.borrow().clone().expect("anchor built");
     let host = cx.debug_bounds("readonly-host").expect("the text draws");
     let y = host.origin.y + px(8.);
     drag(
@@ -300,18 +293,21 @@ fn the_read_only_menu_copies_the_selection(cx: &mut TestAppContext) {
     assert!(after.is_some(), "the menu took focus");
     assert_ne!(before, after, "focus moved from the surface to the menu");
 
-    // The menu item and the action anchor use the same action; dispatching it
-    // directly proves the anchor half without driving the drawn menu.
-    let focus = cx.read_entity(&anchor, |anchor, _| anchor.focus_handle());
-    cx.update(|window, cx| {
-        focus.dispatch_action(&CopySelection, window, cx);
-    });
+    // Click the Copy item, which sits inside the menu's content padding. The
+    // press drops the window selection before the item runs, so this is the
+    // half that has to carry the text from open time.
+    let item = point(at.x + px(30.), at.y + px(17.));
+    cx.simulate_mouse_move(item, None, Modifiers::default());
+    cx.simulate_click(item, Modifiers::default());
     cx.run_until_parked();
     let copied = cx
         .read_from_clipboard()
         .and_then(|item| item.text())
         .unwrap_or_default();
-    assert_eq!(copied, selected, "the action copies the window selection");
+    assert_eq!(
+        copied, selected,
+        "the menu copies the selection it opened on"
+    );
 }
 
 // A parent that frames the input and swallows nothing: the app wrappers add
