@@ -1,12 +1,13 @@
 # The pull-request surface
 
-Status: in progress. Phases 1–5 landed: core data, net/store, the workbench, the
-pull request's own three tabs and its verbs, and the embedded New pull request
-form. Open: the Azure pull-request detail, the Issues and Pipelines workbench,
-and the Files rail stacking on a narrow column. The design source is the
-OpenDesign project `warp-suite-v3` — `DESIGN.md` §5 "Work lists", "Pull requests
-tab", "Pull request", "New pull request" — and the prototype's `prList`,
-`prDetail` and `newPrView`.
+Status: in progress. Phases 1–5 landed (core data, net/store, the workbench, the
+pull request's own three tabs and its verbs, the embedded New pull request
+form), plus the Issues workbench and the Files rail stacking. Open: the Azure
+pull-request detail, blocked on the merged list another plan owns, and the
+Pipelines detail, which has no data to draw. The design source is the OpenDesign
+project `warp-suite-v3` — `DESIGN.md` §5 "Work lists", "Pull requests tab",
+"Pull request", "New pull request", "Issues tab" — and the prototype's
+`prList`, `prDetail`, `newPrView` and `issueDetail`.
 
 ## 1. What the design asks for, and what the app had
 
@@ -28,6 +29,8 @@ replaced the whole detail pane with the pull request and had no list beside it.
 | Files: changed-file rail + the Changes diff viewer | none | rail + diff, Unified/Split/Wrap |
 | Commits: day-grouped list, selected commit's files, diff, Copy SHA | none | the History viewer inside the PR |
 | New pull request in the pane | opens the browser | the form in the detail column |
+| Issues: the same split, with a detail showing state, labels, assignee, description and activity, `Open on GitHub` as the one primary | one full-width list, rows opened on GitHub | workbench + issue detail |
+| Files rail under 900 px of column | a 240 px column at every width | a 180-high band above the diff |
 
 ## 2. Decisions
 
@@ -90,6 +93,21 @@ replaced the whole detail pane with the pull request and had no list beside it.
   required before merging" — the design's "completion control stays disabled
   until they are approved" without inventing a reviewer policy of our own.
 
+- **D13 — both tabs are one workbench.** `ItemListView` already served the two
+  tabs; it now draws the split for both, with the detail column picked by the
+  tab (`PullRequestView`/`NewPullView` on one, `IssueDetailView` on the other).
+  The first row is auto-selected only when nothing is selected: the prototype
+  falls back to `pool[0]` on every render, which in the app would be one
+  `gh issue view` per keystroke in the filter.
+- **D14 — one `gh issue view` per selected issue.** The row carries the counts;
+  the detail asks for the words (state, labels, assignees, body, thread) once,
+  on selection, and keeps the answer until another row is picked.
+- **D15 — the rail reads its column, not the pane.** The workbench hands the
+  detail column its width (`pane − 320`, or the pane when stacked), and the
+  Files and Commits rails become a 180-high band above the diff under 900 px.
+  The workbench's column is under that on any window narrower than ~1728 px
+  (`window − rail − list − 320`), so this is the common case, not the edge.
+
 ## 3. What landed
 
 - `warp-station-core/src/github.rs`: `GitHubFilePatch`, `GitHubCommit`,
@@ -118,17 +136,70 @@ replaced the whole detail pane with the pull request and had no list beside it.
   `CompareCommit` in the model.
 - `WARP_STATION_NEW_PULL=1`, a capture hook for the form, documented beside the
   other hooks.
+- `warp-station-core/src/github.rs`: `GitHubIssue` with `issue_view` and its
+  parser (`state,author,labels,assignees,createdAt,updatedAt,body,comments`),
+  and two tests for the shape and for a bare payload.
+- `ui/issue_detail.rs`: `IssueDetailView` — title row with Back and the one
+  filled primary, the subtitle, the `base` status strip, the description card
+  and the comment thread.
+- `ui/pr_issues.rs`: one workbench for both tabs, `render_issue_row`, the issue
+  selection's Escape/Open-Closed handling; the old full-width issue list and its
+  row shape are gone.
+- `ui/pull_request.rs`: `column_width`, and the Files and Commits rails drawn as
+  a band under 900 px of column.
+- `net.rs` / `store/mod.rs`: `GitHubIssue` + `GitHubIssueLoaded`, `OpenIssue`,
+  `open_issue`, `close_issue`, `reload_open_issue`.
+- `tests/split_probe.rs`: three probes — the Issues workbench and its lazy ask,
+  the narrow issue pane's Back, and the rail stacking at 1920 px and 1500 px.
 
 ## 4. Open work
 
-1. **Azure pull requests.** `azure.rs` has list items only — no policies,
-   reviewers, threads or merge. The design wants them in the same pane; that is
-   a second client, not a port. The list, the source tag and the row reference
-   (`!214`) are also still GitHub-only here.
-2. **Issues and Pipelines workbench.** The design gives all four tabs the same
-   split; only Pull requests has it after this pass.
-3. **The Files rail on a narrow PR column.** The design stacks the rail above the
-   diff under 900 px; the workbench's PR column is under that on a 1500 px
-   window and the rail stays beside the diff.
-4. Delete this plan when 1–3 land, or fold the durable parts into
+1. **Azure pull requests — reported, not built.** The design wants an Azure
+   pull request in the same pane, and the app cannot reach one: the Pull
+   requests list carries GitHub rows only, so nothing selects an Azure PR. The
+   union list (the `!214` reference and the `Source` tag) belongs to
+   `plans/azure-github-activity-merge.md`, which is another session's untracked
+   work; this plan does not own it and does not implement it.
+
+   What the client needs once the list exists, per pull request:
+   - **The record:** `GET {base}/{project}/_apis/git/repositories/{repo}/pullrequests/{id}?api-version=7.1`
+     for state (`active`/`completed`/`abandoned`), title, `sourceRefName` →
+     `targetRefName`, `isDraft`, `mergeStatus`, `createdBy`, `creationDate`,
+     `closedDate`, `lastMergeSourceCommit`.
+   - **Policies:** `.../pullrequests/{id}/evaluations?api-version=7.1` for the
+     checklist — required reviewers, build validation, merge conflicts — which
+     is the Azure spelling of the policy card's rows.
+   - **Reviewers:** `.../pullrequests/{id}/reviewers` for the vote
+     (`10` approved, `5` approved with suggestions, `0` no vote, `-5` waiting,
+     `-10` rejected) and the required/optional flag.
+   - **Files and commits:** `.../pullrequests/{id}/iterations` then
+     `.../iterations/{n}/changes` for the changed files, and
+     `.../pullrequests/{id}/commits` for the commit list; Azure returns no patch
+     text with the change list, so a file's diff is a second call per file
+     (`.../items?path=…&includeContent=true` on both sides) or a `git diff`
+     against the fetched refs.
+   - **Threads:** `.../pullrequests/{id}/threads` for comments, each with its
+     `status` (`active`, `fixed`, `wontFix`, `closed`) — the "comments must be
+     resolved" policy row reads from here.
+   - **Verbs:** reviewer vote `PUT .../reviewers/{reviewerId}`;
+     `PATCH .../pullrequests/{id}` with `status: "completed"` +
+     `lastMergeSourceCommit` + `completionOptions` to complete,
+     `status: "abandoned"` to abandon, `status: "active"` to reopen; and
+     `PUT .../pullrequests/{id}/autocomplete` to arm auto-complete. Approve and
+     decline are votes, not `gh pr review`.
+   - **The pane:** the design's Azure primary is `Set auto-complete` /
+     `Complete` / `Auto-complete set`, the state pill reads Active/Completed/
+     Abandoned, and the review menu is Approve/Decline rather than
+     Approve/Request changes. Everything else — the workbench, the strip, the
+     cards — is the GitHub view's shape with a second data source behind it.
+
+2. **Pipelines — reported, not built.** Its design detail (stages with job rows,
+   a log excerpt, the run's trigger and duration, one `Open run` primary) needs
+   data neither snapshot carries: the Azure snapshot has runs but no stages,
+   jobs or logs, and the GitHub snapshot has no Actions runs at all — `gh run
+   list` is a different plan's work (`plans/azure-github-activity-merge.md`,
+   D2). Until that lands, the tab keeps the shape it has rather than a detail
+   that would be empty.
+
+3. Delete this plan when 1–2 land, or fold the durable parts into
    `apps/warp-station/AGENTS.md`.

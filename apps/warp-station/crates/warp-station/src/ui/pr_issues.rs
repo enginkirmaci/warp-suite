@@ -1,14 +1,15 @@
 //! The detail pane's Pull requests and Issues tabs. Both open on a toolbar with
-//! Open and Closed and the New verb. Pull requests is the design's workbench: a
-//! 320 work list beside the selected pull request, or — below 900 px of pane —
-//! one at a time with Back. Issues is still one full-width list, with its
-//! filter field and Sort menu; a pull request row opens in the pane, and an
-//! issue row opens on GitHub.
+//! Open and Closed and the New verb, and both are the design's workbench: a 320
+//! work list beside the selected item, or — below 900 px of pane — one at a
+//! time with Back. The detail column is the pull request (or the form being
+//! written) on one tab and the issue on the other; Issues keeps its filter and
+//! Sort over the list.
 
 use crate::store::Store;
 use crate::theme;
 use crate::ui::A11y;
 use crate::ui::icon;
+use crate::ui::issue_detail::IssueDetailView;
 use crate::ui::new_pull::NewPullView;
 use crate::ui::pull_request::PullRequestView;
 use crate::ui::repos::{segment, segment_row};
@@ -18,8 +19,6 @@ use gpui_kit::component::input::{InputEvent, InputState};
 use warp_station_core::github::{GitHubItem, IssueSort};
 use warpui_kit_core::shell;
 
-/// The rows' measure, as the design caps a list inside the detail pane.
-const LIST_WIDTH: f32 = 920.;
 /// The workbench's list column, and the pane width under which it and the
 /// pull request stop sharing the pane.
 const WORK_LIST: f32 = 320.;
@@ -32,6 +31,8 @@ pub struct ItemListView {
     pull: Entity<PullRequestView>,
     /// The form that replaces it while a pull request is being written.
     new_pull: Entity<NewPullView>,
+    /// The issue the Issues tab's workbench shows beside the list.
+    issue_detail: Entity<IssueDetailView>,
     filter: Entity<InputState>,
     query: String,
     /// The filter resets when the view changes.
@@ -47,6 +48,7 @@ impl ItemListView {
         store: Entity<Store>,
         pull: Entity<PullRequestView>,
         new_pull: Entity<NewPullView>,
+        issue_detail: Entity<IssueDetailView>,
         pull_requests: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -65,6 +67,7 @@ impl ItemListView {
             pull_requests,
             pull,
             new_pull,
+            issue_detail,
             filter,
             query: String::new(),
             folder: None,
@@ -96,6 +99,9 @@ impl ItemListView {
                     .update(cx, |store, cx| store.close_pull_request(cx));
                 return true;
             }
+        } else if self.issue_detail.read(cx).stacked && self.store.read(cx).open_issue.is_some() {
+            self.store.update(cx, |store, cx| store.close_issue(cx));
+            return true;
         }
         if self.sort_open {
             self.sort_open = false;
@@ -115,12 +121,14 @@ impl ItemListView {
         self.sort_open = false;
         // the filter belongs to the view it was typed in, not to the tab
         self.clear_filter = !self.query.is_empty();
-        // the selected pull request belongs to the list it came from
+        // the selected item belongs to the list it came from
         if self.pull_requests {
             self.store.update(cx, |store, cx| {
                 store.close_new_pull(cx);
                 store.close_pull_request(cx);
             });
+        } else {
+            self.store.update(cx, |store, cx| store.close_issue(cx));
         }
         if closed {
             let pull_requests = self.pull_requests;
@@ -455,11 +463,6 @@ impl Render for ItemListView {
         );
         let menu = (self.sort_open && controls).then(|| self.render_sort_menu(sort, cx));
 
-        let list_id = if self.pull_requests {
-            "pr-list"
-        } else {
-            "issue-list"
-        };
         let state = if self.closed { "closed" } else { "open" };
         let repo_name = self
             .store
@@ -522,23 +525,8 @@ impl Render for ItemListView {
         } else if items.is_empty() {
             let query = self.filter.read(cx).value().trim().to_string();
             no_match(&query, cx)
-        } else if self.pull_requests {
-            self.render_workbench(&items, cx)
         } else {
-            let mut list = div().max_w(px(LIST_WIDTH)).flex().flex_col();
-            for item in &items {
-                list = list.child(self.render_row(item, cx));
-            }
-            div()
-                .id(list_id)
-                .debug_selector(move || list_id.into())
-                .flex_1()
-                .min_h_0()
-                .overflow_y_scroll()
-                .px(px(shell::DETAIL_PADDING - 8.))
-                .py_2()
-                .child(list)
-                .into_any_element()
+            self.render_workbench(&items, cx)
         };
 
         div()
@@ -556,14 +544,22 @@ impl Render for ItemListView {
 
 impl ItemListView {
     /// The design's workbench: the 320 work list, a hairline, and the selected
-    /// pull request. Below 900 px of pane the two take turns and Back returns
-    /// to the list.
+    /// item's detail. Below 900 px of pane the two take turns and Back returns
+    /// to the list. The detail column is the pull request (or the form being
+    /// written) on the Pull requests tab and the issue on the Issues tab.
     fn render_workbench(
         &mut self,
         items: &[GitHubItem],
         cx: &mut Context<Self>,
     ) -> gpui::AnyElement {
-        let stacked = self.store.read(cx).pane_width < STACKED_PANE;
+        let pane_width = self.store.read(cx).pane_width;
+        let stacked = pane_width < STACKED_PANE;
+        // the detail column's own width: the rail-stacking rules read it
+        let column_width = if stacked {
+            pane_width
+        } else {
+            pane_width - WORK_LIST
+        };
         // E2E hook: WARP_STATION_NEW_PULL=1 opens the form once, for a capture
         if self
             .store
@@ -572,30 +568,76 @@ impl ItemListView {
             self.store.update(cx, |store, cx| store.open_new_pull(cx));
         }
         let writing = self.store.read(cx).new_pull.is_some();
+        let selected = if self.pull_requests {
+            self.store
+                .read(cx)
+                .open_pull
+                .as_ref()
+                .map(|open| open.item.number)
+        } else {
+            self.store
+                .read(cx)
+                .open_issue
+                .as_ref()
+                .map(|open| open.item.number)
+        };
         // the first visible row is the selection where both columns show, but
         // never over the form that is already being written
-        if !stacked && !writing && self.store.read(cx).open_pull.is_none() {
+        if !stacked && !writing && selected.is_none() {
             let first = items[0].clone();
-            self.store
-                .update(cx, |store, cx| store.open_pull_request(first, cx));
+            if self.pull_requests {
+                self.store
+                    .update(cx, |store, cx| store.open_pull_request(first, cx));
+            } else {
+                self.store
+                    .update(cx, |store, cx| store.open_issue(first, cx));
+            }
         }
-        self.pull.update(cx, |view, _| view.stacked = stacked);
+        let selected = if self.pull_requests {
+            self.store
+                .read(cx)
+                .open_pull
+                .as_ref()
+                .map(|open| open.item.number)
+        } else {
+            self.store
+                .read(cx)
+                .open_issue
+                .as_ref()
+                .map(|open| open.item.number)
+        };
+        self.pull.update(cx, |view, _| {
+            view.stacked = stacked;
+            view.column_width = column_width;
+        });
         self.new_pull.update(cx, |view, _| view.stacked = stacked);
-        let selected = self
-            .store
-            .read(cx)
-            .open_pull
-            .as_ref()
-            .map(|open| open.item.number);
+        self.issue_detail
+            .update(cx, |view, _| view.stacked = stacked);
 
         let mut rows = div().flex().flex_col();
         for item in items {
-            rows = rows.child(self.render_pr_row(item, selected == Some(item.number)));
+            rows = rows.child(if self.pull_requests {
+                self.render_pr_row(item, selected == Some(item.number))
+                    .into_any_element()
+            } else {
+                self.render_issue_row(item, selected == Some(item.number))
+                    .into_any_element()
+            });
         }
         let label = if self.closed { "Closed" } else { "Open" };
+        let list_selector = if self.pull_requests {
+            "pr-list"
+        } else {
+            "issue-list"
+        };
+        let column_selector = if self.pull_requests {
+            "pr-list-column"
+        } else {
+            "issue-list-column"
+        };
         let list = div()
-            .id("pr-list-column")
-            .debug_selector(|| "pr-list-column".into())
+            .id(column_selector)
+            .debug_selector(move || column_selector.into())
             .w(px(WORK_LIST))
             .flex_shrink_0()
             .h_full()
@@ -622,25 +664,28 @@ impl ItemListView {
             )
             .child(
                 div()
-                    .id("pr-list")
-                    .debug_selector(|| "pr-list".into())
+                    .id(list_selector)
+                    .debug_selector(move || list_selector.into())
                     .flex_1()
                     .min_h_0()
                     .overflow_y_scroll()
                     .child(rows),
             );
 
-        let detail = div()
-            .flex_1()
-            .min_w_0()
-            .h_full()
-            .flex()
-            .flex_col()
-            .child(if writing {
-                self.new_pull.clone().into_any_element()
-            } else {
-                self.pull.clone().into_any_element()
-            });
+        let detail =
+            div()
+                .flex_1()
+                .min_w_0()
+                .h_full()
+                .flex()
+                .flex_col()
+                .child(if !self.pull_requests {
+                    self.issue_detail.clone().into_any_element()
+                } else if writing {
+                    self.new_pull.clone().into_any_element()
+                } else {
+                    self.pull.clone().into_any_element()
+                });
         if stacked {
             if writing || selected.is_some() {
                 div()
@@ -669,6 +714,114 @@ impl ItemListView {
                 .child(detail)
                 .into_any_element()
         }
+    }
+
+    /// An issue row: 58 high, the reference and title, then its labels and
+    /// comment count, with the age on the right. The selected row takes
+    /// `raised` and the 3 px accent edge.
+    fn render_issue_row(&self, item: &GitHubItem, selected: bool) -> impl IntoElement + use<> {
+        let closed = self.closed;
+        let target = item.clone();
+        let store = self.store.clone();
+        let age = item
+            .updated_at
+            .as_deref()
+            .and_then(warp_station_core::rel_time::format_rfc3339);
+        let selector = format!("Issue-{}", item.number);
+        let mut meta = div()
+            .flex()
+            .items_center()
+            .gap_1p5()
+            .min_w_0()
+            .overflow_hidden()
+            .whitespace_nowrap()
+            .text_size(px(theme::font_meta()))
+            .text_color(theme::text_muted());
+        if !item.labels.is_empty() {
+            meta = meta.child(
+                div()
+                    .min_w_0()
+                    .overflow_hidden()
+                    .text_ellipsis()
+                    .child(item.labels.join(" · ")),
+            );
+            meta = meta.child("·");
+        }
+        meta = meta
+            .child(format!(
+                "{} comment{}",
+                item.comments,
+                if item.comments == 1 { "" } else { "s" }
+            ))
+            .child("·")
+            .child(source_tag());
+
+        div().border_t_1().border_color(theme::row_line()).child(
+            div()
+                .id(SharedString::from(selector.clone()))
+                .debug_selector(move || selector.clone())
+                .a11y_button(format!("#{} {}", item.number, item.title))
+                .cursor_pointer()
+                .flex()
+                .items_center()
+                .gap_2p5()
+                .min_h(px(58.))
+                .pl(px(13.))
+                .pr_2p5()
+                .py_2()
+                .border_l(px(3.))
+                .border_color(if selected {
+                    gpui::Hsla::from(theme::accent())
+                } else {
+                    gpui::transparent_black()
+                })
+                .when(selected, |d| d.bg(theme::raised()))
+                .hover(|d| d.bg(theme::panel()))
+                .on_click(move |_, _, cx| {
+                    let item = target.clone();
+                    store.update(cx, |s, cx| s.open_issue(item, cx));
+                })
+                .child(icon(
+                    "icons/icon-issue.svg",
+                    px(theme::icon_medium()),
+                    if closed {
+                        theme::text_muted()
+                    } else {
+                        theme::ISSUE
+                    },
+                ))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .flex()
+                        .flex_col()
+                        .gap_0p5()
+                        .child(
+                            div()
+                                .min_w_0()
+                                .overflow_hidden()
+                                .whitespace_nowrap()
+                                .text_ellipsis()
+                                .text_size(px(theme::font_name()))
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .text_color(if closed {
+                                    theme::text_dim()
+                                } else {
+                                    theme::text()
+                                })
+                                .child(format!("#{} {}", item.number, item.title)),
+                        )
+                        .child(meta),
+                )
+                .children(age.map(|age| {
+                    div()
+                        .flex_shrink_0()
+                        .text_size(px(theme::font_meta()))
+                        .text_color(theme::text_muted())
+                        .child(age)
+                })),
+        )
     }
 
     /// A pull request row: 58 high, the reference and title, then head → base,
@@ -786,155 +939,6 @@ impl ItemListView {
                 })),
         )
     }
-
-    fn render_row(&self, item: &GitHubItem, cx: &mut Context<Self>) -> impl IntoElement + use<> {
-        let closed = self.closed;
-        let opens_here = item.is_pull_request && !closed;
-        let target = item.clone();
-        let url = item.url.clone();
-        let store = self.store.clone();
-        let kind = if item.is_pull_request { "PR" } else { "Issue" };
-        let glyph_color = match (closed, item.is_pull_request) {
-            (true, _) => theme::text_muted(),
-            (false, true) => theme::PR,
-            (false, false) => theme::ISSUE,
-        };
-        let age = item
-            .updated_at
-            .as_deref()
-            .and_then(warp_station_core::rel_time::format_rfc3339);
-
-        let mut second_line = div()
-            .flex()
-            .flex_row()
-            .items_center()
-            .gap_1p5()
-            .min_w_0()
-            .overflow_hidden()
-            .whitespace_nowrap()
-            .text_size(px(theme::font_meta()))
-            .text_color(theme::text_muted());
-        if item.is_pull_request {
-            let head = item.head_ref_name.clone().unwrap_or_default();
-            let base = item.base_ref_name.clone().unwrap_or_default();
-            if !head.is_empty() {
-                second_line = second_line.child(
-                    div()
-                        .font_family(gpui::SharedString::from(theme::code_font()))
-                        .text_size(px(theme::font_mono_meta()))
-                        .child(format!("{head} → {base}")),
-                );
-            }
-        }
-        for label in &item.labels {
-            second_line = second_line.child(
-                div()
-                    .rounded(px(4.))
-                    .bg(theme::raised())
-                    .px_1p5()
-                    .text_color(theme::text_dim())
-                    .child(label.clone()),
-            );
-        }
-        if !item.is_pull_request {
-            let word = if item.comments == 1 {
-                "comment"
-            } else {
-                "comments"
-            };
-            second_line = second_line.child(format!("{} {word}", item.comments));
-        }
-
-        let mut right = div()
-            .flex()
-            .flex_row()
-            .items_center()
-            .gap_2()
-            .flex_shrink_0()
-            .text_size(px(theme::font_meta()))
-            .text_color(theme::text_muted())
-            .child(item.author.clone().unwrap_or_else(|| "ghost".into()))
-            .children(age);
-        if item.is_draft {
-            right = right.child(pill("Draft", theme::text_muted()));
-        } else if item.is_pull_request && !closed {
-            right = right.child(match item.review_decision.as_deref() {
-                Some("APPROVED") => pill("Approved", theme::SUCCESS_BRIGHT),
-                Some("CHANGES_REQUESTED") => pill("Changes requested", theme::DANGER),
-                _ => pill("Review", theme::PR),
-            });
-        }
-
-        let selector = format!("{kind}-{}", item.number);
-        div()
-            .id(SharedString::from(selector.clone()))
-            .debug_selector(move || selector.clone())
-            .a11y_button(format!(
-                "{} #{} {} — {}",
-                kind,
-                item.number,
-                item.title,
-                item.author.clone().unwrap_or_else(|| "ghost".into())
-            ))
-            .cursor_pointer()
-            .flex()
-            .flex_row()
-            .items_center()
-            .gap_3()
-            .rounded(px(6.))
-            .px_2()
-            .py_2p5()
-            .hover(|s| s.bg(theme::raised()))
-            .on_click(cx.listener(move |_, _, _, cx| {
-                if opens_here {
-                    let item = target.clone();
-                    store.update(cx, |s, cx| s.open_pull_request(item, cx));
-                } else if !url.is_empty() {
-                    let _ = warp_station_core::terminal::open_folder(&url);
-                }
-            }))
-            .child(icon(
-                if item.is_pull_request {
-                    "icons/icon-git-pull-request.svg"
-                } else {
-                    "icons/icon-issue.svg"
-                },
-                px(theme::icon_medium()),
-                glyph_color,
-            ))
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .flex()
-                    .flex_col()
-                    .gap_0p5()
-                    .child(
-                        div()
-                            .min_w_0()
-                            .text_size(px(theme::font_name()))
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(theme::text())
-                            .overflow_hidden()
-                            .whitespace_nowrap()
-                            .text_ellipsis()
-                            .child(format!("#{} {}", item.number, item.title)),
-                    )
-                    .child(second_line),
-            )
-            .child(right)
-    }
-}
-
-fn pill(label: &'static str, color: gpui::Rgba) -> impl IntoElement + use<> {
-    div()
-        .rounded_full()
-        .bg(theme::tint(color))
-        .px_2()
-        .py_0p5()
-        .text_size(px(theme::font_meta()))
-        .text_color(color)
-        .child(label)
 }
 
 /// The quiet source tag the merged lists carry: it says where the row will

@@ -134,6 +134,8 @@ pub struct Store {
         std::collections::HashMap<(String, bool), Arc<Vec<warp_station_core::github::GitHubItem>>>,
     /// The pull request taking over the detail pane.
     pub open_pull: Option<OpenPull>,
+    /// The issue selected in the Issues tab's workbench.
+    pub open_issue: Option<OpenIssue>,
     /// The selected pull request's patch, cut per file, by number. `Some(None)`
     /// is a call that failed — the Files tab offers Retry instead of spinning.
     pub pull_diff:
@@ -382,6 +384,7 @@ impl Store {
             github_details: None,
             github_closed: std::collections::HashMap::new(),
             open_pull: None,
+            open_issue: None,
             pull_diff: std::collections::HashMap::new(),
             pull_diff_requested: std::collections::HashSet::new(),
             pull_commit_files: std::collections::HashMap::new(),
@@ -987,6 +990,23 @@ impl Store {
                         self.notify_error(format!("Could not merge #{number}"));
                     }
                     Err(err) => self.notify_error(err),
+                }
+                cx.notify();
+            }
+            UiEvent::GitHubIssueLoaded {
+                folder,
+                number,
+                issue,
+            } => {
+                if let Some(open) = self
+                    .open_issue
+                    .as_mut()
+                    .filter(|open| open.folder == folder && open.item.number == number)
+                {
+                    open.failed = issue.is_none();
+                    if let Some(issue) = issue {
+                        open.issue = Some(*issue);
+                    }
                 }
                 cx.notify();
             }
@@ -2461,6 +2481,51 @@ impl Store {
         cx.notify();
     }
 
+    /// Turns the Issues tab's detail column into `item`, a row of the list. The
+    /// row's own fields carry the head until the full view answers.
+    pub fn open_issue(
+        &mut self,
+        item: warp_station_core::github::GitHubItem,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(folder) = self.selected_repo.clone() else {
+            return;
+        };
+        // the issue is the Issues tab's detail, so the tab comes with it
+        if self.detail_tab != WorkspaceTab::Issues {
+            self.open_detail_tab(WorkspaceTab::Issues, cx);
+        }
+        self.open_issue = Some(OpenIssue {
+            folder,
+            item,
+            issue: None,
+            failed: false,
+        });
+        self.reload_open_issue();
+        cx.notify();
+    }
+
+    fn reload_open_issue(&mut self) {
+        let Some(open) = &self.open_issue else { return };
+        let number = open.item.number;
+        if let Some(gh_exe) = self.gh_exe() {
+            let _ = self.net.send_blocking(NetCommand::GitHubIssue {
+                folder: std::path::PathBuf::from(&open.folder),
+                gh_exe,
+                number,
+            });
+        }
+    }
+
+    /// Back, or Escape, on the Issues tab. Returns whether an issue was open.
+    pub fn close_issue(&mut self, cx: &mut Context<Self>) -> bool {
+        let open = self.open_issue.take().is_some();
+        if open {
+            cx.notify();
+        }
+        open
+    }
+
     fn reload_open_pull(&mut self) {
         let Some(open) = &self.open_pull else { return };
         let number = open.item.number;
@@ -3089,6 +3154,7 @@ impl Store {
         self.commit_file_patch = None;
         self.github_details = None;
         self.open_pull = None;
+        self.open_issue = None;
         self.pull_diff.clear();
         self.pull_diff_requested.clear();
         self.pull_commit_files.clear();
@@ -3669,6 +3735,16 @@ pub struct OpenPull {
     pub failed: bool,
     pub merging: bool,
     pub merge_armed: bool,
+}
+
+/// An issue selected in the Issues tab. It stays on `item`, the list's row,
+/// until `issue`, the full view, answers.
+#[derive(Clone, Debug)]
+pub struct OpenIssue {
+    pub folder: String,
+    pub item: warp_station_core::github::GitHubItem,
+    pub issue: Option<warp_station_core::github::GitHubIssue>,
+    pub failed: bool,
 }
 
 /// The New pull request form: the two branches it would compare and open

@@ -6,6 +6,7 @@ use crate::store::{Store, WorkspaceTab};
 use crate::theme;
 use crate::ui::azure_tab::AzureView;
 use crate::ui::changes::ChangesView;
+use crate::ui::issue_detail::IssueDetailView;
 use crate::ui::launchers;
 use crate::ui::new_pull::NewPullView;
 use crate::ui::overview::{self, HeadState, RepoMenu};
@@ -33,6 +34,7 @@ impl DetailViews {
     pub fn new(store: &Entity<Store>, window: &mut Window, cx: &mut Context<ReposPage>) -> Self {
         let pull = cx.new(|cx| PullRequestView::new(store.clone(), window, cx));
         let new_pull = cx.new(|cx| NewPullView::new(store.clone(), window, cx));
+        let issue_detail = cx.new(|cx| IssueDetailView::new(store.clone(), cx));
         Self {
             changes: cx.new(|cx| ChangesView::new(store.clone(), window, cx)),
             pulls: cx.new(|cx| {
@@ -40,13 +42,22 @@ impl DetailViews {
                     store.clone(),
                     pull.clone(),
                     new_pull.clone(),
+                    issue_detail.clone(),
                     true,
                     window,
                     cx,
                 )
             }),
             issues: cx.new(|cx| {
-                ItemListView::new(store.clone(), pull.clone(), new_pull, false, window, cx)
+                ItemListView::new(
+                    store.clone(),
+                    pull.clone(),
+                    new_pull,
+                    issue_detail,
+                    false,
+                    window,
+                    cx,
+                )
             }),
             pipelines: cx.new(|_| AzureView {
                 store: store.clone(),

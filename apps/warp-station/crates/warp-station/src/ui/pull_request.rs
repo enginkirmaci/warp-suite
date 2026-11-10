@@ -28,6 +28,10 @@ use warpui_kit_diff::{DiffScrollHandles, render_diff_with_scroll};
 const STRIP_HEIGHT: f32 = 44.;
 /// The Files tab's rail and the Commits tab's list, from the prototype.
 const FILE_RAIL: f32 = 240.;
+/// The band the rail becomes when its column is narrow, and the column width
+/// under which the design stacks it above the diff.
+const RAIL_BAND: f32 = 180.;
+const STACKED_COLUMN: f32 = 900.;
 const COMMIT_LIST: f32 = 220.;
 const COMMIT_RAIL: f32 = 200.;
 /// The reading column the description and the comments keep inside the tab.
@@ -86,6 +90,9 @@ pub struct PullRequestView {
     showing: Option<u64>,
     /// The view is the whole detail pane: the workbench's list is not beside it.
     pub stacked: bool,
+    /// The detail column's own width, set by the workbench. The Files and
+    /// Commits rails stack above the diff under 900 px of it.
+    pub column_width: f32,
 }
 
 impl PullRequestView {
@@ -113,6 +120,7 @@ impl PullRequestView {
             comment,
             showing: None,
             stacked: false,
+            column_width: f32::MAX,
         }
     }
 
@@ -769,33 +777,24 @@ impl PullRequestView {
         let ix = self.file_ix.min(files.len().saturating_sub(1));
         let file = files[ix];
 
-        let mut rail = div()
-            .flex_shrink_0()
-            .w(px(FILE_RAIL))
-            .h_full()
-            .flex()
-            .flex_col()
-            .border_r_1()
-            .border_color(theme::hairline())
-            .bg(theme::surface())
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    .h(px(34.))
-                    .px(px(16.))
-                    .text_size(px(theme::font_meta()))
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .text_color(theme::text_dim())
-                    .child("Files")
-                    .child(
-                        div()
-                            .font_weight(FontWeight::MEDIUM)
-                            .text_color(theme::text_muted())
-                            .child(format!("{}", files.len())),
-                    ),
-            );
+        let mut rail = div().flex().flex_col().child(
+            div()
+                .flex()
+                .items_center()
+                .gap_2()
+                .h(px(34.))
+                .px(px(16.))
+                .text_size(px(theme::font_meta()))
+                .font_weight(FontWeight::SEMIBOLD)
+                .text_color(theme::text_dim())
+                .child("Files")
+                .child(
+                    div()
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(theme::text_muted())
+                        .child(format!("{}", files.len())),
+                ),
+        );
         let mut rows = div()
             .id("pull-files")
             .debug_selector(|| "pull-files".into())
@@ -887,6 +886,33 @@ impl PullRequestView {
             );
         }
         rail = rail.child(rows);
+        // the design stacks the rail above the diff when its column is narrow,
+        // because 240 px beside a 400 px diff leaves neither readable
+        let narrow = self.column_width < STACKED_COLUMN;
+        let rail = if narrow {
+            div()
+                .debug_selector(|| "pull-files-band".into())
+                .flex_shrink_0()
+                .w_full()
+                .h(px(RAIL_BAND))
+                .flex()
+                .flex_col()
+                .border_b_1()
+                .border_color(theme::hairline())
+                .bg(theme::surface())
+                .child(rail)
+        } else {
+            div()
+                .flex_shrink_0()
+                .w(px(FILE_RAIL))
+                .h_full()
+                .flex()
+                .flex_col()
+                .border_r_1()
+                .border_color(theme::hairline())
+                .bg(theme::surface())
+                .child(rail)
+        };
 
         let patch = file.patch.as_str();
         let has_patch = patch.contains("\n@@");
@@ -951,61 +977,57 @@ impl PullRequestView {
             show_tooltips,
         );
 
-        div()
+        let diff_column = div()
             .flex_1()
-            .min_h_0()
             .min_w_0()
+            .h_full()
             .flex()
-            .flex_row()
-            .child(rail)
+            .flex_col()
+            .bg(theme::well())
             .child(
                 div()
-                    .flex_1()
-                    .min_w_0()
-                    .h_full()
+                    .flex_shrink_0()
+                    .h(px(44.))
+                    .px_4()
                     .flex()
-                    .flex_col()
-                    .bg(theme::well())
+                    .items_center()
+                    .justify_between()
+                    .gap_3()
+                    .bg(theme::panel())
+                    .border_b_1()
+                    .border_color(theme::hairline())
                     .child(
                         div()
-                            .flex_shrink_0()
-                            .h(px(44.))
-                            .px_4()
+                            .flex_1()
+                            .min_w_0()
+                            .overflow_hidden()
+                            .whitespace_nowrap()
+                            .text_ellipsis()
+                            .font_family(theme::code_font())
+                            .text_size(px(theme::font_mono_meta()))
+                            .text_color(theme::text())
+                            .child(file.path.clone()),
+                    )
+                    .child(
+                        div()
                             .flex()
                             .items_center()
-                            .justify_between()
-                            .gap_3()
-                            .bg(theme::panel())
-                            .border_b_1()
-                            .border_color(theme::hairline())
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .min_w_0()
-                                    .overflow_hidden()
-                                    .whitespace_nowrap()
-                                    .text_ellipsis()
-                                    .font_family(theme::code_font())
-                                    .text_size(px(theme::font_mono_meta()))
-                                    .text_color(theme::text())
-                                    .child(file.path.clone()),
-                            )
-                            .child(
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .gap_1()
-                                    .child(controls)
-                                    .child(view_toggle),
-                            ),
-                    )
-                    .child(body)
-                    .children(
-                        (has_patch && !self.diff_wrap)
-                            .then(|| diff_controls::scrollbars("pull", &self.diff_scroll, split)),
+                            .gap_1()
+                            .child(controls)
+                            .child(view_toggle),
                     ),
             )
-            .into_any_element()
+            .child(body)
+            .children(
+                (has_patch && !self.diff_wrap)
+                    .then(|| diff_controls::scrollbars("pull", &self.diff_scroll, split)),
+            );
+        let layout = if narrow {
+            div().flex_1().min_h_0().min_w_0().flex().flex_col()
+        } else {
+            div().flex_1().min_h_0().min_w_0().flex().flex_row()
+        };
+        layout.child(rail).child(diff_column).into_any_element()
     }
 
     // ---- Commits ----------------------------------------------------------
@@ -1253,33 +1275,24 @@ impl PullRequestView {
                 .into_any_element();
         }
 
-        let mut rail = div()
-            .flex_shrink_0()
-            .w(px(COMMIT_RAIL))
-            .h_full()
-            .flex()
-            .flex_col()
-            .border_r_1()
-            .border_color(theme::hairline())
-            .bg(theme::surface())
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    .h(px(34.))
-                    .px(px(13.))
-                    .text_size(px(theme::font_meta()))
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .text_color(theme::text_dim())
-                    .child("Files")
-                    .child(
-                        div()
-                            .font_weight(FontWeight::MEDIUM)
-                            .text_color(theme::text_muted())
-                            .child(format!("{}", file_list.len())),
-                    ),
-            );
+        let mut rail = div().flex().flex_col().child(
+            div()
+                .flex()
+                .items_center()
+                .gap_2()
+                .h(px(34.))
+                .px(px(13.))
+                .text_size(px(theme::font_meta()))
+                .font_weight(FontWeight::SEMIBOLD)
+                .text_color(theme::text_dim())
+                .child("Files")
+                .child(
+                    div()
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(theme::text_muted())
+                        .child(format!("{}", file_list.len())),
+                ),
+        );
         let mut rows = div()
             .id("pull-commit-files")
             .debug_selector(|| "pull-commit-files".into())
@@ -1451,15 +1464,37 @@ impl PullRequestView {
                     .then(|| diff_controls::scrollbars("pull-commit", &self.commit_scroll, split)),
             );
 
-        detail = detail.child(
+        let narrow = self.column_width < STACKED_COLUMN;
+        let rail = if narrow {
             div()
-                .flex_1()
-                .min_h_0()
+                .debug_selector(|| "pull-commit-files-band".into())
+                .flex_shrink_0()
+                .w_full()
+                .h(px(RAIL_BAND))
                 .flex()
-                .flex_row()
+                .flex_col()
+                .border_b_1()
+                .border_color(theme::hairline())
+                .bg(theme::surface())
                 .child(rail)
-                .child(diff_column),
-        );
+        } else {
+            div()
+                .flex_shrink_0()
+                .w(px(COMMIT_RAIL))
+                .h_full()
+                .flex()
+                .flex_col()
+                .border_r_1()
+                .border_color(theme::hairline())
+                .bg(theme::surface())
+                .child(rail)
+        };
+        let inner = if narrow {
+            div().flex_1().min_h_0().flex().flex_col()
+        } else {
+            div().flex_1().min_h_0().flex().flex_row()
+        };
+        detail = detail.child(inner.child(rail).child(diff_column));
         div()
             .flex_1()
             .min_h_0()
@@ -2421,7 +2456,7 @@ fn check_row(ix: usize, check: &GitHubCheck) -> AnyElement {
         .into_any_element()
 }
 
-fn comment_card(
+pub(crate) fn comment_card(
     ix: usize,
     author: &str,
     verb: String,
@@ -2678,7 +2713,7 @@ fn selected_commit(open: &OpenPull, index: usize) -> Option<&GitHubCommit> {
 }
 
 /// Initials on a circle: gh hands out no picture the window could draw offline.
-fn avatar(name: &str, size: f32) -> AnyElement {
+pub(crate) fn avatar(name: &str, size: f32) -> AnyElement {
     div()
         .flex_shrink_0()
         .size(px(size))
@@ -2706,7 +2741,7 @@ fn ringed_avatar(name: &str, size: f32) -> AnyElement {
         .into_any_element()
 }
 
-fn initials(name: &str) -> String {
+pub(crate) fn initials(name: &str) -> String {
     name.split(['-', '_', ' '])
         .filter_map(|part| part.chars().next())
         .take(2)

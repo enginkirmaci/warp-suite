@@ -7,6 +7,7 @@ pub mod detail;
 pub mod dialogs;
 pub mod diff_controls;
 pub mod formatters;
+pub mod issue_detail;
 pub mod launchers;
 pub mod markdown;
 pub mod new_pull;

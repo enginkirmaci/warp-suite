@@ -23,6 +23,8 @@ const ITEM_LIMIT: usize = 50;
 const PR_FIELDS: &str = "number,title,url,author,labels,isDraft,headRefName,baseRefName,\
                          reviewDecision,updatedAt,createdAt";
 const ISSUE_FIELDS: &str = "number,title,url,author,labels,updatedAt,createdAt,comments";
+const ISSUE_VIEW_FIELDS: &str = "number,title,url,state,author,labels,assignees,\
+                               createdAt,updatedAt,body,comments";
 const PULL_VIEW_FIELDS: &str = "number,title,url,author,state,isDraft,headRefName,baseRefName,\
                                 additions,deletions,mergeable,mergeStateStatus,reviewDecision,\
                                 updatedAt,createdAt,mergedAt,body,comments,reviews,\
@@ -150,6 +152,35 @@ impl PullAction {
             Self::Close => format!("Closed #{number}"),
             Self::Reopen => format!("Reopened #{number}"),
         }
+    }
+}
+
+/// One issue's full view: `gh issue view` for the Issues tab's detail. The
+/// list row carries the counts; this carries the words.
+#[derive(Clone, Debug, Default)]
+pub struct GitHubIssue {
+    pub number: u64,
+    pub title: String,
+    pub url: String,
+    /// OPEN or CLOSED.
+    pub state: String,
+    pub author: Option<String>,
+    pub labels: Vec<String>,
+    pub assignees: Vec<String>,
+    pub created_at: Option<String>,
+    pub updated_at: Option<String>,
+    pub body: String,
+    pub comments: Vec<GitHubComment>,
+}
+
+impl GitHubIssue {
+    pub fn is_open(&self) -> bool {
+        self.state == "OPEN"
+    }
+
+    /// The word the state pill carries.
+    pub fn state_word(&self) -> &'static str {
+        if self.is_open() { "Open" } else { "Closed" }
     }
 }
 
@@ -477,6 +508,14 @@ pub async fn pull_request(folder: &Path, gh_exe: &str, number: u64) -> Option<Gi
     parse_pull(&json)
 }
 
+/// One issue's full view.
+pub async fn issue_view(folder: &Path, gh_exe: &str, number: u64) -> Option<GitHubIssue> {
+    let number = number.to_string();
+    let args = ["issue", "view", &number, "--json", ISSUE_VIEW_FIELDS];
+    let json = run_gh(gh_exe, folder, &args).await?;
+    parse_issue(&json)
+}
+
 /// The pull request's whole patch, cut into one chunk per file. `None` is a
 /// failed call; an empty patch (no changed files) is an empty list.
 pub async fn pull_diff(folder: &Path, gh_exe: &str, number: u64) -> Option<Vec<GitHubFilePatch>> {
@@ -764,6 +803,60 @@ fn parse_pull(json: &str) -> Option<GitHubPull> {
         auto_merge: v
             .get("autoMergeRequest")
             .is_some_and(|request| !request.is_null()),
+    })
+}
+
+fn parse_issue(json: &str) -> Option<GitHubIssue> {
+    let v = serde_json::from_str::<serde_json::Value>(json).ok()?;
+    let number = v.get("number").and_then(|n| n.as_u64())?;
+    let people = |key: &str| -> Vec<String> {
+        v.get(key)
+            .and_then(|items| items.as_array())
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(|item| {
+                        item.get("login")
+                            .and_then(|login| login.as_str())
+                            .or_else(|| item.get("name").and_then(|name| name.as_str()))
+                            .map(str::to_string)
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    Some(GitHubIssue {
+        number,
+        title: text(&v, "title").unwrap_or_default(),
+        url: text(&v, "url").unwrap_or_default(),
+        state: text(&v, "state").unwrap_or_default(),
+        author: v
+            .pointer("/author/login")
+            .and_then(|a| a.as_str())
+            .map(str::to_string),
+        labels: people("labels"),
+        assignees: people("assignees"),
+        created_at: text(&v, "createdAt"),
+        updated_at: text(&v, "updatedAt"),
+        body: text(&v, "body").unwrap_or_default(),
+        comments: v
+            .get("comments")
+            .and_then(|items| items.as_array())
+            .map(|items| {
+                items
+                    .iter()
+                    .map(|comment| GitHubComment {
+                        author: comment
+                            .pointer("/author/login")
+                            .and_then(|a| a.as_str())
+                            .unwrap_or("ghost")
+                            .to_string(),
+                        created_at: text(comment, "createdAt"),
+                        body: text(comment, "body").unwrap_or_default(),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default(),
     })
 }
 
@@ -1210,6 +1303,49 @@ mod tests {
         assert_eq!(files[2].status, "R");
         assert_eq!(files[1].patch, "@@\n-y\n+z");
         assert!(parse_commit_files("{}").is_none(), "no files key at all");
+    }
+
+    const ISSUE: &str = r#"{
+        "number": 477,
+        "title": "Settings on Wayland",
+        "url": "https://github.com/o/r/issues/477",
+        "state": "OPEN",
+        "author": {"login": "engin"},
+        "labels": [{"name": "bug"}, {"name": "wayland"}],
+        "assignees": [{"login": "mert"}],
+        "createdAt": "2026-10-01T10:00:00Z",
+        "updatedAt": "2026-10-02T10:00:00Z",
+        "body": "What it does",
+        "comments": [
+            {"author": {"login": "mert"}, "createdAt": "2026-10-01T11:00:00Z", "body": "Same here"},
+            {"author": null, "createdAt": "2026-10-01T12:00:00Z", "body": "ghosted"}
+        ]
+    }"#;
+
+    #[test]
+    fn an_issue_reads_its_state_labels_assignees_and_thread() {
+        let issue = parse_issue(ISSUE).expect("an issue");
+
+        assert_eq!(issue.number, 477);
+        assert_eq!(issue.state_word(), "Open");
+        assert_eq!(issue.labels, ["bug", "wayland"]);
+        assert_eq!(issue.assignees, ["mert"]);
+        assert_eq!(issue.comments.len(), 2);
+        assert_eq!(issue.comments[1].author, "ghost");
+        assert_eq!(issue.author.as_deref(), Some("engin"));
+        assert_eq!(issue.body, "What it does");
+    }
+
+    /// gh omits what an issue has none of, and a closed one says so.
+    #[test]
+    fn a_bare_issue_is_still_an_issue() {
+        let issue = parse_issue(r#"{"number": 7, "state": "CLOSED"}"#).expect("an issue");
+
+        assert!(issue.labels.is_empty());
+        assert!(issue.assignees.is_empty());
+        assert!(issue.comments.is_empty());
+        assert!(!issue.is_open());
+        assert_eq!(issue.state_word(), "Closed");
     }
 
     #[test]

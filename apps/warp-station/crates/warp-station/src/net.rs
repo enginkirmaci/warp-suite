@@ -100,6 +100,12 @@ pub enum NetCommand {
         gh_exe: String,
         number: u64,
     },
+    /// One issue's full view, for the Issues tab's detail.
+    GitHubIssue {
+        folder: PathBuf,
+        gh_exe: String,
+        number: u64,
+    },
     /// The pull request's whole patch, cut into one chunk per file.
     GitHubPullDiff {
         folder: PathBuf,
@@ -452,6 +458,11 @@ pub enum UiEvent {
         number: u64,
         result: Result<(), String>,
     },
+    GitHubIssueLoaded {
+        folder: String,
+        number: u64,
+        issue: Option<Box<warp_station_core::github::GitHubIssue>>,
+    },
     GitHubPullDiffLoaded {
         folder: String,
         number: u64,
@@ -794,6 +805,22 @@ fn spawn_read_intake(
                             folder: folder.to_string_lossy().to_string(),
                             number,
                             result,
+                        });
+                    });
+                }
+                NetCommand::GitHubIssue {
+                    folder,
+                    gh_exe,
+                    number,
+                } => {
+                    let evt_tx = evt_tx.clone();
+                    tokio::spawn(async move {
+                        let issue =
+                            warp_station_core::github::issue_view(&folder, &gh_exe, number).await;
+                        let _ = evt_tx.send_blocking(UiEvent::GitHubIssueLoaded {
+                            folder: folder.to_string_lossy().to_string(),
+                            number,
+                            issue: issue.map(Box::new),
                         });
                     });
                 }
@@ -1435,6 +1462,7 @@ async fn net_main(cmd_rx: Receiver<NetCommand>, evt_tx: Sender<UiEvent>) {
             | NetCommand::GitHubClosed { .. }
             | NetCommand::GitHubPull { .. }
             | NetCommand::GitHubMerge { .. }
+            | NetCommand::GitHubIssue { .. }
             | NetCommand::GitHubPullDiff { .. }
             | NetCommand::GitHubPullCommitFiles { .. }
             | NetCommand::GitHubPullAction { .. }

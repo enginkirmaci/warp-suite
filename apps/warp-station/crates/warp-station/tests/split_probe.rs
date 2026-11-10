@@ -1609,6 +1609,16 @@ fn settle(
     draw(cx);
 }
 
+fn sent_issue_asks(net_rx: &async_channel::Receiver<NetCommand>) -> Vec<u64> {
+    let mut numbers = Vec::new();
+    while let Ok(command) = net_rx.try_recv() {
+        if let NetCommand::GitHubIssue { number, .. } = command {
+            numbers.push(number);
+        }
+    }
+    numbers
+}
+
 fn sent_creates(
     net_rx: &async_channel::Receiver<NetCommand>,
 ) -> Vec<warp_station_core::github::NewPullRequest> {
@@ -2111,6 +2121,191 @@ fn the_form_takes_the_narrow_pane(cx: &mut TestAppContext) {
         "Escape leaves the form"
     );
     assert!(cx.debug_bounds("pr-list").is_some());
+}
+
+/// The Issues tab is the same workbench: the 320 list, the selected issue's
+/// detail beside it, one `gh issue view` for the row that is picked.
+#[gpui::test]
+fn the_issue_workbench_shows_the_selected_issue(cx: &mut TestAppContext) {
+    let (store, net_rx) = scratch_store(cx, "issue-bench", vec![entry("alpha", "/probe/alpha")]);
+    seed_github(&store, "/probe/alpha", 0, 2, cx);
+    use_a_located_gh(&store, cx);
+    let cx = open_window(&store, cx);
+    draw(cx);
+    while net_rx.try_recv().is_ok() {}
+    click(cx, "detail-tab-issues");
+
+    assert!(
+        cx.debug_bounds("issue-list-column").is_some(),
+        "the work list"
+    );
+    assert!(cx.debug_bounds("issue-list").is_some());
+    assert!(
+        cx.debug_bounds("issue-detail").is_some(),
+        "the first row is the selection"
+    );
+    assert_eq!(
+        store.read_with(cx, |s, _| s.open_issue.as_ref().map(|o| o.item.number)),
+        Some(100)
+    );
+    assert_eq!(
+        sent_issue_asks(&net_rx),
+        [100],
+        "one gh issue view for the selected row"
+    );
+
+    // the answer fills the detail: description, state strip, thread
+    cx.update_entity(&store, |s: &mut Store, cx| {
+        s.on_net_event(
+            UiEvent::GitHubIssueLoaded {
+                folder: "/probe/alpha".into(),
+                number: 100,
+                issue: Some(Box::new(warp_station_core::github::GitHubIssue {
+                    number: 100,
+                    title: "item 100".into(),
+                    url: "https://example.invalid/100".into(),
+                    state: "OPEN".into(),
+                    author: Some("engin".into()),
+                    labels: vec!["bug".into()],
+                    assignees: vec!["mert".into()],
+                    created_at: None,
+                    updated_at: None,
+                    body: "What it does".into(),
+                    comments: vec![warp_station_core::github::GitHubComment {
+                        author: "mert".into(),
+                        created_at: None,
+                        body: "Same here".into(),
+                    }],
+                })),
+            },
+            cx,
+        );
+    });
+    draw(cx);
+    assert!(cx.debug_bounds("issue-description").is_some());
+    assert!(cx.debug_bounds("issue-status").is_some());
+    assert!(cx.debug_bounds("issue-open").is_some(), "the one primary");
+
+    // a press picks that row, and asks for it
+    click(cx, "Issue-101");
+    assert_eq!(
+        store.read_with(cx, |s, _| s.open_issue.as_ref().map(|o| o.item.number)),
+        Some(101)
+    );
+    assert_eq!(sent_issue_asks(&net_rx), [101]);
+}
+
+/// Below 900 px of pane the Issues tab is one column with Back, like the pull
+/// request's.
+#[gpui::test]
+fn a_narrow_issue_pane_keeps_one_column_and_back(cx: &mut TestAppContext) {
+    let (store, _net_rx) = scratch_store(cx, "issue-narrow", vec![entry("alpha", "/probe/alpha")]);
+    seed_github(&store, "/probe/alpha", 0, 2, cx);
+    let cx = open_window(&store, cx);
+    cx.simulate_resize(gpui::size(gpui::px(1100.), gpui::px(760.)));
+    draw(cx);
+    click(cx, "detail-tab-issues");
+    draw(cx);
+
+    assert!(
+        cx.debug_bounds("issue-list").is_some(),
+        "the list has the tab"
+    );
+    assert!(
+        cx.debug_bounds("issue-detail").is_none(),
+        "nothing is selected in a narrow pane"
+    );
+
+    click(cx, "Issue-100");
+    draw(cx);
+    assert!(cx.debug_bounds("issue-detail").is_some());
+    assert!(
+        cx.debug_bounds("issue-list").is_none(),
+        "the list steps aside"
+    );
+    assert!(
+        cx.debug_bounds("issue-detail-back").is_some(),
+        "Back is here"
+    );
+
+    cx.simulate_keystrokes("escape");
+    draw(cx);
+    assert!(cx.debug_bounds("issue-list").is_some(), "Escape goes back");
+    assert!(cx.debug_bounds("issue-detail").is_none());
+}
+
+/// The Files rail is a column beside the diff on a wide detail, and a band
+/// above it under 900 px of column — the workbench's column is `pane - 320`, so
+/// a 1500 px window is already under it.
+#[gpui::test]
+fn the_files_rail_stacks_under_900(cx: &mut TestAppContext) {
+    let (store, _net_rx) = scratch_store(cx, "rail-stack", vec![entry("alpha", "/probe/alpha")]);
+    seed_github(&store, "/probe/alpha", 1, 0, cx);
+    let cx = open_window(&store, cx);
+    draw(cx);
+    click(cx, "detail-tab-pulls");
+
+    let mut pull = ready_pull(0);
+    pull.files = vec![warp_station_core::github::GitHubFilePatch {
+        path: "src/main.rs".into(),
+        status: "M".into(),
+        additions: 2,
+        deletions: 1,
+        patch: String::new(),
+    }];
+    pull.commits = vec![warp_station_core::github::GitHubCommit {
+        oid: "abc1234def".into(),
+        headline: "Add the thing".into(),
+        author: Some("engin".into()),
+        committed_at: None,
+    }];
+    cx.update_entity(&store, |s: &mut Store, cx| {
+        s.open_pull.as_mut().unwrap().pull = Some(pull);
+        cx.notify();
+    });
+    draw(cx);
+    click(cx, "pull-tab-files");
+
+    // 1920 px: the pane is 1412 and the column 1092, so the rail is a column
+    assert!(cx.debug_bounds("pull-files").is_some());
+    assert!(
+        cx.debug_bounds("pull-files-band").is_none(),
+        "a wide column keeps the rail beside the diff"
+    );
+
+    // 1500 px: the pane is 992 and the column 672, so the rail is a band
+    cx.simulate_resize(gpui::size(gpui::px(1500.), gpui::px(960.)));
+    draw(cx);
+    let band = cx
+        .debug_bounds("pull-files-band")
+        .expect("a narrow column stacks the rail");
+    assert!(
+        band.size.width >= gpui::px(600.),
+        "the band spans the whole 672 px column, not a 240 px rail: {}",
+        band.size.width
+    );
+    assert_eq!(band.size.height, gpui::px(180.), "a bounded band");
+    assert!(
+        cx.debug_bounds("pull-files").is_some(),
+        "its rows still draw"
+    );
+
+    // the commit's inner rail follows the same rule
+    cx.update_entity(&store, |s: &mut Store, cx| {
+        s.pull_commit_files.insert(
+            "abc1234def".into(),
+            Some(vec![warp_station_core::github::GitHubFilePatch {
+                path: "src/main.rs".into(),
+                status: "M".into(),
+                additions: 2,
+                deletions: 1,
+                patch: String::new(),
+            }]),
+        );
+        cx.notify();
+    });
+    click(cx, "pull-tab-commits");
+    assert!(cx.debug_bounds("pull-commit-files-band").is_some());
 }
 
 /// The composer posts what was typed, and a landed comment empties it.
