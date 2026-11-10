@@ -7,9 +7,10 @@ use crate::theme;
 use crate::ui::azure_tab::AzureView;
 use crate::ui::changes::ChangesView;
 use crate::ui::launchers;
+use crate::ui::new_pull::NewPullView;
 use crate::ui::overview::{self, HeadState, RepoMenu};
 use crate::ui::pr_issues::ItemListView;
-use crate::ui::pull_request;
+use crate::ui::pull_request::PullRequestView;
 use crate::ui::readme::ReadmeView;
 use crate::ui::repos::ReposPage;
 use gpui::prelude::*;
@@ -30,10 +31,23 @@ pub struct DetailViews {
 
 impl DetailViews {
     pub fn new(store: &Entity<Store>, window: &mut Window, cx: &mut Context<ReposPage>) -> Self {
+        let pull = cx.new(|cx| PullRequestView::new(store.clone(), window, cx));
+        let new_pull = cx.new(|cx| NewPullView::new(store.clone(), window, cx));
         Self {
             changes: cx.new(|cx| ChangesView::new(store.clone(), window, cx)),
-            pulls: cx.new(|cx| ItemListView::new(store.clone(), true, window, cx)),
-            issues: cx.new(|cx| ItemListView::new(store.clone(), false, window, cx)),
+            pulls: cx.new(|cx| {
+                ItemListView::new(
+                    store.clone(),
+                    pull.clone(),
+                    new_pull.clone(),
+                    true,
+                    window,
+                    cx,
+                )
+            }),
+            issues: cx.new(|cx| {
+                ItemListView::new(store.clone(), pull.clone(), new_pull, false, window, cx)
+            }),
             pipelines: cx.new(|_| AzureView {
                 store: store.clone(),
             }),
@@ -41,7 +55,8 @@ impl DetailViews {
         }
     }
 
-    /// Escape, for whichever list tab is showing: its menu, then its filter.
+    /// Escape, for whichever list tab is showing: its pull request, then its
+    /// menu, then its filter.
     pub fn dismiss_list(&self, tab: WorkspaceTab, cx: &mut App) -> bool {
         let view = match tab {
             WorkspaceTab::PullRequests => &self.pulls,
@@ -86,21 +101,6 @@ pub fn render(
     let Some(repo) = store.selected_entry() else {
         return pane.child(overview::empty_state()).into_any_element();
     };
-
-    if let Some(open) = store.open_pull.as_ref() {
-        let folder = repo.folder_path.to_string_lossy();
-        let tabbed = store.repo_tabs.iter().any(|tab| tab.folder == folder);
-        return pane
-            .child(pull_request::render(
-                repo,
-                open,
-                entities,
-                tabbed,
-                store.active_repo_tab.is_some(),
-                cx,
-            ))
-            .into_any_element();
-    }
 
     let folder = repo.folder_path.to_string_lossy().to_string();
     let settings = store.settings();

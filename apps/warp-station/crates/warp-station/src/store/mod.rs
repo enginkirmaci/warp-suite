@@ -134,6 +134,38 @@ pub struct Store {
         std::collections::HashMap<(String, bool), Arc<Vec<warp_station_core::github::GitHubItem>>>,
     /// The pull request taking over the detail pane.
     pub open_pull: Option<OpenPull>,
+    /// The selected pull request's patch, cut per file, by number. `Some(None)`
+    /// is a call that failed — the Files tab offers Retry instead of spinning.
+    pub pull_diff:
+        std::collections::HashMap<u64, Option<Vec<warp_station_core::github::GitHubFilePatch>>>,
+    /// Numbers whose patch was already asked for (in flight or answered).
+    pull_diff_requested: std::collections::HashSet<u64>,
+    /// One commit's files by SHA, as the Commits tab asks for them.
+    pub pull_commit_files:
+        std::collections::HashMap<String, Option<Vec<warp_station_core::github::GitHubFilePatch>>>,
+    pull_commits_requested: std::collections::HashSet<String>,
+    /// A verb is running: the head's buttons stay dead until it answers.
+    pub pull_acting: bool,
+    /// A comment just landed: the view drains this to empty its composer.
+    pub pull_comment_sent: bool,
+    /// The armed Abandon confirmation: its number and title.
+    pub confirm_abandon: Option<(u64, String)>,
+    /// The New pull request form, when it is open.
+    pub new_pull: Option<NewPullForm>,
+    /// The form's branch preview, keyed by (base, head). `Some(None)` is a
+    /// compare that found nothing to say — a branch that does not resolve.
+    pub compare: Option<(
+        (String, String),
+        Option<warp_station_core::model::ComparePreview>,
+    )>,
+    /// Pairs whose compare was already asked for (in flight or answered).
+    compare_requested: std::collections::HashSet<(String, String)>,
+    /// A pull request was just created: the workbench switches its list to
+    /// Open. The list view drains this.
+    pub pull_created: bool,
+    /// E2E hook: WARP_STATION_NEW_PULL=1 opens the New pull request form the
+    /// first time the Pull requests tab draws; the workbench drains it.
+    pub new_pull_requested: bool,
     /// The closed list is already asked for (in flight or cached). One ask per
     /// (folder, pull_requests); cleared by Refresh, a merge, or Retry.
     closed_requested: std::collections::HashSet<(String, bool)>,
@@ -213,6 +245,9 @@ pub struct Store {
     pending_selection: Option<String>,
     /// The list pane's width while it is dragged; the settings hold it after.
     list_width: Option<f32>,
+    /// The detail pane's width this frame, as the page measured it. The
+    /// workbench splits or stacks on it; it is a render fact, never persisted.
+    pub pane_width: f32,
     /// The tab on screen; None is the Repositories tab with the list.
     pub active_repo_tab: Option<String>,
     /// What the Repositories tab was showing when a repo tab took over.
@@ -347,6 +382,18 @@ impl Store {
             github_details: None,
             github_closed: std::collections::HashMap::new(),
             open_pull: None,
+            pull_diff: std::collections::HashMap::new(),
+            pull_diff_requested: std::collections::HashSet::new(),
+            pull_commit_files: std::collections::HashMap::new(),
+            pull_commits_requested: std::collections::HashSet::new(),
+            pull_acting: false,
+            pull_comment_sent: false,
+            confirm_abandon: None,
+            new_pull: None,
+            compare: None,
+            compare_requested: std::collections::HashSet::new(),
+            pull_created: false,
+            new_pull_requested: std::env::var("WARP_STATION_NEW_PULL").as_deref() == Ok("1"),
             closed_requested: std::collections::HashSet::new(),
             closed_failed: std::collections::HashSet::new(),
             wand_busy: None,
@@ -382,6 +429,7 @@ impl Store {
             pending_open_tab: None,
             pending_selection: None,
             list_width: None,
+            pane_width: f32::MAX,
             active_repo_tab: None,
             home_repo: None,
             home_tab: WorkspaceTab::default(),
@@ -907,8 +955,8 @@ impl Store {
                     .filter(|open| open.folder == folder && open.item.number == number)
                 {
                     open.failed = pull.is_none();
-                    if pull.is_some() {
-                        open.pull = pull;
+                    if let Some(pull) = pull {
+                        open.pull = Some(*pull);
                     }
                 }
                 cx.notify();
@@ -939,6 +987,131 @@ impl Store {
                         self.notify_error(format!("Could not merge #{number}"));
                     }
                     Err(err) => self.notify_error(err),
+                }
+                cx.notify();
+            }
+            UiEvent::GitHubPullDiffLoaded {
+                folder,
+                number,
+                files,
+            } => {
+                if self
+                    .open_pull
+                    .as_ref()
+                    .is_some_and(|open| open.folder == folder && open.item.number == number)
+                {
+                    self.pull_diff.insert(number, files);
+                }
+                cx.notify();
+            }
+            UiEvent::GitHubPullCommitFilesLoaded { sha, files, .. } => {
+                self.pull_commit_files.insert(sha, files);
+                cx.notify();
+            }
+            UiEvent::GitHubPullActed {
+                folder,
+                number,
+                action,
+                result,
+            } => {
+                self.pull_acting = false;
+                match result {
+                    Ok(()) => {
+                        if matches!(action, warp_station_core::github::PullAction::Comment(_)) {
+                            self.pull_comment_sent = true;
+                        }
+                        self.notify_success(action.done_word(number));
+                        if self
+                            .open_pull
+                            .as_ref()
+                            .is_some_and(|open| open.folder == folder && open.item.number == number)
+                        {
+                            self.reload_open_pull();
+                        }
+                        // the row may have moved between the open and closed
+                        // lists, and the repo's counts changed with it
+                        self.kick_github_pass(&[std::path::PathBuf::from(&folder)]);
+                        let key = (folder, true);
+                        self.github_closed.remove(&key);
+                        self.closed_requested.remove(&key);
+                        self.closed_failed.remove(&key);
+                    }
+                    Err(err) if err.is_empty() => {
+                        self.notify_error("GitHub did not answer the pull request".to_string());
+                    }
+                    Err(err) => self.notify_error(err),
+                }
+                cx.notify();
+            }
+            UiEvent::CompareLoaded {
+                folder,
+                base,
+                head,
+                preview,
+            } => {
+                // the form may have moved on while the read ran; only the pair
+                // it is showing is worth keeping
+                let showing = self
+                    .new_pull
+                    .as_ref()
+                    .is_some_and(|form| form.base.trim() == base && form.head.trim() == head);
+                if showing && self.selected_repo.as_deref() == Some(folder.as_str()) {
+                    self.compare = Some(((base, head), preview));
+                }
+                cx.notify();
+            }
+            UiEvent::GitHubPullCreated {
+                folder,
+                request,
+                result,
+            } => {
+                if let Some(form) = self.new_pull.as_mut() {
+                    form.creating = false;
+                }
+                match result {
+                    Ok(number) => {
+                        let url = self
+                            .github_by_folder
+                            .get(&folder)
+                            .and_then(|snapshot| snapshot.url.clone())
+                            .or_else(|| self.github_details.as_ref().and_then(|d| d.url.clone()))
+                            .map(|url| format!("{url}/pull/{number}"))
+                            .unwrap_or_default();
+                        // the row the list and the pane both draw, before the
+                        // full view answers
+                        let item = warp_station_core::github::GitHubItem {
+                            number,
+                            title: request.title.clone(),
+                            url,
+                            head_ref_name: Some(request.head.clone()),
+                            base_ref_name: Some(request.base.clone()),
+                            is_draft: request.draft,
+                            is_pull_request: true,
+                            ..Default::default()
+                        };
+                        self.new_pull = None;
+                        self.compare = None;
+                        self.compare_requested.clear();
+                        self.pull_created = true;
+                        self.open_pull_request(item, cx);
+                        self.notify_success(format!("Created #{number}"));
+                        // the open list, the repo's counts and the pane all
+                        // read from the pass
+                        self.kick_github_pass(&[std::path::PathBuf::from(&folder)]);
+                        let key = (folder, true);
+                        self.github_closed.remove(&key);
+                        self.closed_requested.remove(&key);
+                        self.closed_failed.remove(&key);
+                    }
+                    Err(err) => {
+                        if let Some(form) = self.new_pull.as_mut() {
+                            form.error = Some(if err.trim().is_empty() {
+                                "GitHub did not answer.".to_string()
+                            } else {
+                                err
+                            });
+                        }
+                    }
                 }
                 cx.notify();
             }
@@ -2179,7 +2352,6 @@ impl Store {
             }
             None => self.home_tab = tab,
         }
-        self.open_pull = None;
         self.save_repo_tabs();
         cx.notify();
     }
@@ -2265,6 +2437,18 @@ impl Store {
         let Some(folder) = self.selected_repo.clone() else {
             return;
         };
+        // the pull request is the Pull requests tab's detail, so the tab comes
+        // with it — a press on the Overview's row lands here
+        if self.detail_tab != WorkspaceTab::PullRequests {
+            self.open_detail_tab(WorkspaceTab::PullRequests, cx);
+        }
+        self.pull_acting = false;
+        self.confirm_abandon = None;
+        self.new_pull = None;
+        self.compare = None;
+        self.compare_requested.clear();
+        self.pull_created = false;
+        self.new_pull_requested = false;
         self.open_pull = Some(OpenPull {
             folder,
             item,
@@ -2279,13 +2463,289 @@ impl Store {
 
     fn reload_open_pull(&mut self) {
         let Some(open) = &self.open_pull else { return };
+        let number = open.item.number;
+        // the full view may name different files than the one before it
+        self.pull_diff.remove(&number);
+        self.pull_diff_requested.remove(&number);
         if let Some(gh_exe) = self.gh_exe() {
             let _ = self.net.send_blocking(NetCommand::GitHubPull {
                 folder: std::path::PathBuf::from(&open.folder),
                 gh_exe,
-                number: open.item.number,
+                number,
             });
         }
+    }
+
+    /// The selected pull request's patch, asked for once per number. The Files
+    /// tab calls this as it draws, so the call rides the same guard the closed
+    /// lists use and drawing cannot re-request.
+    pub fn load_pull_diff(&mut self) {
+        let Some(open) = self.open_pull.as_ref() else {
+            return;
+        };
+        let number = open.item.number;
+        if self.pull_diff.contains_key(&number) || !self.pull_diff_requested.insert(number) {
+            return;
+        }
+        let Some(gh_exe) = self.gh_exe() else {
+            // no gh means no patch: say so instead of leaving the tab loading
+            self.pull_diff.insert(number, None);
+            return;
+        };
+        let _ = self.net.send_blocking(NetCommand::GitHubPullDiff {
+            folder: std::path::PathBuf::from(&open.folder),
+            gh_exe,
+            number,
+        });
+    }
+
+    /// One commit's files, asked for once per SHA.
+    pub fn load_pull_commit_files(&mut self, sha: &str) {
+        if self.pull_commit_files.contains_key(sha)
+            || !self.pull_commits_requested.insert(sha.to_string())
+        {
+            return;
+        }
+        let Some(open) = self.open_pull.as_ref() else {
+            return;
+        };
+        let Some(gh_exe) = self.gh_exe() else {
+            self.pull_commit_files.insert(sha.to_string(), None);
+            return;
+        };
+        let _ = self.net.send_blocking(NetCommand::GitHubPullCommitFiles {
+            folder: std::path::PathBuf::from(&open.folder),
+            gh_exe,
+            sha: sha.to_string(),
+        });
+    }
+
+    /// One verb on the selected pull request. The head's buttons stay dead
+    /// until it answers.
+    pub fn act_on_pull(
+        &mut self,
+        action: warp_station_core::github::PullAction,
+        cx: &mut Context<Self>,
+    ) {
+        if self.pull_acting {
+            return;
+        }
+        let Some(gh_exe) = self.gh_exe() else {
+            return;
+        };
+        let Some(open) = self.open_pull.as_ref() else {
+            return;
+        };
+        self.pull_acting = true;
+        let _ = self.net.send_blocking(NetCommand::GitHubPullAction {
+            folder: std::path::PathBuf::from(&open.folder),
+            gh_exe,
+            number: open.item.number,
+            action,
+        });
+        cx.notify();
+    }
+
+    // ---- the New pull request form -----------------------------------------
+
+    /// Opens the form with the branches it would most likely want: the checked
+    /// out branch as the source, the repository's default branch as the base.
+    pub fn open_new_pull(&mut self, cx: &mut Context<Self>) {
+        let head = self
+            .selected_entry()
+            .and_then(|repo| repo.git_branch_name.clone())
+            .unwrap_or_default();
+        let base = self.default_branch();
+        self.new_pull = Some(NewPullForm {
+            head,
+            base,
+            error: None,
+            creating: false,
+        });
+        self.compare = None;
+        self.compare_requested.clear();
+        cx.notify();
+    }
+
+    /// Cancel and Back: the form goes, the selection it was drawn over stays.
+    pub fn close_new_pull(&mut self, cx: &mut Context<Self>) {
+        if self.new_pull.take().is_some() {
+            self.compare = None;
+            self.compare_requested.clear();
+            cx.notify();
+        }
+    }
+
+    /// The form's branches as they are typed, so the preview follows them.
+    pub fn set_new_pull_branches(&mut self, head: String, base: String, cx: &mut Context<Self>) {
+        let Some(form) = self.new_pull.as_mut() else {
+            return;
+        };
+        if form.head == head && form.base == base {
+            return;
+        }
+        form.head = head;
+        form.base = base;
+        // a branch the user is still typing is not an error yet
+        form.error = None;
+        cx.notify();
+    }
+
+    /// The base the form starts on: what GitHub calls the default branch, then
+    /// the usual two names if the details have not landed.
+    fn default_branch(&self) -> String {
+        if let Some(branch) = self
+            .github_details
+            .as_ref()
+            .and_then(|details| details.default_branch.clone())
+            .filter(|branch| !branch.trim().is_empty())
+        {
+            return branch;
+        }
+        let known = |name: &str| self.branches.iter().any(|branch| branch.name == name);
+        if known("main") {
+            "main".to_string()
+        } else if known("master") {
+            "master".to_string()
+        } else {
+            "main".to_string()
+        }
+    }
+
+    /// The form's preview, asked for once per pair of branches. The form calls
+    /// this as it draws, so a burst of typing costs one read.
+    pub fn load_compare(&mut self) {
+        let Some(form) = self.new_pull.as_ref() else {
+            return;
+        };
+        let head = form.head.trim().to_string();
+        let base = form.base.trim().to_string();
+        if head.is_empty() || base.is_empty() || head == base {
+            return;
+        }
+        let key = (base.clone(), head.clone());
+        if self
+            .compare
+            .as_ref()
+            .is_some_and(|(known, _)| *known == key)
+            || !self.compare_requested.insert(key.clone())
+        {
+            return;
+        }
+        let Some(folder) = self.selected_repo.clone() else {
+            return;
+        };
+        let _ = self.net.send_blocking(NetCommand::CompareBranches {
+            folder: std::path::PathBuf::from(folder),
+            base: key.0,
+            head: key.1,
+        });
+    }
+
+    /// Whether the form's current pair has been answered at all — a compare
+    /// that found nothing is an answer, and the form says so instead of
+    /// spinning.
+    pub fn compare_answered(&self) -> bool {
+        let Some(form) = self.new_pull.as_ref() else {
+            return false;
+        };
+        let key = (form.base.trim().to_string(), form.head.trim().to_string());
+        self.compare
+            .as_ref()
+            .is_some_and(|(known, _)| *known == key)
+    }
+
+    /// The preview for the form's current branches, once it has landed.
+    pub fn compare_preview(&self) -> Option<&warp_station_core::model::ComparePreview> {
+        let form = self.new_pull.as_ref()?;
+        let key = (form.base.trim().to_string(), form.head.trim().to_string());
+        self.compare
+            .as_ref()
+            .filter(|(known, _)| *known == key)
+            .and_then(|(_, preview)| preview.as_ref())
+    }
+
+    /// Create, or Create as draft. What the form refuses it says itself; what
+    /// `gh` refuses comes back in the form.
+    pub fn create_pull(
+        &mut self,
+        title: String,
+        body: String,
+        reviewer: String,
+        draft: bool,
+        cx: &mut Context<Self>,
+    ) {
+        if self.new_pull.as_ref().is_some_and(|form| form.creating) {
+            return;
+        }
+        let Some(form) = self.new_pull.as_ref() else {
+            return;
+        };
+        let request = warp_station_core::github::NewPullRequest {
+            title,
+            body,
+            base: form.base.trim().to_string(),
+            head: form.head.trim().to_string(),
+            reviewer: Some(reviewer).filter(|name| !name.trim().is_empty()),
+            draft,
+        };
+        if let Some(problem) = request.problem() {
+            if let Some(form) = self.new_pull.as_mut() {
+                form.error = Some(problem.to_string());
+            }
+            cx.notify();
+            return;
+        }
+        let Some(gh_exe) = self.gh_exe() else {
+            if let Some(form) = self.new_pull.as_mut() {
+                form.error = Some("The gh CLI is not available.".to_string());
+            }
+            cx.notify();
+            return;
+        };
+        let Some(folder) = self.selected_repo.clone() else {
+            return;
+        };
+        if let Some(form) = self.new_pull.as_mut() {
+            form.creating = true;
+            form.error = None;
+        }
+        let _ = self.net.send_blocking(NetCommand::GitHubPullCreate {
+            folder: std::path::PathBuf::from(folder),
+            gh_exe,
+            request,
+        });
+        cx.notify();
+    }
+
+    /// Abandon can't be taken back, so the menu asks first and the page draws
+    /// the card over the scrim.
+    pub fn ask_abandon(&mut self, cx: &mut Context<Self>) {
+        let Some(open) = self.open_pull.as_ref() else {
+            return;
+        };
+        let title = open
+            .pull
+            .as_ref()
+            .map_or_else(|| open.item.title.clone(), |p| p.title.clone());
+        self.confirm_abandon = Some((open.item.number, title));
+        cx.notify();
+    }
+
+    pub fn cancel_abandon(&mut self, cx: &mut Context<Self>) {
+        if self.confirm_abandon.take().is_some() {
+            cx.notify();
+        }
+    }
+
+    /// The dialog's confirm: closes the pull request, which is GitHub's word
+    /// for abandoning it.
+    pub fn confirm_abandon(&mut self, cx: &mut Context<Self>) {
+        if self.confirm_abandon.take().is_none() {
+            return;
+        }
+        self.act_on_pull(warp_station_core::github::PullAction::Close, cx);
+        cx.notify();
     }
 
     /// Back, or Escape. Returns whether a pull request was open.
@@ -2629,6 +3089,12 @@ impl Store {
         self.commit_file_patch = None;
         self.github_details = None;
         self.open_pull = None;
+        self.pull_diff.clear();
+        self.pull_diff_requested.clear();
+        self.pull_commit_files.clear();
+        self.pull_commits_requested.clear();
+        self.pull_acting = false;
+        self.confirm_abandon = None;
         self.commit_message_draft = None;
         self.commit_message_clear = false;
         self.readme_draft = None;
@@ -3203,6 +3669,17 @@ pub struct OpenPull {
     pub failed: bool,
     pub merging: bool,
     pub merge_armed: bool,
+}
+
+/// The New pull request form: the two branches it would compare and open
+/// between, and what the last attempt said.
+#[derive(Clone, Debug, Default)]
+pub struct NewPullForm {
+    pub head: String,
+    pub base: String,
+    /// Why the form refuses to send, or what `gh` answered.
+    pub error: Option<String>,
+    pub creating: bool,
 }
 
 /// A repository opened in a tab of its own, and the detail tab it was left on.

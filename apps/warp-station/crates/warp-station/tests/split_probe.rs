@@ -1509,9 +1509,10 @@ fn seed_github(
 ) {
     let snapshot = warp_station_core::github::GitHubSnapshot {
         available: true,
+        // a resolved repository: the tab's New verb needs the link
+        url: Some("https://github.com/o/alpha".into()),
         pulls: (0..pulls).map(|n| github_item(n, true)).collect(),
         issues: (0..issues).map(|n| github_item(100 + n, false)).collect(),
-        ..Default::default()
     };
     cx.update_entity(store, |s: &mut Store, _| {
         s.github_by_folder
@@ -1587,6 +1588,51 @@ fn use_a_located_gh(store: &gpui::Entity<Store>, cx: &mut TestAppContext) {
     });
 }
 
+/// The net thread's answer to one verb: without it the head stays busy, as it
+/// would while `gh` runs.
+fn settle(
+    store: &gpui::Entity<Store>,
+    action: warp_station_core::github::PullAction,
+    cx: &mut gpui::VisualTestContext,
+) {
+    cx.update_entity(store, |s: &mut Store, cx| {
+        s.on_net_event(
+            UiEvent::GitHubPullActed {
+                folder: "/probe/alpha".into(),
+                number: 0,
+                action,
+                result: Ok(()),
+            },
+            cx,
+        );
+    });
+    draw(cx);
+}
+
+fn sent_creates(
+    net_rx: &async_channel::Receiver<NetCommand>,
+) -> Vec<warp_station_core::github::NewPullRequest> {
+    let mut requests = Vec::new();
+    while let Ok(command) = net_rx.try_recv() {
+        if let NetCommand::GitHubPullCreate { request, .. } = command {
+            requests.push(request);
+        }
+    }
+    requests
+}
+
+fn sent_actions(
+    net_rx: &async_channel::Receiver<NetCommand>,
+) -> Vec<warp_station_core::github::PullAction> {
+    let mut actions = Vec::new();
+    while let Ok(command) = net_rx.try_recv() {
+        if let NetCommand::GitHubPullAction { action, .. } = command {
+            actions.push(action);
+        }
+    }
+    actions
+}
+
 fn sent_merges(net_rx: &async_channel::Receiver<NetCommand>) -> Vec<u64> {
     let mut numbers = Vec::new();
     while let Ok(command) = net_rx.try_recv() {
@@ -1640,25 +1686,42 @@ fn a_failed_closed_load_offers_retry(cx: &mut TestAppContext) {
     assert_eq!(asked, 1, "Retry asks once");
 }
 
-/// A row turns the whole pane into the pull request, head included, and Back
-/// and Escape both return to the list on the tab it left.
+/// The Pull requests tab is the design's workbench: the 320 work list beside
+/// the selected pull request, with the repository's own head still above it.
+/// The first row is the selection where both columns fit.
 #[gpui::test]
-fn a_pull_request_takes_over_the_pane_until_back(cx: &mut TestAppContext) {
+fn a_pull_request_opens_beside_the_list(cx: &mut TestAppContext) {
     let (store, _net_rx) = scratch_store(cx, "pull", vec![entry("alpha", "/probe/alpha")]);
     seed_github(&store, "/probe/alpha", 2, 0, cx);
     let cx = open_window(&store, cx);
     draw(cx);
     click(cx, "detail-tab-pulls");
+    draw(cx);
 
-    click(cx, "PR-1");
-    assert!(cx.debug_bounds("pull-request").is_some());
+    assert!(cx.debug_bounds("pr-list").is_some(), "the work list shows");
     assert!(
-        cx.debug_bounds("detail-tab-pulls").is_none(),
-        "the repo head gives way"
+        cx.debug_bounds("pull-request").is_some(),
+        "the first row opens beside it"
+    );
+    assert!(
+        cx.debug_bounds("detail-tab-pulls").is_some(),
+        "the repo head stays above the workbench"
+    );
+    assert!(
+        cx.debug_bounds("pull-back").is_none(),
+        "Back belongs to the narrow pane"
     );
     assert!(
         cx.debug_bounds("pull-merge").is_none(),
         "no verb until the full view says it is allowed"
+    );
+
+    click(cx, "PR-1");
+    assert!(cx.debug_bounds("pull-request").is_some());
+    assert_eq!(
+        store.read_with(cx, |s, _| s.open_pull.as_ref().map(|o| o.item.number)),
+        Some(1),
+        "a press selects that row"
     );
 
     cx.update_entity(&store, |s: &mut Store, cx| {
@@ -1667,16 +1730,426 @@ fn a_pull_request_takes_over_the_pane_until_back(cx: &mut TestAppContext) {
     });
     draw(cx);
     assert!(cx.debug_bounds("pull-merge").is_some());
-    assert!(cx.debug_bounds("pull-thread").is_some());
+    assert!(cx.debug_bounds("pull-comments").is_some());
+    assert!(cx.debug_bounds("pull-policies").is_some());
+    assert!(cx.debug_bounds("pull-reviewers-card").is_some());
+}
+
+/// Below 900 px of pane the list and the pull request take turns: a row opens
+/// the detail with Back, and Back and Escape both return to the list.
+#[gpui::test]
+fn a_narrow_pane_shows_one_column_and_back_returns(cx: &mut TestAppContext) {
+    let (store, _net_rx) = scratch_store(cx, "pull-stacked", vec![entry("alpha", "/probe/alpha")]);
+    seed_github(&store, "/probe/alpha", 2, 0, cx);
+    let cx = open_window(&store, cx);
+    cx.simulate_resize(gpui::size(gpui::px(1100.), gpui::px(760.)));
+    draw(cx);
+    click(cx, "detail-tab-pulls");
+    draw(cx);
+
+    assert!(cx.debug_bounds("pr-list").is_some(), "the list has the tab");
+    assert!(
+        cx.debug_bounds("pull-request").is_none(),
+        "nothing is selected in a narrow pane"
+    );
+
+    click(cx, "PR-1");
+    draw(cx);
+    assert!(cx.debug_bounds("pull-request").is_some());
+    assert!(cx.debug_bounds("pr-list").is_none(), "the list steps aside");
+    assert!(cx.debug_bounds("pull-back").is_some());
 
     cx.simulate_keystrokes("escape");
     draw(cx);
+    assert!(cx.debug_bounds("pr-list").is_some(), "Escape goes back");
     assert!(cx.debug_bounds("pull-request").is_none());
-    assert!(cx.debug_bounds("pr-list").is_some(), "back on the list");
 
     click(cx, "PR-1");
     click(cx, "pull-back");
+    draw(cx);
+    assert!(cx.debug_bounds("pr-list").is_some(), "so does Back");
+}
+
+/// The pull request's own strip: Overview carries the policies, the description
+/// and the comments; Files and Commits swap the body for their viewers.
+#[gpui::test]
+fn the_pull_request_tabs_swap_their_bodies(cx: &mut TestAppContext) {
+    let (store, _net_rx) = scratch_store(cx, "pull-tabs", vec![entry("alpha", "/probe/alpha")]);
+    seed_github(&store, "/probe/alpha", 1, 0, cx);
+    let cx = open_window(&store, cx);
+    draw(cx);
+    click(cx, "detail-tab-pulls");
+
+    let mut pull = ready_pull(0);
+    pull.files = vec![warp_station_core::github::GitHubFilePatch {
+        path: "src/main.rs".into(),
+        status: "M".into(),
+        additions: 2,
+        deletions: 1,
+        patch: String::new(),
+    }];
+    pull.commits = vec![warp_station_core::github::GitHubCommit {
+        oid: "abc1234def".into(),
+        headline: "Add the thing".into(),
+        author: Some("engin".into()),
+        committed_at: None,
+    }];
+    cx.update_entity(&store, |s: &mut Store, cx| {
+        s.open_pull.as_mut().unwrap().pull = Some(pull);
+        cx.notify();
+    });
+    draw(cx);
+
+    assert!(cx.debug_bounds("pull-policies").is_some(), "Overview first");
+    assert!(cx.debug_bounds("pull-files").is_none());
+
+    click(cx, "pull-tab-files");
+    assert!(cx.debug_bounds("pull-files").is_some(), "the file rail");
+    assert!(cx.debug_bounds("pull-file-0").is_some());
+    assert!(cx.debug_bounds("pull-policies").is_none());
+
+    click(cx, "pull-tab-commits");
+    assert!(cx.debug_bounds("pull-commits").is_some(), "the commit list");
+    assert!(cx.debug_bounds("pull-commit-0").is_some());
+    assert!(cx.debug_bounds("pull-copy-sha").is_some());
+
+    click(cx, "pull-tab-overview");
+    assert!(cx.debug_bounds("pull-policies").is_some());
+}
+
+/// Every verb is one command: Approve, Mark as draft, and Abandon (which asks
+/// first) all leave the view as a `GitHubPullAction`.
+#[gpui::test]
+fn the_pull_request_verbs_send_one_command(cx: &mut TestAppContext) {
+    use warp_station_core::github::PullAction;
+
+    let (store, net_rx) = scratch_store(cx, "pull-verbs", vec![entry("alpha", "/probe/alpha")]);
+    seed_github(&store, "/probe/alpha", 1, 0, cx);
+    use_a_located_gh(&store, cx);
+    let cx = open_window(&store, cx);
+    draw(cx);
+    click(cx, "detail-tab-pulls");
+    cx.update_entity(&store, |s: &mut Store, cx| {
+        s.open_pull.as_mut().unwrap().pull = Some(ready_pull(0));
+        cx.notify();
+    });
+    draw(cx);
+    while net_rx.try_recv().is_ok() {}
+
+    click(cx, "pull-approve");
+    assert_eq!(sent_actions(&net_rx), [PullAction::Approve]);
+    settle(&store, PullAction::Approve, cx);
+
+    // the primary's menu: draft, then abandon through its confirmation
+    click(cx, "pull-primary-menu");
+    assert!(cx.debug_bounds("pull-primary-menu").is_some());
+    click(cx, "pull-menu-draft");
+    assert_eq!(sent_actions(&net_rx), [PullAction::Draft], "Mark as draft");
+    settle(&store, PullAction::Draft, cx);
+
+    click(cx, "pull-primary-menu");
+    click(cx, "pull-menu-abandon");
+    assert!(
+        cx.debug_bounds("abandon-dialog").is_some(),
+        "Abandon asks first"
+    );
+    click(cx, "btn-danger-Abandon pull request");
+    assert_eq!(sent_actions(&net_rx), [PullAction::Close]);
+    assert!(
+        cx.debug_bounds("abandon-dialog").is_none(),
+        "the card closes with the answer"
+    );
+}
+
+/// New pull request opens the form in the detail column — not an overlay, and
+/// not the browser — and Cancel gives the selection back.
+#[gpui::test]
+fn the_new_pull_request_form_opens_in_the_pane(cx: &mut TestAppContext) {
+    let (store, _net_rx) = scratch_store(cx, "new-pull", vec![entry("alpha", "/probe/alpha")]);
+    seed_github(&store, "/probe/alpha", 1, 0, cx);
+    let cx = open_window(&store, cx);
+    draw(cx);
+    click(cx, "detail-tab-pulls");
+    click(cx, "list-new");
+
+    assert!(cx.debug_bounds("new-pull").is_some(), "the form draws");
+    assert!(
+        cx.debug_bounds("pull-request").is_none(),
+        "it takes the detail column"
+    );
+    assert!(
+        cx.debug_bounds("pr-list").is_some(),
+        "the list stays beside it"
+    );
+    for field in [
+        "new-pull-head",
+        "new-pull-base",
+        "new-pull-title",
+        "new-pull-description",
+        "new-pull-reviewer",
+        "new-pull-foot",
+    ] {
+        assert!(cx.debug_bounds(field).is_some(), "{field} draws");
+    }
+    assert!(
+        cx.debug_bounds("new-pull-back").is_none(),
+        "Back belongs to the narrow pane"
+    );
+    assert_eq!(
+        store.read_with(cx, |s, _| s.new_pull.as_ref().map(|f| f.head.clone())),
+        Some("main".into()),
+        "the source starts on the checked out branch"
+    );
+
+    click(cx, "new-pull-cancel");
+    assert!(cx.debug_bounds("new-pull").is_none());
+    assert!(
+        cx.debug_bounds("pull-request").is_some(),
+        "Cancel gives the selection back"
+    );
+}
+
+/// The form previews what the source branch would bring: files on Files,
+/// commits on Commits, each tab counting its own.
+#[gpui::test]
+fn the_form_previews_the_branches(cx: &mut TestAppContext) {
+    use warp_station_core::model::{CompareCommit, ComparePreview, GitChangedFile};
+
+    let (store, _net_rx) =
+        scratch_store(cx, "new-pull-preview", vec![entry("alpha", "/probe/alpha")]);
+    seed_github(&store, "/probe/alpha", 1, 0, cx);
+    let cx = open_window(&store, cx);
+    draw(cx);
+    click(cx, "detail-tab-pulls");
+    click(cx, "list-new");
+
+    let preview = ComparePreview {
+        files: vec![GitChangedFile {
+            path: "src/main.rs".into(),
+            status_code: "M".into(),
+            additions: Some(4),
+            deletions: Some(1),
+        }],
+        commits: vec![CompareCommit {
+            hash: "abc1234def".into(),
+            subject: "Add the thing".into(),
+            author: Some("engin".into()),
+            committed_at: None,
+            files: 1,
+        }],
+    };
+    cx.update_entity(&store, |s: &mut Store, cx| {
+        if let Some(form) = s.new_pull.as_mut() {
+            form.head = "feat/x".into();
+            form.base = "main".into();
+        }
+        s.compare = Some(((("main".to_string()), "feat/x".to_string()), Some(preview)));
+        cx.notify();
+    });
+    draw(cx);
+
+    click(cx, "new-pull-tab-files");
+    assert!(cx.debug_bounds("new-pull-files").is_some());
+    assert!(cx.debug_bounds("new-pull-file").is_some(), "a file row");
+    assert!(cx.debug_bounds("new-pull-overview").is_none());
+
+    click(cx, "new-pull-tab-commits");
+    assert!(cx.debug_bounds("new-pull-commits").is_some());
+    assert!(cx.debug_bounds("new-pull-commit").is_some(), "a commit row");
+
+    click(cx, "new-pull-tab-overview");
+    assert!(cx.debug_bounds("new-pull-overview").is_some());
+}
+
+/// Create refuses a blank title and two of the same branch before it spends a
+/// process, and says why on Overview.
+#[gpui::test]
+fn the_form_refuses_what_gh_would_refuse(cx: &mut TestAppContext) {
+    let (store, net_rx) =
+        scratch_store(cx, "new-pull-refuse", vec![entry("alpha", "/probe/alpha")]);
+    seed_github(&store, "/probe/alpha", 1, 0, cx);
+    use_a_located_gh(&store, cx);
+    let cx = open_window(&store, cx);
+    draw(cx);
+    click(cx, "detail-tab-pulls");
+    click(cx, "list-new");
+    while net_rx.try_recv().is_ok() {}
+
+    // the source and the base both start on main
+    click(cx, "new-pull-create");
+    assert!(
+        cx.debug_bounds("new-pull-error").is_some(),
+        "two of the same branch is refused"
+    );
+    assert!(sent_creates(&net_rx).is_empty(), "nothing is sent");
+
+    cx.update_entity(&store, |s: &mut Store, cx| {
+        if let Some(form) = s.new_pull.as_mut() {
+            form.head = "feat/x".into();
+        }
+        cx.notify();
+    });
+    draw(cx);
+    click(cx, "new-pull-create");
+    assert!(
+        sent_creates(&net_rx).is_empty(),
+        "an empty title is refused"
+    );
+    assert!(cx.debug_bounds("new-pull-error").is_some());
+}
+
+/// Create sends one request and the new pull request takes the pane, with the
+/// list back on Open.
+#[gpui::test]
+fn creating_sends_one_request_and_selects_it(cx: &mut TestAppContext) {
+    let (store, net_rx) =
+        scratch_store(cx, "new-pull-create", vec![entry("alpha", "/probe/alpha")]);
+    seed_github(&store, "/probe/alpha", 1, 0, cx);
+    use_a_located_gh(&store, cx);
+    let cx = open_window(&store, cx);
+    draw(cx);
+    click(cx, "detail-tab-pulls");
+    click(cx, "list-new");
+    cx.update_entity(&store, |s: &mut Store, cx| {
+        if let Some(form) = s.new_pull.as_mut() {
+            form.head = "feat/x".into();
+            form.base = "main".into();
+        }
+        cx.notify();
+    });
+    draw(cx);
+    while net_rx.try_recv().is_ok() {}
+
+    click(cx, "new-pull-title");
+    cx.simulate_keystrokes("a d d  space t h e  space t h i n g");
+    draw(cx);
+    click(cx, "new-pull-create");
+
+    let sent = sent_creates(&net_rx);
+    assert_eq!(sent.len(), 1, "one create");
+    assert_eq!(sent[0].title, "add the thing");
+    assert_eq!(sent[0].head, "feat/x");
+    assert_eq!(sent[0].base, "main");
+    assert!(!sent[0].draft);
+
+    // gh's refusal comes back in the form, and the form stays open
+    cx.update_entity(&store, |s: &mut Store, cx| {
+        s.on_net_event(
+            UiEvent::GitHubPullCreated {
+                folder: "/probe/alpha".into(),
+                request: Box::new(sent[0].clone()),
+                result: Err("no permission on the base".into()),
+            },
+            cx,
+        );
+    });
+    draw(cx);
+    assert!(
+        cx.debug_bounds("new-pull-error").is_some(),
+        "gh's words show"
+    );
+
+    // Create as draft rides the same verb
+    click(cx, "new-pull-primary-menu");
+    assert!(cx.debug_bounds("new-pull-menu").is_some());
+    click(cx, "new-pull-menu-draft");
+    let drafts = sent_creates(&net_rx);
+    assert_eq!(drafts.len(), 1, "one more create");
+    assert!(drafts[0].draft, "the menu's draft item drafts");
+
+    // gh answers with the number it created
+    cx.update_entity(&store, |s: &mut Store, cx| {
+        s.on_net_event(
+            UiEvent::GitHubPullCreated {
+                folder: "/probe/alpha".into(),
+                request: Box::new(sent[0].clone()),
+                result: Ok(7),
+            },
+            cx,
+        );
+    });
+    draw(cx);
+
+    assert!(cx.debug_bounds("new-pull").is_none(), "the form closes");
+    assert!(
+        cx.debug_bounds("pull-request").is_some(),
+        "the new pull request shows"
+    );
+    assert_eq!(
+        store.read_with(cx, |s, _| s.open_pull.as_ref().map(|o| o.item.number)),
+        Some(7)
+    );
+    assert!(
+        !store.read_with(cx, |s, _| s.pull_created),
+        "the list drained the flag"
+    );
+}
+
+/// Below 900 px of pane the form takes it whole, and Back and Escape return to
+/// the list.
+#[gpui::test]
+fn the_form_takes_the_narrow_pane(cx: &mut TestAppContext) {
+    let (store, _net_rx) =
+        scratch_store(cx, "new-pull-narrow", vec![entry("alpha", "/probe/alpha")]);
+    seed_github(&store, "/probe/alpha", 1, 0, cx);
+    let cx = open_window(&store, cx);
+    cx.simulate_resize(gpui::size(gpui::px(1100.), gpui::px(760.)));
+    draw(cx);
+    click(cx, "detail-tab-pulls");
+    draw(cx);
+    click(cx, "list-new");
+    draw(cx);
+
+    assert!(cx.debug_bounds("new-pull").is_some());
+    assert!(cx.debug_bounds("pr-list").is_none(), "the list steps aside");
+    assert!(cx.debug_bounds("new-pull-back").is_some(), "Back is here");
+
+    cx.simulate_keystrokes("escape");
+    draw(cx);
+    assert!(
+        cx.debug_bounds("new-pull").is_none(),
+        "Escape leaves the form"
+    );
     assert!(cx.debug_bounds("pr-list").is_some());
+}
+
+/// The composer posts what was typed, and a landed comment empties it.
+#[gpui::test]
+fn the_comment_composer_posts_its_words(cx: &mut TestAppContext) {
+    use warp_station_core::github::PullAction;
+
+    let (store, net_rx) = scratch_store(cx, "pull-comment", vec![entry("alpha", "/probe/alpha")]);
+    seed_github(&store, "/probe/alpha", 1, 0, cx);
+    use_a_located_gh(&store, cx);
+    let cx = open_window(&store, cx);
+    draw(cx);
+    click(cx, "detail-tab-pulls");
+    cx.update_entity(&store, |s: &mut Store, cx| {
+        s.open_pull.as_mut().unwrap().pull = Some(ready_pull(0));
+        cx.notify();
+    });
+    draw(cx);
+    while net_rx.try_recv().is_ok() {}
+
+    // the composer sits under the description, so the window has to be tall
+    // enough for its bounds to be inside the overview's viewport
+    cx.simulate_resize(gpui::size(gpui::px(1920.), gpui::px(1600.)));
+    draw(cx);
+    click(cx, "pull-comment-field");
+    cx.simulate_keystrokes("n i c e");
+    draw(cx);
+    click(cx, "pull-comment");
+    assert_eq!(
+        sent_actions(&net_rx),
+        [PullAction::Comment("nice".into())],
+        "the composer sends its words"
+    );
+
+    settle(&store, PullAction::Comment(String::new()), cx);
+    assert!(
+        !store.read_with(cx, |s, _| s.pull_comment_sent),
+        "the view drains the flag"
+    );
 }
 
 /// Merging can't be undone: the first press arms, the second sends, and a
@@ -1704,7 +2177,11 @@ fn the_merge_takes_two_presses_and_passing_checks(cx: &mut TestAppContext) {
         cx.notify();
     });
     draw(cx);
-    assert!(cx.debug_bounds("pull-checks").is_some());
+    click(cx, "pull-checks-toggle");
+    assert!(
+        cx.debug_bounds("pull-checks").is_some(),
+        "View checks opens the rows"
+    );
     click(cx, "pull-merge");
     click(cx, "pull-merge");
     assert!(sent_merges(&net_rx).is_empty(), "a failed check blocks it");
@@ -1792,8 +2269,8 @@ fn the_issue_sort_is_remembered(cx: &mut TestAppContext) {
     assert!(cx.debug_bounds("issue-sort-menu").is_none());
 }
 
-/// Closed asks once, shows its rows, and a closed pull request opens on GitHub
-/// rather than in the pane.
+/// Closed asks once, shows its rows, and a closed pull request opens in the
+/// pane like an open one — the state pill says which it is.
 #[gpui::test]
 fn the_closed_list_loads_when_it_is_asked_for(cx: &mut TestAppContext) {
     let (store, net_rx) = scratch_store(cx, "closed", vec![entry("alpha", "/probe/alpha")]);
@@ -1827,7 +2304,10 @@ fn the_closed_list_loads_when_it_is_asked_for(cx: &mut TestAppContext) {
     assert!(cx.debug_bounds("PR-0").is_none());
 
     click(cx, "PR-7");
-    assert!(cx.debug_bounds("pull-request").is_none());
+    assert!(
+        cx.debug_bounds("pull-request").is_some(),
+        "a closed row opens its own detail"
+    );
 
     click(cx, "pr-state-open");
     assert!(cx.debug_bounds("PR-0").is_some());

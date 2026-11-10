@@ -202,6 +202,97 @@ pub fn branches(folder: &Path) -> Option<Vec<GitBranchRef>> {
     .flatten()
 }
 
+/// Upper bound on the commits one compare lists; a branch longer than this is
+/// a rebase waiting to happen, not a preview.
+const MAX_COMPARE_COMMITS: usize = 200;
+
+/// What `head` would bring to `base`: the files and the commits a new pull
+/// request previews. The three-dot range is deliberate — the merge base is the
+/// starting point, so a base that moved on since the branch forked does not
+/// read as removals. `None` when either name does not resolve (a branch that
+/// was deleted, a typo) or when the two are the same branch.
+pub fn compare(folder: &Path, base: &str, head: &str) -> Option<ComparePreview> {
+    let base = base.trim();
+    let head = head.trim();
+    if base.is_empty() || head.is_empty() || base == head {
+        return None;
+    }
+    with_repo(folder, |repo| {
+        let base_oid = repo.revparse_single(base).ok()?.peel_to_commit().ok()?.id();
+        let head_commit = repo.revparse_single(head).ok()?.peel_to_commit().ok()?;
+        let head_oid = head_commit.id();
+        let merge_base = repo.merge_base(base_oid, head_oid).ok()?;
+        let base_tree = repo.find_commit(merge_base).ok()?.tree().ok()?;
+        let head_tree = head_commit.tree().ok()?;
+        let mut options = diff_options(repo);
+        let mut diff = repo
+            .diff_tree_to_tree(Some(&base_tree), Some(&head_tree), Some(&mut options))
+            .ok()?;
+        find_renames(&mut diff).ok();
+        let mut files = files_from_diff(&diff);
+        for (file, delta) in files.iter_mut().zip(diff.deltas()) {
+            file.status_code = delta_letter(delta.status()).to_string();
+        }
+        Some(ComparePreview {
+            files,
+            commits: compare_commits(repo, head_oid, merge_base),
+        })
+    })
+    .flatten()
+}
+
+/// The commits `head` carries that the merge base does not, newest first, each
+/// with the number of files it touched.
+fn compare_commits(
+    repo: &Repository,
+    head: git2::Oid,
+    merge_base: git2::Oid,
+) -> Vec<CompareCommit> {
+    let Ok(mut walk) = repo.revwalk() else {
+        return Vec::new();
+    };
+    if walk.push(head).is_err() || walk.hide(merge_base).is_err() {
+        return Vec::new();
+    }
+    walk.take(MAX_COMPARE_COMMITS)
+        .filter_map(|oid| repo.find_commit(oid.ok()?).ok())
+        .map(|commit| CompareCommit {
+            hash: commit.id().to_string(),
+            subject: commit
+                .summary()
+                .ok()
+                .flatten()
+                .unwrap_or_default()
+                .to_string(),
+            author: commit.author().name().ok().map(str::to_string),
+            committed_at: Some(to_local(commit.time()).to_rfc3339()),
+            files: commit_file_count(repo, &commit),
+        })
+        .collect()
+}
+
+/// One commit's touched-file count: its tree against its first parent's.
+fn commit_file_count(repo: &Repository, commit: &git2::Commit<'_>) -> usize {
+    let Ok(tree) = commit.tree() else {
+        return 0;
+    };
+    let parent_tree = commit.parent(0).ok().and_then(|parent| parent.tree().ok());
+    repo.diff_tree_to_tree(parent_tree.as_ref(), Some(&tree), None)
+        .map(|diff| diff.deltas().len())
+        .unwrap_or(0)
+}
+
+/// The rail's letter for a diff delta, in the app's own vocabulary.
+fn delta_letter(status: git2::Delta) -> char {
+    match status {
+        git2::Delta::Added | git2::Delta::Untracked => 'A',
+        git2::Delta::Deleted => 'D',
+        git2::Delta::Renamed => 'R',
+        git2::Delta::Copied => 'C',
+        _ => 'M',
+    }
+}
+
 /// Resolves a remote-tracking branch pick (`origin/main`) to the local branch
 /// a checkout should land on: the name after the remote prefix, plus whether
 /// that local branch already exists. None when `target` is not a
@@ -1127,6 +1218,109 @@ mod untracked_patch_tests {
             .expect("untracked row");
         assert_eq!(counts.additions, Some(3));
         assert_eq!(counts.deletions, Some(0));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+#[cfg(test)]
+mod compare_tests {
+    use super::*;
+
+    /// A repo with `main` and a `feat` branch one commit ahead, so the compare
+    /// has both a file and a commit to report.
+    fn forked_repo(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("ws-compare-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let repo = git2::Repository::init(&dir).unwrap();
+        repo.set_head("refs/heads/main").ok();
+        std::fs::write(dir.join("base.txt"), "base\n").unwrap();
+        let sig = git2::Signature::now("t", "t@example.com").unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(Path::new("base.txt")).unwrap();
+        let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+        repo.commit(Some("refs/heads/main"), &sig, &sig, "init", &tree, &[])
+            .unwrap();
+        let head = repo
+            .find_commit(repo.revparse_single("main").unwrap().id())
+            .unwrap();
+        repo.branch("feat", &head, false).unwrap();
+
+        std::fs::write(dir.join("feat.txt"), "one\ntwo\nthree\n").unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(Path::new("feat.txt")).unwrap();
+        index.write().unwrap();
+        let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+        repo.commit(
+            Some("refs/heads/feat"),
+            &sig,
+            &sig,
+            "add the feature",
+            &tree,
+            &[&head],
+        )
+        .unwrap();
+        dir
+    }
+
+    #[test]
+    fn a_compare_lists_the_branchs_files_and_commits() {
+        let dir = forked_repo("files");
+        let preview = compare(&dir, "main", "feat").expect("a compare");
+
+        assert_eq!(preview.files.len(), 1);
+        assert_eq!(preview.files[0].path, "feat.txt");
+        assert_eq!(preview.files[0].status_code, "A");
+        assert_eq!(preview.files[0].additions, Some(3));
+        assert_eq!(preview.commits.len(), 1);
+        assert_eq!(preview.commits[0].subject, "add the feature");
+        assert_eq!(preview.commits[0].files, 1);
+        assert!(preview.commits[0].committed_at.is_some());
+        assert_eq!(preview.line_counts(), (3, 0));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Three-dot: a base that moved on does not show up as removals.
+    #[test]
+    fn a_moved_base_does_not_read_as_removals() {
+        let dir = forked_repo("three-dot");
+        let repo = git2::Repository::open(&dir).unwrap();
+        let sig = git2::Signature::now("t", "t@example.com").unwrap();
+        // main gains a file the feature never saw
+        std::fs::write(dir.join("later.txt"), "later\n").unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(Path::new("later.txt")).unwrap();
+        index.write().unwrap();
+        let main = repo
+            .find_commit(repo.revparse_single("main").unwrap().id())
+            .unwrap();
+        let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+        repo.commit(
+            Some("refs/heads/main"),
+            &sig,
+            &sig,
+            "later",
+            &tree,
+            &[&main],
+        )
+        .unwrap();
+
+        let preview = compare(&dir, "main", "feat").expect("a compare");
+
+        assert!(
+            preview.files.iter().all(|file| file.path != "later.txt"),
+            "the base's own file stays out of the preview"
+        );
+        assert_eq!(preview.files.len(), 1);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_same_branch_or_a_typo_is_no_compare() {
+        let dir = forked_repo("guard");
+        assert!(compare(&dir, "main", "main").is_none());
+        assert!(compare(&dir, "main", "gone").is_none());
+        assert!(compare(&dir, "  ", "feat").is_none());
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

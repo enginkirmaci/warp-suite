@@ -245,6 +245,13 @@ impl ReposPage {
             cx.notify();
             return true;
         }
+        if self.store.update(cx, |store, cx| {
+            let open = store.confirm_abandon.is_some();
+            store.cancel_abandon(cx);
+            open
+        }) {
+            return true;
+        }
         // the inline editor closes on Escape before anything else
         if self.tag_editing || self.tag_draft.is_some() {
             self.tag_editing = false;
@@ -263,11 +270,10 @@ impl ReposPage {
             cx.notify();
             return true;
         }
+        // the Pull requests tab closes its own pull request when the workbench
+        // is stacked; every other tab has only a menu or a filter to close
         let tab = self.store.read(cx).active_detail_tab();
-        if self.store.read(cx).open_pull.is_none() && self.views.dismiss_list(tab, cx) {
-            return true;
-        }
-        if self.store.update(cx, |s, cx| s.close_pull_request(cx)) {
+        if self.views.dismiss_list(tab, cx) {
             return true;
         }
         self.views
@@ -429,6 +435,14 @@ impl Render for ReposPage {
         self.ensure_tag_editor(window, cx);
         let list_width = self.store.read(cx).list_width();
         let list_visible = self.list_visible(window, cx);
+        // the detail pane's width this frame: the workbench splits or stacks on
+        // it, and no view can measure its own column
+        let pane_width = f32::from(window.viewport_size().width)
+            - warpui_kit_core::shell::RAIL_WIDTH
+            - if list_visible { list_width } else { 0. };
+        self.store.update(cx, |store, _| {
+            store.pane_width = pane_width;
+        });
         let strip = self.render_strip(cx);
         let page = cx.entity();
         let list = list_visible.then(|| {
@@ -485,6 +499,16 @@ impl Render for ReposPage {
         // a dialog is a layer over the page
         if let Some(dialog) = &mut self.dialog {
             stage = stage.child(dialog.render(window, cx));
+        }
+        // Abandon's confirmation lives on the store, so the menu that asks for
+        // it and the card that answers it never disagree
+        if let Some((number, title)) = self.store.read(cx).confirm_abandon.clone() {
+            stage = stage.child(crate::ui::dialogs::abandon_pull(
+                &self.store,
+                number,
+                &title,
+                cx,
+            ));
         }
         stage
     }

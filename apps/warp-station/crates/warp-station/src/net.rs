@@ -100,6 +100,37 @@ pub enum NetCommand {
         gh_exe: String,
         number: u64,
     },
+    /// The pull request's whole patch, cut into one chunk per file.
+    GitHubPullDiff {
+        folder: PathBuf,
+        gh_exe: String,
+        number: u64,
+    },
+    /// One commit's changed files, patches included.
+    GitHubPullCommitFiles {
+        folder: PathBuf,
+        gh_exe: String,
+        sha: String,
+    },
+    /// One verb on the pull request (approve, draft, close…).
+    GitHubPullAction {
+        folder: PathBuf,
+        gh_exe: String,
+        number: u64,
+        action: warp_station_core::github::PullAction,
+    },
+    /// What one branch would bring to another, for the New pull request form.
+    CompareBranches {
+        folder: PathBuf,
+        base: String,
+        head: String,
+    },
+    /// Opens the pull request the New pull request form filled in.
+    GitHubPullCreate {
+        folder: PathBuf,
+        gh_exe: String,
+        request: warp_station_core::github::NewPullRequest,
+    },
     /// The Azure DevOps activity pass (2-way parallel REST probes).
     AzurePass {
         folders: Vec<PathBuf>,
@@ -413,12 +444,40 @@ pub enum UiEvent {
     GitHubPullLoaded {
         folder: String,
         number: u64,
-        pull: Option<warp_station_core::github::GitHubPull>,
+        // boxed: the full view is the widest thing this channel carries
+        pull: Option<Box<warp_station_core::github::GitHubPull>>,
     },
     GitHubMerged {
         folder: String,
         number: u64,
         result: Result<(), String>,
+    },
+    GitHubPullDiffLoaded {
+        folder: String,
+        number: u64,
+        files: Option<Vec<warp_station_core::github::GitHubFilePatch>>,
+    },
+    GitHubPullCommitFilesLoaded {
+        folder: String,
+        sha: String,
+        files: Option<Vec<warp_station_core::github::GitHubFilePatch>>,
+    },
+    GitHubPullActed {
+        folder: String,
+        number: u64,
+        action: warp_station_core::github::PullAction,
+        result: Result<(), String>,
+    },
+    CompareLoaded {
+        folder: String,
+        base: String,
+        head: String,
+        preview: Option<warp_station_core::model::ComparePreview>,
+    },
+    GitHubPullCreated {
+        folder: String,
+        request: Box<warp_station_core::github::NewPullRequest>,
+        result: Result<u64, String>,
     },
     AzureSettled {
         items: Vec<(String, warp_station_core::azure::AzureSnapshot)>,
@@ -644,6 +703,7 @@ fn spawn_read_intake(
     let (queue_tx, queue_rx) = async_channel::unbounded();
     tokio::spawn(async move {
         let details_reads = Arc::new(AtomicU64::new(0));
+        let compare_reads = Arc::new(AtomicU64::new(0));
         while let Ok(cmd) = cmd_rx.recv().await {
             match cmd {
                 NetCommand::LoadChanges { folder } => {
@@ -716,7 +776,7 @@ fn spawn_read_intake(
                         let _ = evt_tx.send_blocking(UiEvent::GitHubPullLoaded {
                             folder: folder.to_string_lossy().to_string(),
                             number,
-                            pull,
+                            pull: pull.map(Box::new),
                         });
                     });
                 }
@@ -733,6 +793,106 @@ fn spawn_read_intake(
                         let _ = evt_tx.send_blocking(UiEvent::GitHubMerged {
                             folder: folder.to_string_lossy().to_string(),
                             number,
+                            result,
+                        });
+                    });
+                }
+                NetCommand::GitHubPullDiff {
+                    folder,
+                    gh_exe,
+                    number,
+                } => {
+                    let evt_tx = evt_tx.clone();
+                    tokio::spawn(async move {
+                        let files =
+                            warp_station_core::github::pull_diff(&folder, &gh_exe, number).await;
+                        let _ = evt_tx.send_blocking(UiEvent::GitHubPullDiffLoaded {
+                            folder: folder.to_string_lossy().to_string(),
+                            number,
+                            files,
+                        });
+                    });
+                }
+                NetCommand::GitHubPullCommitFiles {
+                    folder,
+                    gh_exe,
+                    sha,
+                } => {
+                    let evt_tx = evt_tx.clone();
+                    tokio::spawn(async move {
+                        let files =
+                            warp_station_core::github::commit_files(&folder, &gh_exe, &sha).await;
+                        let _ = evt_tx.send_blocking(UiEvent::GitHubPullCommitFilesLoaded {
+                            folder: folder.to_string_lossy().to_string(),
+                            sha,
+                            files,
+                        });
+                    });
+                }
+                NetCommand::CompareBranches { folder, base, head } => {
+                    // the form's two fields are typed into, so only the last
+                    // ask of a burst reads the repository
+                    let generation = compare_reads.fetch_add(1, Ordering::SeqCst) + 1;
+                    let newest = compare_reads.clone();
+                    let evt_tx = evt_tx.clone();
+                    tokio::spawn(async move {
+                        tokio::time::sleep(SELECTION_DEBOUNCE).await;
+                        if newest.load(Ordering::SeqCst) != generation {
+                            return;
+                        }
+                        let preview = tokio::task::spawn_blocking({
+                            let folder = folder.clone();
+                            let base = base.clone();
+                            let head = head.clone();
+                            move || warp_station_core::git::read::compare(&folder, &base, &head)
+                        })
+                        .await
+                        .ok()
+                        .flatten();
+                        let _ = evt_tx.send_blocking(UiEvent::CompareLoaded {
+                            folder: folder.to_string_lossy().to_string(),
+                            base,
+                            head,
+                            preview,
+                        });
+                    });
+                }
+                NetCommand::GitHubPullCreate {
+                    folder,
+                    gh_exe,
+                    request,
+                } => {
+                    let evt_tx = evt_tx.clone();
+                    tokio::spawn(async move {
+                        let result =
+                            warp_station_core::github::create_pull(&folder, &gh_exe, &request)
+                                .await;
+                        let _ = evt_tx.send_blocking(UiEvent::GitHubPullCreated {
+                            folder: folder.to_string_lossy().to_string(),
+                            request: Box::new(request),
+                            result,
+                        });
+                    });
+                }
+                NetCommand::GitHubPullAction {
+                    folder,
+                    gh_exe,
+                    number,
+                    action,
+                } => {
+                    let evt_tx = evt_tx.clone();
+                    tokio::spawn(async move {
+                        let result = warp_station_core::github::act_on_pull(
+                            &folder,
+                            &gh_exe,
+                            number,
+                            action.clone(),
+                        )
+                        .await;
+                        let _ = evt_tx.send_blocking(UiEvent::GitHubPullActed {
+                            folder: folder.to_string_lossy().to_string(),
+                            number,
+                            action,
                             result,
                         });
                     });
@@ -1275,6 +1435,11 @@ async fn net_main(cmd_rx: Receiver<NetCommand>, evt_tx: Sender<UiEvent>) {
             | NetCommand::GitHubClosed { .. }
             | NetCommand::GitHubPull { .. }
             | NetCommand::GitHubMerge { .. }
+            | NetCommand::GitHubPullDiff { .. }
+            | NetCommand::GitHubPullCommitFiles { .. }
+            | NetCommand::GitHubPullAction { .. }
+            | NetCommand::CompareBranches { .. }
+            | NetCommand::GitHubPullCreate { .. }
             | NetCommand::LoadChanges { .. } => {}
             NetCommand::LoadHistory { folder } => {
                 let (commits, unpushed) = tokio::task::spawn_blocking({

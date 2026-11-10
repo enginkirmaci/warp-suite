@@ -197,6 +197,52 @@ pub struct GitBranchRef {
     pub kind: GitBranchKind,
 }
 
+/// One commit a branch would bring, as the new-pull-request preview lists it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CompareCommit {
+    pub hash: String,
+    pub subject: String,
+    pub author: Option<String>,
+    /// RFC 3339, the shape the pull request's own commits carry.
+    pub committed_at: Option<String>,
+    pub files: usize,
+}
+
+impl CompareCommit {
+    pub fn short_hash(&self) -> &str {
+        if self.hash.len() <= 7 {
+            &self.hash
+        } else {
+            &self.hash[..7]
+        }
+    }
+}
+
+/// What one branch would bring to another: the files and the commits a new
+/// pull request previews before it exists. `base...head` (three-dot), so a
+/// base that moved on does not read as removals.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ComparePreview {
+    pub files: Vec<GitChangedFile>,
+    pub commits: Vec<CompareCommit>,
+}
+
+impl ComparePreview {
+    pub fn is_empty(&self) -> bool {
+        self.files.is_empty() && self.commits.is_empty()
+    }
+
+    /// `+adds −dels` across the preview.
+    pub fn line_counts(&self) -> (u64, u64) {
+        self.files.iter().fold((0, 0), |(adds, dels), file| {
+            (
+                adds + u64::from(file.additions.unwrap_or(0)),
+                dels + u64::from(file.deletions.unwrap_or(0)),
+            )
+        })
+    }
+}
+
 /// Outcome of one sync command: success, the actionable stderr line on
 /// failure, or a user abort (neither success nor a git error).
 #[derive(Clone, Debug)]

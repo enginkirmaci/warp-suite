@@ -8,12 +8,11 @@
 use crate::net::{GitAction, NetCommand};
 use crate::store::Store;
 use crate::theme;
+use crate::ui::diff_controls;
 use crate::ui::{A11y, icon};
 use gpui::prelude::*;
 use gpui::{Context, Entity, FontWeight, SharedString, Window, div, px, uniform_list};
-use gpui_kit::base::{Scrollbar, ScrollbarMode};
 use gpui_kit::component::input::{InputState, TextareaState};
-use gpui_kit::component::menu::ContextMenuExt as _;
 use std::cell::RefCell;
 use std::rc::Rc;
 use warp_station_core::model::GitChangedFile;
@@ -513,13 +512,13 @@ impl ChangesView {
                 .min_h_0()
                 .flex()
                 .flex_col()
-                .child(attach_filling(
+                .child(diff_controls::attach_filling(
                     gpui::ElementId::Name("changes-diff-menu".into()),
                     render_diff_with_scroll(
                         patch,
                         None,
                         warpui_kit_diff::DiffOptions {
-                            mode: kit_mode(self.diff_view),
+                            mode: diff_controls::kit_mode(self.diff_view),
                             wrap: self.diff_wrap,
                         },
                         &self.diff_scroll,
@@ -530,8 +529,8 @@ impl ChangesView {
                     warpui_kit_core::text_menu::focus(cx),
                 ))
                 .into_any_element(),
-            Some(_) => diff_state("No textual changes"),
-            None => diff_state("Loading patch…"),
+            Some(_) => diff_controls::state("No textual changes"),
+            None => diff_controls::state("Loading patch…"),
         };
         pane.child(
             div()
@@ -562,16 +561,34 @@ impl ChangesView {
                         .flex()
                         .items_center()
                         .gap_1()
-                        .child(diff_wrap_toggle(
+                        .child(diff_controls::wrap_toggle(
+                            "diff",
                             self.diff_wrap,
                             self.store.clone(),
-                            cx.entity(),
+                            {
+                                let this = cx.entity();
+                                move |next, cx| {
+                                    this.update(cx, |this, cx| {
+                                        this.diff_wrap = next;
+                                        cx.notify();
+                                    });
+                                }
+                            },
                             show_tooltips,
                         ))
-                        .child(diff_view_toggle(
+                        .child(diff_controls::view_toggle(
+                            "diff",
                             split,
                             self.store.clone(),
-                            cx.entity(),
+                            {
+                                let this = cx.entity();
+                                move |next, cx| {
+                                    this.update(cx, |this, cx| {
+                                        this.diff_view = next;
+                                        cx.notify();
+                                    });
+                                }
+                            },
                             show_tooltips,
                         )),
                 ),
@@ -585,31 +602,11 @@ impl ChangesView {
     /// viewport with the matching handle; the bars live here, outside the
     /// vertical scroller, so they stay visible while the diff scrolls.
     fn render_diff_scrollbars(&self) -> gpui::AnyElement {
-        let bar = |handle: &gpui::ScrollHandle, id: &'static str| {
-            div().flex_1().min_w_0().relative().child(
-                Scrollbar::horizontal(handle)
-                    .id(id)
-                    .mode(ScrollbarMode::Always)
-                    .viewport_from_layout(),
-            )
-        };
-        let mut footer = div()
-            .debug_selector(|| "diff-scrollbars".into())
-            .flex_shrink_0()
-            .h(px(16.))
-            .px_1()
-            .flex()
-            .flex_row()
-            .bg(theme::well());
-        footer = if self.diff_view == DiffViewMode::Split {
-            footer
-                .child(bar(&self.diff_scroll.left, "diff-scrollbar-left"))
-                .child(div().flex_shrink_0().w(px(1.)).bg(theme::hairline()))
-                .child(bar(&self.diff_scroll.right, "diff-scrollbar-right"))
-        } else {
-            footer.child(bar(&self.diff_scroll.unified, "diff-scrollbar-unified"))
-        };
-        footer.into_any_element()
+        diff_controls::scrollbars(
+            "diff",
+            &self.diff_scroll,
+            self.diff_view == DiffViewMode::Split,
+        )
     }
 
     fn render_file_list(
@@ -718,7 +715,7 @@ impl ChangesView {
         let key = (file.path.clone(), staged);
         let selected = self.selected_file.as_ref() == Some(&key);
         let armed = self.discard_armed.as_ref() == Some(&key);
-        let status_color = status_color(file.status_code.as_str());
+        let status_color = diff_controls::status_color(file.status_code.as_str());
         let row_id: SharedString =
             format!("{}-{}", if staged { "s" } else { "u" }, file.path).into();
         let row_selector = row_id.clone();
@@ -2236,151 +2233,6 @@ fn clean_state(store: &Entity<Store>, cx: &mut gpui::App) -> gpui::AnyElement {
                 .child(last)
         }))
         .into_any_element()
-}
-
-/// The diff pane's non-row states: a patch on its way, and a file with no
-/// textual delta (binary, mode-only).
-fn diff_state(text: &str) -> gpui::AnyElement {
-    div()
-        .flex_1()
-        .flex()
-        .items_center()
-        .justify_center()
-        .p_4()
-        .text_size(px(theme::font_body()))
-        .text_color(theme::text_muted())
-        .child(text.to_string())
-        .into_any_element()
-}
-
-/// The diff header's single icon button. The glyph names the other mode and
-/// the tooltip says the action; a click flips the local view and persists it.
-fn diff_view_toggle(
-    split: bool,
-    store: Entity<Store>,
-    this: Entity<ChangesView>,
-    show_tooltips: bool,
-) -> gpui::AnyElement {
-    let label = if split {
-        "Switch to unified view"
-    } else {
-        "Switch to split view"
-    };
-    let icon_path = if split {
-        "icons/icon-diff-unified.svg"
-    } else {
-        "icons/icon-diff-split.svg"
-    };
-    let button = div()
-        .id("diff-view-toggle")
-        .debug_selector(|| "diff-view-toggle".into())
-        .a11y_button(label)
-        .cursor_pointer()
-        .rounded_md()
-        .p_1()
-        .flex()
-        .items_center()
-        .hover(|s| s.bg(theme::raised()))
-        .on_click(move |_, _, cx| {
-            let next = if split {
-                DiffViewMode::Unified
-            } else {
-                DiffViewMode::Split
-            };
-            store.update(cx, |store, _| store.set_diff_view(next));
-            this.update(cx, |this, cx| {
-                this.diff_view = next;
-                cx.notify();
-            });
-        })
-        .child(icon(
-            icon_path,
-            px(theme::icon_small()),
-            theme::text_muted(),
-        ));
-    crate::ui::with_tooltip(button, show_tooltips, label).into_any_element()
-}
-
-/// Wrap a full-pane selectable surface in the Copy menu. `text_menu::attach`
-/// sizes to its content, which is right for a text block in flow but collapses
-/// a surface that owns a scroller; this wrapper grows in the pane's flex
-/// column and gives the scroller a definite height.
-fn attach_filling(
-    id: gpui::ElementId,
-    content: gpui::AnyElement,
-    focus: Option<gpui::FocusHandle>,
-) -> gpui::AnyElement {
-    let wrapper = div()
-        .id(id)
-        .relative()
-        .flex()
-        .flex_col()
-        .flex_1()
-        .min_h_0()
-        .child(content);
-    match focus {
-        Some(focus) => wrapper
-            .context_menu(warpui_kit_core::text_menu::menu(focus))
-            .into_any_element(),
-        None => wrapper.into_any_element(),
-    }
-}
-
-/// The header's word-wrap toggle. The icon button is active while rows wrap;
-/// the choice is persisted with the layout.
-fn diff_wrap_toggle(
-    wrap: bool,
-    store: Entity<Store>,
-    this: Entity<ChangesView>,
-    show_tooltips: bool,
-) -> gpui::AnyElement {
-    let label = "Wrap long lines";
-    let button = div()
-        .id("diff-wrap-toggle")
-        .debug_selector(|| "diff-wrap-toggle".into())
-        .a11y_toggle(label, wrap)
-        .cursor_pointer()
-        .rounded_md()
-        .p_1()
-        .flex()
-        .items_center()
-        .when(wrap, |d| d.bg(theme::raised()))
-        .hover(|d| d.bg(theme::raised()))
-        .on_click(move |_, _, cx| {
-            let next = !wrap;
-            store.update(cx, |store, _| store.set_diff_wrap(next));
-            this.update(cx, |this, cx| {
-                this.diff_wrap = next;
-                cx.notify();
-            });
-        })
-        .child(icon(
-            "icons/icon-wrap.svg",
-            px(theme::icon_small()),
-            if wrap {
-                theme::text()
-            } else {
-                theme::text_muted()
-            },
-        ));
-    crate::ui::with_tooltip(button, show_tooltips, label).into_any_element()
-}
-
-fn kit_mode(mode: DiffViewMode) -> warpui_kit_diff::DiffMode {
-    match mode {
-        DiffViewMode::Unified => warpui_kit_diff::DiffMode::Unified,
-        DiffViewMode::Split => warpui_kit_diff::DiffMode::Split,
-    }
-}
-
-fn status_color(code: &str) -> gpui::Rgba {
-    match code {
-        "U" | "?" | "A" => theme::SUCCESS_BRIGHT,
-        "D" => theme::DANGER,
-        "R" => theme::blue_bright(),
-        "C" => theme::AMBER_BRIGHT,
-        _ => theme::AMBER_BRIGHT,
-    }
 }
 
 /// The +/− stage-toggle button per row: unstaged rows stage, staged rows

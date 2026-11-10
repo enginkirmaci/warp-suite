@@ -1,14 +1,16 @@
-//! The detail pane's Pull requests and Issues tabs: a toolbar with Open and
-//! Closed and the New verb, then one row per item — the item glyph, #number and
-//! title, a head → base line (PRs) or labels and comments (issues), and an
-//! author / age cluster on the right. Issues also get a filter field and a Sort
-//! menu. A click on an open pull request turns the pane into that pull request;
-//! every other row opens on GitHub.
+//! The detail pane's Pull requests and Issues tabs. Both open on a toolbar with
+//! Open and Closed and the New verb. Pull requests is the design's workbench: a
+//! 320 work list beside the selected pull request, or — below 900 px of pane —
+//! one at a time with Back. Issues is still one full-width list, with its
+//! filter field and Sort menu; a pull request row opens in the pane, and an
+//! issue row opens on GitHub.
 
 use crate::store::Store;
 use crate::theme;
 use crate::ui::A11y;
 use crate::ui::icon;
+use crate::ui::new_pull::NewPullView;
+use crate::ui::pull_request::PullRequestView;
 use crate::ui::repos::{segment, segment_row};
 use gpui::prelude::*;
 use gpui::{Context, Entity, FontWeight, SharedString, Window, div, px};
@@ -18,10 +20,18 @@ use warpui_kit_core::shell;
 
 /// The rows' measure, as the design caps a list inside the detail pane.
 const LIST_WIDTH: f32 = 920.;
+/// The workbench's list column, and the pane width under which it and the
+/// pull request stop sharing the pane.
+const WORK_LIST: f32 = 320.;
+const STACKED_PANE: f32 = 900.;
 
 pub struct ItemListView {
     store: Entity<Store>,
     pull_requests: bool,
+    /// The pull request the workbench shows beside the list.
+    pull: Entity<PullRequestView>,
+    /// The form that replaces it while a pull request is being written.
+    new_pull: Entity<NewPullView>,
     filter: Entity<InputState>,
     query: String,
     /// The filter resets when the view changes.
@@ -35,6 +45,8 @@ pub struct ItemListView {
 impl ItemListView {
     pub fn new(
         store: Entity<Store>,
+        pull: Entity<PullRequestView>,
+        new_pull: Entity<NewPullView>,
         pull_requests: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -51,6 +63,8 @@ impl ItemListView {
         Self {
             store,
             pull_requests,
+            pull,
+            new_pull,
             filter,
             query: String::new(),
             folder: None,
@@ -60,9 +74,29 @@ impl ItemListView {
         }
     }
 
-    /// Escape: the Sort menu first, then the filter. Returns whether it took
-    /// the key.
+    /// Escape: the workbench's form or pull request first, then the Sort menu,
+    /// then the filter. Returns whether it took the key.
     pub fn dismiss(&mut self, cx: &mut Context<Self>) -> bool {
+        // the workbench's pull request is the innermost surface on the tab
+        if self.pull_requests {
+            if self.new_pull.update(cx, |view, cx| view.dismiss(cx)) {
+                return true;
+            }
+            if self.pull.update(cx, |view, cx| view.dismiss(cx)) {
+                return true;
+            }
+            if self.store.read(cx).new_pull.is_some() {
+                // below 900 px the form is the whole pane, so Escape is Back
+                if self.new_pull.read(cx).stacked {
+                    self.store.update(cx, |store, cx| store.close_new_pull(cx));
+                    return true;
+                }
+            } else if self.pull.read(cx).stacked && self.store.read(cx).open_pull.is_some() {
+                self.store
+                    .update(cx, |store, cx| store.close_pull_request(cx));
+                return true;
+            }
+        }
         if self.sort_open {
             self.sort_open = false;
             cx.notify();
@@ -81,6 +115,13 @@ impl ItemListView {
         self.sort_open = false;
         // the filter belongs to the view it was typed in, not to the tab
         self.clear_filter = !self.query.is_empty();
+        // the selected pull request belongs to the list it came from
+        if self.pull_requests {
+            self.store.update(cx, |store, cx| {
+                store.close_new_pull(cx);
+                store.close_pull_request(cx);
+            });
+        }
         if closed {
             let pull_requests = self.pull_requests;
             self.store.update(cx, |s, _| s.load_closed(pull_requests));
@@ -209,29 +250,41 @@ impl ItemListView {
                     )),
             )
             .when_some(new_url, |bar, url| {
+                // the workbench's detail owns the one filled primary, so the
+                // list's New stays a plain button — and a pull request is
+                // written in the pane, not in the browser
+                let store = self.store.clone();
+                let pull_requests = self.pull_requests;
                 bar.child(
                     div()
                         .id("list-new")
+                        .debug_selector(|| "list-new".into())
                         .a11y_button(label)
                         .cursor_pointer()
                         .h(px(shell::CONTROL_HEIGHT))
                         .px_3()
                         .rounded(px(6.))
+                        .border_1()
+                        .border_color(theme::line_strong())
+                        .bg(theme::panel())
                         .flex()
                         .items_center()
                         .gap_2()
-                        .bg(theme::accent())
                         .text_size(px(theme::font_control()))
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .text_color(theme::on_accent())
-                        .hover(|s| s.bg(theme::accent_hover()))
-                        .on_click(move |_, _, _| {
-                            let _ = warp_station_core::terminal::open_folder(&url);
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(theme::text())
+                        .hover(|s| s.bg(theme::raised()))
+                        .on_click(move |_, _, cx| {
+                            if pull_requests {
+                                store.update(cx, |store, cx| store.open_new_pull(cx));
+                            } else {
+                                let _ = warp_station_core::terminal::open_folder(&url);
+                            }
                         })
                         .child(icon(
                             "icons/icon-plus.svg",
                             px(theme::icon_small()),
-                            theme::on_accent(),
+                            theme::text_dim(),
                         ))
                         .child(label),
                 )
@@ -311,6 +364,13 @@ impl Render for ItemListView {
             self.closed = false;
             self.sort_open = false;
             self.clear_filter = !self.query.is_empty();
+        }
+        // a pull request that was just created lands in the Open list
+        if self
+            .store
+            .update(cx, |store, _| std::mem::take(&mut store.pull_created))
+        {
+            self.closed = false;
         }
         if std::mem::take(&mut self.clear_filter) {
             self.filter
@@ -462,6 +522,8 @@ impl Render for ItemListView {
         } else if items.is_empty() {
             let query = self.filter.read(cx).value().trim().to_string();
             no_match(&query, cx)
+        } else if self.pull_requests {
+            self.render_workbench(&items, cx)
         } else {
             let mut list = div().max_w(px(LIST_WIDTH)).flex().flex_col();
             for item in &items {
@@ -493,6 +555,238 @@ impl Render for ItemListView {
 }
 
 impl ItemListView {
+    /// The design's workbench: the 320 work list, a hairline, and the selected
+    /// pull request. Below 900 px of pane the two take turns and Back returns
+    /// to the list.
+    fn render_workbench(
+        &mut self,
+        items: &[GitHubItem],
+        cx: &mut Context<Self>,
+    ) -> gpui::AnyElement {
+        let stacked = self.store.read(cx).pane_width < STACKED_PANE;
+        // E2E hook: WARP_STATION_NEW_PULL=1 opens the form once, for a capture
+        if self
+            .store
+            .update(cx, |store, _| std::mem::take(&mut store.new_pull_requested))
+        {
+            self.store.update(cx, |store, cx| store.open_new_pull(cx));
+        }
+        let writing = self.store.read(cx).new_pull.is_some();
+        // the first visible row is the selection where both columns show, but
+        // never over the form that is already being written
+        if !stacked && !writing && self.store.read(cx).open_pull.is_none() {
+            let first = items[0].clone();
+            self.store
+                .update(cx, |store, cx| store.open_pull_request(first, cx));
+        }
+        self.pull.update(cx, |view, _| view.stacked = stacked);
+        self.new_pull.update(cx, |view, _| view.stacked = stacked);
+        let selected = self
+            .store
+            .read(cx)
+            .open_pull
+            .as_ref()
+            .map(|open| open.item.number);
+
+        let mut rows = div().flex().flex_col();
+        for item in items {
+            rows = rows.child(self.render_pr_row(item, selected == Some(item.number)));
+        }
+        let label = if self.closed { "Closed" } else { "Open" };
+        let list = div()
+            .id("pr-list-column")
+            .debug_selector(|| "pr-list-column".into())
+            .w(px(WORK_LIST))
+            .flex_shrink_0()
+            .h_full()
+            .flex()
+            .flex_col()
+            .border_r_1()
+            .border_color(theme::hairline())
+            .bg(theme::surface())
+            .child(
+                div()
+                    .flex_shrink_0()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .h(px(40.))
+                    .px_4()
+                    .border_b_1()
+                    .border_color(theme::hairline())
+                    .text_size(px(theme::font_meta()))
+                    .text_color(theme::text_dim())
+                    .child(format!("{label} {}", items.len()))
+                    .child(div().flex_1())
+                    .child(source_tag()),
+            )
+            .child(
+                div()
+                    .id("pr-list")
+                    .debug_selector(|| "pr-list".into())
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_y_scroll()
+                    .child(rows),
+            );
+
+        let detail = div()
+            .flex_1()
+            .min_w_0()
+            .h_full()
+            .flex()
+            .flex_col()
+            .child(if writing {
+                self.new_pull.clone().into_any_element()
+            } else {
+                self.pull.clone().into_any_element()
+            });
+        if stacked {
+            if writing || selected.is_some() {
+                div()
+                    .size_full()
+                    .min_h_0()
+                    .flex()
+                    .flex_col()
+                    .child(detail)
+                    .into_any_element()
+            } else {
+                div()
+                    .size_full()
+                    .min_h_0()
+                    .flex()
+                    .flex_col()
+                    .child(list)
+                    .into_any_element()
+            }
+        } else {
+            div()
+                .flex_1()
+                .min_h_0()
+                .flex()
+                .flex_row()
+                .child(list)
+                .child(detail)
+                .into_any_element()
+        }
+    }
+
+    /// A pull request row: 58 high, the reference and title, then head → base,
+    /// its state and the source. The selected row takes `raised` and the 3 px
+    /// accent edge.
+    fn render_pr_row(&self, item: &GitHubItem, selected: bool) -> impl IntoElement + use<> {
+        let closed = self.closed;
+        let target = item.clone();
+        let store = self.store.clone();
+        let age = item
+            .updated_at
+            .as_deref()
+            .and_then(warp_station_core::rel_time::format_rfc3339);
+        let head = item.head_ref_name.clone().unwrap_or_default();
+        let base = item.base_ref_name.clone().unwrap_or_default();
+        let state = if closed {
+            "closed"
+        } else if item.is_draft {
+            "draft"
+        } else {
+            "open"
+        };
+        let selector = format!("PR-{}", item.number);
+        div().border_t_1().border_color(theme::row_line()).child(
+            div()
+                .id(SharedString::from(selector.clone()))
+                .debug_selector(move || selector.clone())
+                .a11y_button(format!("#{} {}", item.number, item.title))
+                .cursor_pointer()
+                .flex()
+                .items_center()
+                .gap_2p5()
+                .min_h(px(58.))
+                .pl(px(13.))
+                .pr_2p5()
+                .py_2()
+                .border_l(px(3.))
+                .border_color(if selected {
+                    gpui::Hsla::from(theme::accent())
+                } else {
+                    gpui::transparent_black()
+                })
+                .when(selected, |d| d.bg(theme::raised()))
+                .hover(|d| d.bg(theme::panel()))
+                .on_click(move |_, _, cx| {
+                    let item = target.clone();
+                    store.update(cx, |s, cx| s.open_pull_request(item, cx));
+                })
+                .child(icon(
+                    "icons/icon-git-pull-request.svg",
+                    px(theme::icon_medium()),
+                    if closed {
+                        theme::text_muted()
+                    } else {
+                        theme::PR
+                    },
+                ))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .flex()
+                        .flex_col()
+                        .gap_0p5()
+                        .child(
+                            div()
+                                .min_w_0()
+                                .overflow_hidden()
+                                .whitespace_nowrap()
+                                .text_ellipsis()
+                                .text_size(px(theme::font_name()))
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .text_color(if closed {
+                                    theme::text_dim()
+                                } else {
+                                    theme::text()
+                                })
+                                .child(format!("#{} {}", item.number, item.title)),
+                        )
+                        .child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap_1p5()
+                                .min_w_0()
+                                .overflow_hidden()
+                                .whitespace_nowrap()
+                                .text_size(px(theme::font_meta()))
+                                .text_color(theme::text_muted())
+                                .when(!head.is_empty(), |d| {
+                                    d.child(
+                                        div()
+                                            .min_w_0()
+                                            .overflow_hidden()
+                                            .text_ellipsis()
+                                            .font_family(gpui::SharedString::from(
+                                                theme::code_font(),
+                                            ))
+                                            .text_size(px(theme::font_mono_meta()))
+                                            .child(format!("{head} → {base}")),
+                                    )
+                                    .child("·")
+                                })
+                                .child(state)
+                                .child("·")
+                                .child(source_tag()),
+                        ),
+                )
+                .children(age.map(|age| {
+                    div()
+                        .flex_shrink_0()
+                        .text_size(px(theme::font_meta()))
+                        .text_color(theme::text_muted())
+                        .child(age)
+                })),
+        )
+    }
+
     fn render_row(&self, item: &GitHubItem, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let closed = self.closed;
         let opens_here = item.is_pull_request && !closed;
@@ -641,6 +935,20 @@ fn pill(label: &'static str, color: gpui::Rgba) -> impl IntoElement + use<> {
         .text_size(px(theme::font_meta()))
         .text_color(color)
         .child(label)
+}
+
+/// The quiet source tag the merged lists carry: it says where the row will
+/// open, on the raised surface and in the muted ink, never the entity hue.
+fn source_tag() -> impl IntoElement + use<> {
+    div()
+        .flex_shrink_0()
+        .rounded(px(4.))
+        .bg(theme::raised())
+        .px_1p5()
+        .py_0p5()
+        .text_size(px(theme::font_micro()))
+        .text_color(theme::text_muted())
+        .child("GitHub")
 }
 
 /// A filter that matched nothing says so and offers the way back.

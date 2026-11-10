@@ -32,6 +32,23 @@ pub fn format_rfc3339(iso: &str) -> Option<String> {
         .map(|at| format(at.with_timezone(&Local)))
 }
 
+/// The day a timestamp belongs to, for a list grouped by day: "Today",
+/// "Yesterday", or the date itself (`2026-11-08`).
+pub fn day_label(iso: &str) -> Option<String> {
+    let at = DateTime::parse_from_rfc3339(iso)
+        .ok()?
+        .with_timezone(&Local);
+    let today = Local::now().date_naive();
+    let day = at.date_naive();
+    if day == today {
+        Some("Today".into())
+    } else if today.pred_opt() == Some(day) {
+        Some("Yesterday".into())
+    } else {
+        Some(day.format("%Y-%m-%d").to_string())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -61,5 +78,26 @@ mod tests {
             .to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
         assert_eq!(format_rfc3339(&iso).as_deref(), Some("2mo ago"));
         assert_eq!(format_rfc3339("not a date"), None);
+    }
+
+    #[test]
+    fn a_day_label_names_today_yesterday_or_the_date() {
+        let stamp = |at: DateTime<Local>| {
+            at.with_timezone(&chrono::Utc)
+                .to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+        };
+        let now = Local::now();
+
+        assert_eq!(day_label(&stamp(now)).as_deref(), Some("Today"));
+        assert_eq!(
+            day_label(&stamp(now - Duration::days(1))).as_deref(),
+            Some("Yesterday")
+        );
+        let old = now - Duration::days(30);
+        assert_eq!(
+            day_label(&stamp(old)).as_deref(),
+            Some(old.format("%Y-%m-%d").to_string().as_str())
+        );
+        assert_eq!(day_label("not a date"), None);
     }
 }
