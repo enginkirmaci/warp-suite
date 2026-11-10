@@ -404,6 +404,39 @@ Use the core helper for new code rather than adding another copy.
   keyboard shortcut or the menu; a bump of `gpui-kit` gets the probe in
   `kits/warpui-kit-core/tests/text_editing_probe.rs` first.
 
+## The About screen
+
+Every GPUI app carries **About above Settings** at the bottom of the rail, and
+all three draw the same screen from `warpui_kit_core::about`:
+
+- the list holds the four suite members — Station, Agent, Notes and the
+  headless SnapIt — and the row for the app you are in carries a `This app`
+  tag;
+- the detail is a hero (mark, channel tag, tagline, Repository / Changelog /
+  Report an issue), a **Build** card (version, build, channel, released,
+  runtime) and a **Legal** card (GPL-3.0, copyright, `View license`);
+- the detail owns one filled primary: `Release notes` on the current app,
+  `Open <app>` on a sibling, and `Open controls` (Station) or `Open Station`
+  (a sibling) for SnapIt. On Linux SnapIt's row says `Windows only` and has
+  no primary;
+- `Copy version` writes `Warp Station 0.1.0 (1b7d006) · dev` — one line, the
+  format support asks for.
+
+The marks are monochrome `currentColor` SVGs in
+`kits/warpui-kit-core/assets/marks/`, so the accent tints them and they follow
+a palette switch like everything else. Build facts come from each app's
+`build.rs` (`WARP_SUITE_BUILD`, `WARP_SUITE_CHANNEL`, `WARP_SUITE_RELEASED`),
+which the release scripts export; a plain `cargo build` has no script behind
+it and reports `dev` rather than pretending to be a release. `View license`
+opens the app's own GPL text in a modal, embedded at build time and rendered
+through `warpui_kit_markdown`'s read-only document viewer — the GPL reads as
+prose, at the family's type, selectable — so the license ships with the binary
+and the MIT kit carries none of it.
+
+SnapIt has no window of its own. It is a row on the other apps' screens, its
+`-V` prints the same build line, and Station's Tools › SnapIt page repeats
+the version the row promises.
+
 ## Where a change goes
 
 - A new color or tone: `palette.rs` — add it to `Ramp` (with a value in all four
@@ -412,6 +445,7 @@ Use the core helper for new code rather than adding another copy.
 - A new size: `fonts.rs`, and only if no existing step fits.
 - A new shared shape: `warpui-kit-core` (see `kits/README.md`), not an app —
   `controls.rs` for a button/menu, `field.rs` for a field, `settings.rs` for a
-  settings row, `motion.rs` for anything that moves.
+  settings row, `about.rs` for anything the About screen shows, `motion.rs` for
+  anything that moves.
 - Startup, text size or palette plumbing: `bootstrap.rs` / `scale.rs`.
 - App-only layout constants: the app's `theme.rs`.

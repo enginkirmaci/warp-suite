@@ -27,6 +27,7 @@ enum Section {
     Repos,
     Summary,
     Tools,
+    About,
     Settings,
 }
 
@@ -43,10 +44,22 @@ enum Tool {
 /// How wide the title bar's search field is.
 const SEARCH_W: f32 = 460.;
 
+/// The About screen's Legal card reads this out in the app: the license text
+/// ships with the binary, not only with the repository.
+const ABOUT_LICENSE: &str = include_str!("../../../../LICENSE");
+
 pub struct MainWindow {
     pub store: Entity<Store>,
     section: Section,
     tool: Tool,
+    /// About: which suite member the detail shows. The app you are in until
+    /// the user picks another; the list keeps all four reachable.
+    about_selected: warpui_kit_core::about::AppId,
+    /// The license card is up over the About screen.
+    about_license_open: bool,
+    /// The license document, built the first time the card opens: a read-only
+    /// markdown editor, so the GPL reads as prose and its text is selectable.
+    about_license: Option<Entity<warpui_kit_markdown::LiveEditorState>>,
     repos_page: Entity<crate::ui::repos::ReposPage>,
     settings_page: Entity<crate::ui::settings::SettingsPage>,
     summary_page: Entity<SummaryPage>,
@@ -129,9 +142,16 @@ impl MainWindow {
                 Ok("settings") => Section::Settings,
                 Ok("summary") => Section::Summary,
                 Ok("tools") => Section::Tools,
+                Ok("about") => Section::About,
                 _ => Section::Repos,
             },
             tool: tool.unwrap_or(Tool::Formatters),
+            about_selected: warpui_kit_core::about::AppId::Station,
+            // E2E hook: WARP_STATION_LICENSE=1 opens About with the license
+            // card up (a hidden window takes no pointer, so a capture needs
+            // the card to open itself).
+            about_license_open: matches!(std::env::var("WARP_STATION_LICENSE").as_deref(), Ok("1")),
+            about_license: None,
             repos_page,
             settings_page,
             summary_page,
@@ -256,6 +276,12 @@ impl Render for MainWindow {
                     return;
                 }
                 if key == "escape" {
+                    if this.about_license_open {
+                        this.about_license_open = false;
+                        cx.notify();
+                        cx.stop_propagation();
+                        return;
+                    }
                     if this.wand_queue_open {
                         this.wand_queue_open = false;
                         cx.notify();
@@ -352,6 +378,21 @@ impl Render for MainWindow {
         }
         if let Some(toasts) = self.render_toasts(cx) {
             root = root.child(toasts);
+        }
+        if self.about_license_open {
+            let editor = self.about_license.get_or_insert_with(|| {
+                crate::ui::markdown::attach(ABOUT_LICENSE.into(), window, cx)
+            });
+            let body = crate::ui::markdown::render_read_only_card(editor, cx);
+            root = root.child(warpui_kit_core::about::license_dialog(
+                "about-license",
+                "GNU General Public License v3.0",
+                body,
+                cx.listener(|this, _, _, cx| {
+                    this.about_license_open = false;
+                    cx.notify();
+                }),
+            ));
         }
         root
     }
@@ -1542,6 +1583,13 @@ impl MainWindow {
             ))
             .child(div().flex_1())
             .child(self.rail_item(
+                Section::About,
+                "rail-about",
+                "icons/icon-about.svg",
+                "About",
+                cx,
+            ))
+            .child(self.rail_item(
                 Section::Settings,
                 "rail-settings",
                 "icons/icon-cog.svg",
@@ -1557,6 +1605,7 @@ impl MainWindow {
             Section::Repos => body.child(self.repos_page.clone()).into_any_element(),
             Section::Summary => body.child(self.summary_page.clone()).into_any_element(),
             Section::Tools => body.child(self.render_tools(window, cx)).into_any_element(),
+            Section::About => body.child(self.render_about(cx)).into_any_element(),
             Section::Settings => body.child(self.settings_page.clone()).into_any_element(),
         }
     }
@@ -1699,5 +1748,114 @@ impl MainWindow {
                     .child(page),
             )
             .into_any_element()
+    }
+
+    // ---- about ---------------------------------------------------------------
+
+    /// The rail's About section: the family in the list, the selected member's
+    /// identity, Build and Legal cards in the detail. The screen is the kit's;
+    /// this holds the one piece of state it needs and the effects behind its
+    /// verbs. It opens on Station, the app you are in.
+    fn render_about(&mut self, cx: &mut Context<Self>) -> gpui::Div {
+        use warpui_kit_core::about::{self, AppId};
+
+        let build = warpui_kit_core::build_info!();
+        let width = self.store.read(cx).list_width();
+        let selected = self.about_selected;
+        let current = AppId::Station;
+
+        let entity = cx.entity();
+        let pick = entity.clone();
+        let on_pick = move |id: AppId, _: &gpui::ClickEvent, _: &mut Window, cx: &mut App| {
+            pick.update(cx, |this, cx| {
+                this.about_selected = id;
+                cx.notify();
+            });
+        };
+        let act = entity.clone();
+        let on_action =
+            move |action: about::Action, _: &gpui::ClickEvent, _: &mut Window, cx: &mut App| {
+                act.update(cx, |this, cx| this.apply_about_action(action, cx));
+            };
+        let open = entity;
+        let on_link =
+            move |link: about::Link, _: &gpui::ClickEvent, _: &mut Window, cx: &mut App| {
+                open.update(cx, |this, cx| this.open_about_link(link, cx));
+            };
+
+        shell::panes()
+            .min_w_0()
+            .debug_selector(|| "about-page".into())
+            .child(about::list(width, selected, current, &build, on_pick))
+            .child(about::detail(
+                selected,
+                current,
+                &build,
+                "Open controls",
+                on_action,
+                on_link,
+            ))
+    }
+
+    /// What the About detail's buttons do. The kit decides which one is
+    /// showing; the app owns the effect.
+    fn apply_about_action(
+        &mut self,
+        action: warpui_kit_core::about::Action,
+        cx: &mut Context<Self>,
+    ) {
+        use warpui_kit_core::about;
+
+        match action {
+            about::Action::ReleaseNotes => {
+                let url = format!("{}/releases", about::repository());
+                if let Err(err) = warp_station_core::terminal::open_url(&url) {
+                    self.store.update(cx, |store, cx| {
+                        store.notify_error(format!("release notes: {err}"));
+                        cx.notify();
+                    });
+                }
+            }
+            about::Action::OpenApp(id) => {
+                let member = about::app(id);
+                if let Err(err) = warpui_kit_platform::sibling::open(member.binary) {
+                    self.store.update(cx, |store, cx| {
+                        store.notify_error(err);
+                        cx.notify();
+                    });
+                }
+            }
+            // Station is the one app whose About can reach the SnapIt page:
+            // SnapIt has no window, so "Open controls" lands here.
+            about::Action::SnapIt => {
+                self.section = Section::Tools;
+                self.tool = Tool::SnapIt;
+                cx.notify();
+            }
+            about::Action::CopyVersion => {
+                let build = warpui_kit_core::build_info!();
+                let line = build.version_line(about::app(self.about_selected));
+                cx.write_to_clipboard(ClipboardItem::new_string(line));
+            }
+        }
+    }
+
+    /// The three external links open the browser; the license stays in the app,
+    /// where the text ships with the binary.
+    fn open_about_link(&mut self, link: warpui_kit_core::about::Link, cx: &mut Context<Self>) {
+        use warpui_kit_core::about;
+
+        if link == about::Link::License {
+            self.about_license_open = true;
+            cx.notify();
+            return;
+        }
+        let url = link.url(about::app(self.about_selected));
+        if let Err(err) = warp_station_core::terminal::open_url(&url) {
+            self.store.update(cx, |store, cx| {
+                store.notify_error(format!("link: {err}"));
+                cx.notify();
+            });
+        }
     }
 }

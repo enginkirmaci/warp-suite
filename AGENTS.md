@@ -198,6 +198,13 @@ when one side changes, update the other side in the **same commit**.
   additive; a writer must not drop the key it does not own. Writes use a
   sidecar lock and an atomic rename. Reduced motion is per-app, not in this
   file.
+- **About and build facts**: every GPUI app carries About above Settings and
+  draws `warpui_kit_core::about` — the family list plus the selected member's
+  Build and Legal cards. `scripts/build.sh` and `scripts/build.ps1` export
+  `WARP_SUITE_BUILD`, `WARP_SUITE_CHANNEL` and `WARP_SUITE_RELEASED`; each
+  app's `build.rs` turns them into `cargo:rustc-env` and a plain `cargo build`
+  falls back to `dev`. The variable names and the `Copy version` line are a
+  family contract: change the four apps and the release scripts together.
 - **warp-android-scribe bridge** (`android-apps/warp-android-scribe`): LAN
   `http://<nas-lan>:8787` (UFW `<nas-subnet>`) and public
   `https://<nas-host>` through Cloudflare Tunnel -> Nginx Proxy

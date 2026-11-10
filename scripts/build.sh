@@ -70,6 +70,26 @@ if git -C "$root" rev-parse HEAD >/dev/null 2>&1; then
     [ -z "$(git -C "$root" status --porcelain 2>/dev/null)" ] || suite_sha="$suite_sha-dirty"
 fi
 
+# The build facts every app's About screen shows. Each app's build.rs turns
+# these into `cargo:rustc-env`; a plain `cargo build` without this script
+# still compiles and says `dev`.
+WARP_SUITE_BUILD="dev"
+if [ -n "$suite_sha" ]; then
+    WARP_SUITE_BUILD="$(printf '%s' "${suite_sha%-dirty}" | cut -c1-7)"
+    case "$suite_sha" in *-dirty) WARP_SUITE_BUILD="$WARP_SUITE_BUILD-dirty" ;; esac
+fi
+WARP_SUITE_CHANNEL="dev"
+case "$version" in
+    *-dirty) ;;
+    *)
+        if printf '%s' "$version" | grep -Eq '^v?[0-9]+\.[0-9]+\.[0-9]+$'; then
+            WARP_SUITE_CHANNEL="stable"
+        fi
+        ;;
+esac
+export WARP_SUITE_BUILD WARP_SUITE_CHANNEL
+export WARP_SUITE_RELEASED="$(date -u +%Y-%m-%d)"
+
 : > "$bundle/REVISIONS.txt"
 built=0
 while read -r app; do

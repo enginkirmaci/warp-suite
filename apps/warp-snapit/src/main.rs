@@ -17,7 +17,14 @@ fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         Action::Version => {
-            println!("warp-snapit {}", env!("CARGO_PKG_VERSION"));
+            // The same build line the About screen shows: one format for a
+            // support report, whatever the user pasted.
+            println!(
+                "warp-snapit {} ({}) · {}",
+                env!("CARGO_PKG_VERSION"),
+                env!("WARP_SUITE_BUILD"),
+                env!("WARP_SUITE_CHANNEL")
+            );
             ExitCode::SUCCESS
         }
         Action::Run(cli) => run(cli),

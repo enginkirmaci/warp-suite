@@ -16,6 +16,7 @@ pub mod io;
 pub mod logging;
 pub mod notes;
 pub mod paths;
+pub mod sibling;
 
 #[cfg(feature = "assets")]
 pub mod assets;

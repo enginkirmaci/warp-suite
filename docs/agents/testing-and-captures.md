@@ -78,7 +78,8 @@ construction. Use them instead of clicking through a hidden window.
 
 | App | Variable | Values |
 | --- | --- | --- |
-| Warp Station | `WARP_STATION_PAGE` | `settings`, `summary`, `tools` |
+| Warp Station | `WARP_STATION_PAGE` | `settings`, `summary`, `tools`, `about` |
+| Warp Station | `WARP_STATION_LICENSE` | `1` opens About with the license card up |
 | Warp Station | `WARP_STATION_SHEET` | tab label, case-insensitive: `Overview`, `Changes`, `History`, `Pull requests`, `Issues`, `Pipelines` |
 | Warp Station | `WARP_STATION_SELECT` | a name or index in the list |
 | Warp Station | `WARP_STATION_TOOLS_OPEN` | `formatters`, `nuget`, `clipboard` |
@@ -86,8 +87,8 @@ construction. Use them instead of clicking through a hidden window.
 | Warp Station | `WARP_STATION_NOTES` | `1` to open the Notes panel on launch |
 | Warp Station | `WARP_STATION_NEW_PULL` | `1` to open the New pull request form on the first Pull requests draw |
 | Warp Station | `WARP_STATION_IPC_DIR` | override the agent-door directory |
-| warp-agent | `WARP_AGENT_PAGE` | `settings`, `settings-chat`, `settings-permissions`, `settings-server` |
-| warp-notes | `WARP_NOTES_PAGE` | `settings` |
+| warp-agent | `WARP_AGENT_PAGE` | `settings`, `settings-chat`, `settings-permissions`, `settings-server`, `about` |
+| warp-notes | `WARP_NOTES_PAGE` | `settings`, `about` |
 
 The hooks are read once at launch; unset means the app's normal default. They
 exist for captures and automation, not as user-facing settings.

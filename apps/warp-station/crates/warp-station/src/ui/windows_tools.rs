@@ -145,6 +145,21 @@ impl Render for SnapItPage {
                             .text_color(theme::text_muted())
                             .child("The engine snaps a dragged window into the zones these lines make."),
                     )
+                    // The About row's Open controls lands here, so the facts
+                    // that row promises are on the page it opens.
+                    .child(
+                        div()
+                            .debug_selector(|| "snapit-version".into())
+                            .text_size(px(theme::font_meta()))
+                            .text_color(theme::text_muted())
+                            .child(format!(
+                                "SnapIt {} ({}) · {} · {}",
+                                env!("CARGO_PKG_VERSION"),
+                                env!("WARP_SUITE_BUILD"),
+                                env!("WARP_SUITE_CHANNEL"),
+                                warpui_kit_core::about::LICENSE,
+                            )),
+                    )
                     .into_any_element()
             }
             None => div()

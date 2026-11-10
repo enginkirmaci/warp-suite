@@ -62,6 +62,15 @@ if (Test-Path (Join-Path $root '.git')) {
     try { $sha = (& git -C $root rev-parse HEAD 2>$null) } catch { }
 }
 
+# The build facts every app's About screen shows. Each app's build.rs turns
+# these into `cargo:rustc-env`; a plain `cargo build` without this script
+# still compiles and says `dev`.
+$env:WARP_SUITE_BUILD = if ($sha -and $sha -ne 'unknown') {
+    if ($sha.Length -ge 7) { $sha.Substring(0, 7) } else { $sha }
+} else { 'dev' }
+$env:WARP_SUITE_CHANNEL = if ($Version -match '^v?[0-9]+\.[0-9]+\.[0-9]+$') { 'stable' } else { 'dev' }
+$env:WARP_SUITE_RELEASED = (Get-Date).ToUniversalTime().ToString('yyyy-MM-dd')
+
 New-Item -ItemType Directory -Force -Path $dist | Out-Null
 $revisions = @()
 

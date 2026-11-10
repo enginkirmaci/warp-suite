@@ -12,6 +12,8 @@
 //! - [`shell`] — the one window shape: rail, tab strip, list and detail
 //! - [`motion`] — durations and the spinner
 //! - [`kit`] — maps the palette onto gpui-kit's shadcn-style theme tokens
+//! - [`about`] — the About screen every app carries above Settings: the
+//!   family table, the marks, and the Build/Legal cards
 //! - [`a11y`] — the role/label trait every hand-rolled control passes through
 //! - [`mod@icon`] — tinted svg icon builders (asset path or inline source)
 //! - [`bootstrap`] — the one app startup: kit init, shared scale and palette,
@@ -28,6 +30,7 @@
 //! same family.
 
 pub mod a11y;
+pub mod about;
 pub mod bootstrap;
 pub mod controls;
 pub mod field;
