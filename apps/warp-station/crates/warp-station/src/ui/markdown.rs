@@ -7,8 +7,8 @@
 //! comments, not a document, and one editor entity per comment buys nothing.
 
 use gpui::{
-    AnyElement, AppContext as _, Entity, IntoElement as _, ParentElement as _, SharedString,
-    Styled as _, Window, div, px,
+    AnyElement, Entity, IntoElement as _, ParentElement as _, SharedString, Styled as _, Window,
+    div, px,
 };
 use warpui_kit_markdown::{LiveEditor, LiveEditorState};
 
@@ -24,27 +24,7 @@ pub fn attach<C: 'static>(
     window: &mut Window,
     cx: &mut gpui::Context<C>,
 ) -> Entity<LiveEditorState> {
-    let editor = cx.new(|cx| {
-        let mut state = LiveEditorState::new(window, cx);
-        state.set_read_only(true, cx);
-        state.set_value(text, window, cx);
-        state
-    });
-    let owner = cx.entity().downgrade();
-    cx.observe(&editor, move |_, _, cx| {
-        // defer: the editor notifies while its host is often still on the
-        // update stack (a click inside the document, a layout pass), and
-        // updating the host from here re-enters its lease. The effect runs
-        // after the current update, where notifying is safe.
-        let owner = owner.clone();
-        cx.defer(move |cx| {
-            if let Some(owner) = owner.upgrade() {
-                owner.update(cx, |_, cx| cx.notify());
-            }
-        });
-    })
-    .detach();
-    editor
+    warpui_kit_markdown::read_only_document(text, window, cx)
 }
 
 /// Swaps the document the editor renders (a regenerated summary, a saved

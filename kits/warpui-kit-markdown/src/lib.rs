@@ -22,8 +22,13 @@ pub mod apply;
 pub mod editor;
 pub mod highlighter;
 pub mod live;
+pub mod read_only;
 
 pub use editor::read_only_selection_text;
 pub use editor::{CodeBlock, LiveColors, LiveEditor, LiveEditorEvent, LiveEditorState, note_key};
 pub use highlighter::{LIVE_LANGUAGE, live_highlighter_factory};
 pub use live::{MarkdownLiveKind, MarkdownLiveSpan, parse, parse_document, toggle_task_at};
+pub use read_only::{
+    read_only_document, render_read_only_document, render_read_only_document_at,
+    render_read_only_document_in_card,
+};
