@@ -9,7 +9,7 @@ use crate::ui::A11y;
 use crate::ui::icon;
 use crate::ui::overview::{card, section_title};
 use gpui::prelude::*;
-use gpui::{Context, Entity, FontWeight, SharedString, Window, div, px};
+use gpui::{Context, Entity, FontWeight, SharedString, Window, div, px, relative};
 use warpui_kit_markdown::LiveEditorState;
 
 use crate::ui::markdown as md;
@@ -302,7 +302,8 @@ impl Render for ReadmeView {
                         )
                         .child(
                             div()
-                                .text_size(px(theme::font_body()))
+                                .text_size(px(theme::font_name()))
+                                .line_height(relative(25. / 15.))
                                 .text_color(theme::text_faint())
                                 .child("Create a README.md in the repository root to see it here."),
                         )

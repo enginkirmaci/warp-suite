@@ -8,7 +8,7 @@
 
 use gpui::{
     AnyElement, Entity, IntoElement as _, ParentElement as _, SharedString, Styled as _, Window,
-    div, px,
+    div, px, relative,
 };
 use warpui_kit_markdown::{LiveEditor, LiveEditorState};
 
@@ -57,13 +57,18 @@ fn render(editor: &Entity<LiveEditorState>, cx: &gpui::App, in_card: bool) -> An
     let mut element = LiveEditor::new(editor)
         .read_only(true)
         .fit_content(true)
-        .text_size(px(theme::font_body()));
+        .text_size(px(theme::font_name()));
     if in_card {
         element = element.unbounded_column().top_margin_em(0.5);
     }
+    // the design's running text is 15 / 25; the viewer takes a text step but
+    // no line-height hook, so the container that owns the document states
+    // the ratio
     div()
         .w_full()
         .h(px(height))
+        .text_size(px(theme::font_name()))
+        .line_height(relative(25. / 15.))
         .child(element)
         .into_any_element()
 }

@@ -68,14 +68,28 @@ impl Render for AzureView {
         let github = folder
             .as_ref()
             .and_then(|f| self.store.read(cx).github_by_folder.get(f).cloned());
+        let (azure_enabled, github_enabled) = {
+            let store = self.store.read(cx);
+            let settings = store.settings();
+            (
+                settings.repos.enable_azure_devops,
+                settings.repos.enable_github,
+            )
+        };
         let azure_ok = azure.as_ref().is_some_and(|snapshot| snapshot.available);
         let github_ok = github.as_ref().is_some_and(|snapshot| snapshot.available);
         if !azure_ok && !github_ok {
             return empty_state(if azure.is_none() && github.is_none() {
-                "No activity loaded yet — the pass fills after the scan settles".into()
+                // no source has answered yet: an enabled one is still on its
+                // way, and a disabled pair has nothing to wait for
+                if azure_enabled || github_enabled {
+                    "No activity loaded yet — the pass fills after the scan settles".into()
+                } else {
+                    "GitHub and Azure DevOps are both turned off — turn one on in Settings to see its runs."
+                        .into()
+                }
             } else {
-                "This repository has no GitHub or Azure DevOps remote (or the token was rejected)"
-                    .into()
+                "This repository has no GitHub or Azure DevOps remote.".into()
             });
         }
 

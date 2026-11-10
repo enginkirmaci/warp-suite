@@ -477,7 +477,10 @@ fn remove_row(armed: bool, entities: &Entity<Store>, page: &Entity<ReposPage>) -
         .cursor_pointer()
         .rounded(px(6.))
         .px_2()
-        .py_1p5()
+        // the resting row is one 32 px line; the armed one carries its second
+        // line and takes its height from the content
+        .when(!armed, |row| row.h(px(32.)).justify_center())
+        .when(armed, |row| row.py_1p5())
         .flex()
         .flex_col()
         .gap_0p5()

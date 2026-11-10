@@ -1109,7 +1109,8 @@ fn an_archived_row_has_no_star_to_press(cx: &mut TestAppContext) {
     cx.update_entity(&store, |s: &mut Store, cx| s.toggle_show_archived(cx));
     let cx = open_window(&store, cx);
 
-    click(cx, "repo-star-1");
+    // the Archive filter shows the archived repo alone, so it is row 0
+    click(cx, "repo-star-0");
 
     assert!(!cx.read_entity(&store, |s, _| s.repos[1].is_favorite()));
 }
@@ -2475,6 +2476,46 @@ fn the_issue_filter_narrows_the_rows(cx: &mut TestAppContext) {
     );
 }
 
+/// The design's Issues toolbar does not depend on the row count: an empty list
+/// keeps Filter issues, Sort and the New verb when a create target is known.
+/// Pull requests still carry no filter.
+#[gpui::test]
+fn the_issues_toolbar_survives_an_empty_list(cx: &mut TestAppContext) {
+    let (store, _net_rx) = scratch_store(cx, "empty-issues", vec![entry("alpha", "/probe/alpha")]);
+    seed_github(&store, "/probe/alpha", 0, 0, cx);
+    let cx = open_window(&store, cx);
+    draw(cx);
+
+    click(cx, "detail-tab-issues");
+    assert!(
+        cx.debug_bounds("issue-filter").is_some(),
+        "Filter issues stays on an empty list"
+    );
+    assert!(
+        cx.debug_bounds("issue-sort").is_some(),
+        "Sort stays on an empty list"
+    );
+    assert!(
+        cx.debug_bounds("list-new").is_some(),
+        "a known GitHub target keeps New issue"
+    );
+    assert!(
+        cx.debug_bounds("issue-list").is_none(),
+        "there are no rows to list"
+    );
+    click(cx, "issue-sort");
+    assert!(
+        cx.debug_bounds("issue-sort-menu").is_some(),
+        "the sort menu opens over the empty state"
+    );
+
+    click(cx, "detail-tab-pulls");
+    assert!(
+        cx.debug_bounds("issue-filter").is_none(),
+        "the design gives pull requests no filter"
+    );
+}
+
 /// The menu marks the sort, a pick is remembered, and an outside press closes it.
 #[gpui::test]
 fn the_issue_sort_is_remembered(cx: &mut TestAppContext) {
@@ -2814,8 +2855,9 @@ fn the_list_edge_drags_inside_its_bounds(cx: &mut TestAppContext) {
     assert!(handle_now.x < handle.x);
 }
 
-/// An integration that is off takes its tabs and its Overview card along, and
-/// anything still asking for one of those tabs lands on Overview.
+/// An integration that is off takes its GitHub tabs and its Overview card
+/// along, and anything still asking for one of those tabs lands on Overview.
+/// Pipelines is every repository's tab and brings its own empty state.
 #[gpui::test]
 fn the_integration_switches_take_their_tabs_along(cx: &mut TestAppContext) {
     let (store, _net_rx) = scratch_store(cx, "tabs-off", vec![entry("alpha", "/probe/alpha")]);
@@ -2841,10 +2883,20 @@ fn the_integration_switches_take_their_tabs_along(cx: &mut TestAppContext) {
 
     assert!(cx.debug_bounds("detail-tab-issues").is_none());
     assert!(cx.debug_bounds("detail-tab-pulls").is_none());
-    assert!(cx.debug_bounds("detail-tab-pipelines").is_none());
+    assert!(
+        cx.debug_bounds("detail-tab-pipelines").is_some(),
+        "Pipelines is always a tab"
+    );
     assert!(
         cx.debug_bounds("detail-tab-overview-panel").is_some(),
         "a tab that is gone falls back to Overview"
+    );
+
+    click(cx, "detail-tab-pipelines");
+    draw(cx);
+    assert!(
+        cx.debug_bounds("detail-tab-pipelines-panel").is_some(),
+        "the empty Pipelines tab opens like any other"
     );
 }
 

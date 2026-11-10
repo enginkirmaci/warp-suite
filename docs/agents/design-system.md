@@ -145,6 +145,10 @@ There is one scale with a floor of 12, and these are the only sizes:
 | `font_list_title` | 20 | a list's title |
 | `font_screen_title` | 22 | a page's title |
 
+Running text in a panel — the README card and the daily summary — is the 15
+step (`font_name`) at a 25 px line, not `font_body`; the note editor keeps
+`font_note` 16.
+
 Icons: `icon_nano` 12, `icon_tiny` 14, `icon_small` 16, `icon_medium` 18,
 `icon_large` 20, `icon_xl` 22. `icon_nano` and `icon_xl` exist only on the
 `FontTokens` snapshot (there are no getters); the other four have both.
@@ -228,8 +232,9 @@ warp-agent's tool tiles. The rules:
   wheel tick does not rebuild thousands of rows.
 - **States are rows with a word:** loading, binary, no textual change and
   truncation. They never pass through the row renderer.
-- **Size:** `font_control` (14) for the diff body. The block still follows the
-  app's text size through the caller's `font_detail`.
+- **Size:** `font_mono_meta` (13) with a 21 px line (the kit's
+  `DIFF_LINE_HEIGHT`), matching DESIGN.md's `mono 13/21`. The block still
+  follows the app's text size through the caller's `font_detail`.
 - **The body is selectable.** Unwrapped unified has one selectable text
   covering every line; unwrapped split has one per column, so a drag stays on
   its side and copy gives that side's code. Wrapped rows are separate
@@ -330,11 +335,17 @@ toasts, dialogs), `SPIN` 800 ms, `PROGRESS` 1200 ms.
 The shapes the family repeats. Copy the numbers, since they come from the
 mockup, and use the shared helper where one exists.
 
-- **Radius:** controls 6, panels 8 (`t.radius`, `t.radius_lg`).
+- **Radius:** controls 6, panels and menus 8, dialogs 10.
 - **Card:** `panel()`, `.border_1()`, `hairline()`, `.rounded_lg()`.
 - **Popover:** `controls::popover_card()` — `popup()`, `line_strong()` edge,
-  8px radius, `.shadow_lg()`. warp-agent uses it; Warp Station still draws its
-  own menu chrome.
+  8px radius, `.shadow_lg()`. A menu row is 32 high inside 4 padding, 14/500,
+  with its icon at 16 and any keycap right-aligned. warp-agent uses it; Warp
+  Station still draws its own menu chrome.
+- **Dialog:** the scrim card every app draws for a blocking surface —
+  `popup()`, `line_strong()` edge, 10px radius, one shadow. The header is 44
+  high with the title at `font_brand` 15/600 and a quiet close; the footer
+  holds the one filled primary. Notes' prompt, quick open, shortcut sheet and
+  Trash are this same card.
 - **Primary action:** one to a surface. Fill with `.bg(accent())` and
   `.text_color(on_accent())`; Warp Station's primary paths hover
   `accent_hover()`, while warp-notes' primary button and warp-agent's shared

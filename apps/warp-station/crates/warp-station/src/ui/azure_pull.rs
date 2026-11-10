@@ -667,7 +667,7 @@ impl AzurePullView {
                             wrap: self.diff_wrap,
                         },
                         &self.diff_scroll,
-                        theme::font_control(),
+                        theme::font_mono_meta(),
                         window,
                         cx,
                     ),

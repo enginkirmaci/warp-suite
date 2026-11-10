@@ -83,9 +83,9 @@ fn overlay_shell(
         .into_any_element()
 }
 
-/// The dialog card: 8px corners, 1px `LINE_STRONG` edge, one step of the ramp
-/// above the page, and a ruled header — the mockup's panel language rather
-/// than the 12px popup the pre-redesign app used.
+/// The dialog card: 10px corners, 1px `LINE_STRONG` edge, the overlay step,
+/// and a ruled header — the design's dialog surface rather than the 12px
+/// popup the pre-redesign app used.
 ///
 /// `close_id` is the debug selector the probes click; each dialog passes its
 /// own so both headers stay addressable.
@@ -97,10 +97,10 @@ fn dialog_card(
 ) -> gpui::Div {
     div()
         .w(px(CARD_W))
-        .rounded(px(8.))
+        .rounded(px(10.))
         .border_1()
         .border_color(theme::line_strong())
-        .bg(theme::card())
+        .bg(theme::popup())
         .shadow_lg()
         .overflow_hidden()
         .flex()
@@ -138,7 +138,11 @@ fn dialog_card(
                         .justify_center()
                         .hover(|s| s.bg(theme::hover_bg()))
                         .on_click(on_close)
-                        .child(icon("icons/icon-close.svg", px(12.), theme::text_muted())),
+                        .child(icon(
+                            "icons/icon-close.svg",
+                            px(theme::font_micro()),
+                            theme::text_muted(),
+                        )),
                 ),
         )
 }
@@ -532,7 +536,7 @@ impl AddRepoDialog {
                             .a11y_button("Increase scan depth")
                             .cursor_pointer()
                             .w(px(16.))
-                            .h(px(11.))
+                            .h(px(12.))
                             .flex()
                             .items_center()
                             .justify_center()
@@ -543,7 +547,11 @@ impl AddRepoDialog {
                                     cx.notify();
                                 }
                             }))
-                            .child(icon("icons/icon-arrow-up.svg", px(7.), theme::text_muted())),
+                            .child(icon(
+                                "icons/icon-arrow-up.svg",
+                                px(theme::font_micro()),
+                                theme::text_muted(),
+                            )),
                     )
                     .child(
                         div()
@@ -551,7 +559,7 @@ impl AddRepoDialog {
                             .a11y_button("Decrease scan depth")
                             .cursor_pointer()
                             .w(px(16.))
-                            .h(px(11.))
+                            .h(px(12.))
                             .flex()
                             .items_center()
                             .justify_center()
@@ -564,7 +572,7 @@ impl AddRepoDialog {
                             }))
                             .child(icon(
                                 "icons/icon-arrow-down.svg",
-                                px(7.),
+                                px(theme::font_micro()),
                                 theme::text_muted(),
                             )),
                     ),

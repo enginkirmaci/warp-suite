@@ -508,7 +508,7 @@ fn bar_button(
         .flex()
         .items_center()
         .justify_center()
-        .text_size(px(12.))
+        .text_size(px(warpui_kit_core::fonts::font_micro()))
         .text_color(theme.muted_foreground)
         .hover(|style| style.bg(warpui_kit_core::palette::HOVER))
         .on_click(move |_, window, cx| on_click(window, cx))
@@ -571,7 +571,7 @@ fn find_bar(state: &Entity<LiveEditorState>, cx: &App) -> impl IntoElement {
                 .child(
                     div()
                         .flex_shrink_0()
-                        .text_size(px(11.))
+                        .text_size(px(warpui_kit_core::fonts::font_micro()))
                         .text_color(theme.muted_foreground)
                         .child(count),
                 )

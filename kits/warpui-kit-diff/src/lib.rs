@@ -83,12 +83,16 @@ use gpui::prelude::*;
 use gpui::{
     AbsoluteLength, AnyElement, App, Background, BorderStyle, Bounds, Corners, Div, Edges,
     ElementId, HighlightStyle, Hsla, ListAlignment, ListState, PaintQuad, Pixels, ScrollHandle,
-    StyledText, TextStyle, Window, canvas, div, list, pattern_slash, point, px, size,
+    StyledText, TextStyle, Window, canvas, div, list, pattern_slash, point, px, relative, size,
     transparent_black,
 };
 
 use warpui_kit_core::fonts;
 use warpui_kit_core::palette;
+
+/// The design's diff pitch: mono 13 / 21. A ratio, so the rows keep the same
+/// rhythm at every text-size step the caller passes.
+const DIFF_LINE_HEIGHT: f32 = 21.0 / 13.0;
 
 thread_local! {
     /// Parsed patches, keyed by (text hash, length). Parsing includes the word
@@ -654,6 +658,7 @@ fn wrap_list_frame(
         .min_h_0()
         .font_family(fonts::code_font())
         .text_size(px(font_detail))
+        .line_height(relative(DIFF_LINE_HEIGHT))
         .whitespace_normal()
         .child(list(state, render_item).size_full())
         .into_any_element()
@@ -704,6 +709,7 @@ fn wrapped_frame(child: AnyElement, font_detail: f32) -> impl IntoElement {
         .flex_col()
         .font_family(fonts::code_font())
         .text_size(px(font_detail))
+        .line_height(relative(DIFF_LINE_HEIGHT))
         .whitespace_normal()
         .child(child)
 }
@@ -1073,6 +1079,7 @@ fn diff_scroller(
         .restrict_scroll_to_axis()
         .font_family(fonts::code_font())
         .text_size(px(font_detail))
+        .line_height(relative(DIFF_LINE_HEIGHT))
         .whitespace_nowrap();
     let frame = match handle {
         Some(handle) => frame.track_scroll(handle),
@@ -1106,6 +1113,7 @@ fn split_frame(child: AnyElement, font_detail: f32) -> impl IntoElement {
         .flex_row()
         .font_family(fonts::code_font())
         .text_size(px(font_detail))
+        .line_height(relative(DIFF_LINE_HEIGHT))
         .whitespace_nowrap()
         .child(child)
 }
@@ -1713,6 +1721,7 @@ fn code_style(window: &mut Window, font_detail: f32, color: gpui::Rgba) -> TextS
     let mut style = window.text_style();
     style.font_family = fonts::code_font().into();
     style.font_size = AbsoluteLength::Pixels(px(font_detail));
+    style.line_height = relative(DIFF_LINE_HEIGHT);
     style.color = color.into();
     style
 }
@@ -1728,6 +1737,7 @@ fn block_root(font_detail: f32) -> gpui::Div {
         .flex_col()
         .font_family(fonts::code_font())
         .text_size(px(font_detail))
+        .line_height(relative(DIFF_LINE_HEIGHT))
 }
 
 /// One row of text on the ambient background; empty lines keep a single

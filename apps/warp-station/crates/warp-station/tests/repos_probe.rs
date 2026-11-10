@@ -1697,10 +1697,10 @@ fn row_selector(prefix: &str, row: usize) -> &'static str {
     Box::leak(format!("{prefix}{row}").into_boxed_str())
 }
 
-/// The archiving flow: an archived repo leaves the projection (and every
-/// background pass) by default, the Archive chip counts it and toggles the
-/// limp rows back on below the live ones, and the rail's menu restores the
-/// selected one: the tag drops, the folder re-probes, a toast confirms.
+/// The archiving flow: an archived repo leaves the live projection (and every
+/// background pass) by default, the Archive chip counts it and switches the
+/// list to the archived rows alone, and the rail's menu restores the selected
+/// one: the tag drops, the folder re-probes, a toast confirms.
 #[gpui::test]
 fn archived_repos_hide_toggle_and_restore(cx: &mut TestAppContext) {
     use warp_station::net::NetCommand;
@@ -1744,7 +1744,7 @@ fn archived_repos_hide_toggle_and_restore(cx: &mut TestAppContext) {
         "the Archive chip shows while an archived repo exists"
     );
 
-    // the chip toggles the archived rows back on, below the live ones
+    // the chip switches the list to the archived rows alone
     let chip = cx
         .debug_bounds("archive-chip")
         .expect("the archive chip renders");
@@ -1752,17 +1752,29 @@ fn archived_repos_hide_toggle_and_restore(cx: &mut TestAppContext) {
     cx.run_until_parked();
     cx.update(|window, cx| drop(window.draw(cx)));
     assert!(cx.read_entity(&store, |s, _| s.show_archived));
-    assert_eq!(cx.read_entity(&store, |s, _| s.projected.len()), 3);
+    assert_eq!(
+        cx.read_entity(&store, |s, _| s.projected.len()),
+        1,
+        "the Archive filter projects the archived repo alone"
+    );
     let beta_row = cx.read_entity(&store, |s, _| {
         s.projected
             .iter()
             .position(|row| matches!(row, ProjectedRow::Repo(ix) if s.repos[*ix].name == "beta"))
-            .expect("the archived row joins the projection when shown")
+            .expect("the archived row is the archive view's only row")
     });
+    assert_eq!(beta_row, 0, "the archive view holds the archived row alone");
+    // toggling the chip off restores the live projection
+    dialog_click(cx, "archive-chip");
+    assert!(!cx.read_entity(&store, |s, _| s.show_archived));
     assert_eq!(
-        beta_row, 2,
-        "the archived row sorts below every live repo (favorites first)"
+        cx.read_entity(&store, |s, _| s.projected.len()),
+        2,
+        "the live rows return when the Archive filter is off"
     );
+    // back to the archive view for the restore flow below
+    dialog_click(cx, "archive-chip");
+    assert!(cx.read_entity(&store, |s, _| s.show_archived));
     // restore: the rail's menu acts on the row it opened on
     dialog_click(cx, row_selector("repo-row-", beta_row));
     dialog_click(cx, "insp-more");

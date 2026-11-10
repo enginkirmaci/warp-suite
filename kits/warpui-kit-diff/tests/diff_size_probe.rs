@@ -124,6 +124,12 @@ fn the_blocks_draw_at_the_requested_detail_size(cx: &mut TestAppContext) {
         code_row > 13.,
         "a 13px row is at least 13px tall: {code_row}"
     );
+    // The design's diff pitch: mono 13/21. The kit pins the ratio, so the
+    // first step is exactly one design row and the larger steps keep it.
+    assert_eq!(
+        diff_row, 21.,
+        "a 13px diff row is the design's 21px pitch: {diff_row}"
+    );
 }
 
 /// The regression itself: a surrounding view with a large ambient text size

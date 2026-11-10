@@ -61,8 +61,9 @@ pub struct Store {
     pub repos: Vec<RepoEntry>,
     /// Checked tag-filter chips (OR semantics: a repo matches when it has any).
     pub tag_filters: Vec<String>,
-    /// Session-only: while on, archived repos join the list below the live
-    /// ones. Never persisted.
+    /// The Archive filter: while on, the list shows the archived repositories
+    /// alone. The choice persists with the settings (the chip is the filter's
+    /// control, not an extra toggle).
     pub show_archived: bool,
     /// Session-only scope: only repos that need attention — uncommitted work,
     /// an open issue, or commits still to push. Never persisted.
@@ -2390,6 +2391,7 @@ impl Store {
         self.group_filter = None;
         self.attention_only = false;
         self.reproject();
+        self.ensure_row_selected(cx);
         cx.notify();
     }
 
@@ -2401,6 +2403,7 @@ impl Store {
         }
         self.attention_only = on;
         self.reproject();
+        self.ensure_row_selected(cx);
         cx.notify();
     }
 
@@ -2494,6 +2497,7 @@ impl Store {
             None => self.tag_filters.push(tag.to_string()),
         }
         self.reproject();
+        self.ensure_row_selected(cx);
         cx.notify();
     }
 
@@ -3493,30 +3497,19 @@ impl Store {
         cx.notify();
     }
 
-    /// The detail tabs these settings and this repo allow: an integration that
-    /// is off takes its tabs along, and Pipelines needs an Azure project.
+    /// The detail tabs these settings allow: an integration that is off takes
+    /// its own tabs along. Pipelines stays for every repository — one with no
+    /// runs gets the tab and its empty state.
     pub fn detail_tabs(&self) -> Vec<WorkspaceTab> {
         let settings = self.settings();
-        let azure = settings.repos.enable_azure_devops
-            && self
-                .selected_repo
-                .as_ref()
-                .and_then(|folder| self.azure_by_folder.get(folder))
-                .is_some_and(|snapshot| snapshot.available);
-        // GitHub Actions runs feed the same workbench, so a GitHub repository
-        // has a Pipelines tab of its own even without an Azure remote.
-        let actions = settings.repos.enable_github
-            && self
-                .selected_repo
-                .as_ref()
-                .and_then(|folder| self.github_by_folder.get(folder))
-                .is_some_and(|snapshot| snapshot.available);
         WorkspaceTab::ALL
             .into_iter()
             .filter(|tab| match tab {
                 WorkspaceTab::PullRequests | WorkspaceTab::Issues => settings.repos.enable_github,
-                WorkspaceTab::Pipelines => azure || actions,
-                WorkspaceTab::Overview | WorkspaceTab::Changes | WorkspaceTab::History => true,
+                WorkspaceTab::Overview
+                | WorkspaceTab::Changes
+                | WorkspaceTab::History
+                | WorkspaceTab::Pipelines => true,
             })
             .collect()
     }
@@ -3936,11 +3929,29 @@ impl Store {
         if self.active_repo_tab.is_some() {
             return;
         }
-        if self.selected_entry().is_none()
-            && let Some(folder) = self.first_row_folder()
-        {
-            self.select_repo(&folder, cx);
+        // a filter can hide the selected repo: the rail follows the list and
+        // falls back to the first row, or to the empty state when it has none
+        if !self.selected_in_projection() {
+            if let Some(folder) = self.first_row_folder() {
+                self.select_repo(&folder, cx);
+            } else if !self.scanning && self.selected_repo.take().is_some() {
+                // an empty projection while a scan is in flight is not a
+                // reason to drop the selection: the rows are still coming
+                cx.notify();
+            }
         }
+    }
+
+    /// Whether the selected repository is one of the projected rows.
+    fn selected_in_projection(&self) -> bool {
+        let Some(folder) = self.selected_repo.as_ref() else {
+            return false;
+        };
+        self.projected.iter().any(|row| {
+            row.repo_index()
+                .and_then(|ix| self.repos.get(ix))
+                .is_some_and(|repo| repo.folder_path.to_string_lossy() == *folder)
+        })
     }
 
     fn reproject(&mut self) {
@@ -4148,15 +4159,16 @@ impl Store {
         persist_repo_state(&self.settings, &self.repos);
     }
 
-    /// The toolbar's Archive chip: flips whether archived rows join the
-    /// projection (sorted below the live ones). The choice persists — the
-    /// next launch opens on the same view of the list.
+    /// The Archive chip: flips the list between the live repositories and the
+    /// archived ones. The choice persists — the next launch opens on the same
+    /// view of the list.
     pub fn toggle_show_archived(&mut self, cx: &mut Context<Self>) {
         self.show_archived = !self.show_archived;
         // absence IS the off state, so only the opt-in is written
         let on = self.show_archived;
         self.update_settings(|s| s.repos.show_archived = on.then_some(true));
         self.reproject();
+        self.ensure_row_selected(cx);
         cx.notify();
     }
 
@@ -4553,6 +4565,36 @@ mod tests {
             !ai_enabled(&settings),
             "warp-agent off turns the AI surface off"
         );
+    }
+
+    /// Pipelines is a tab of every repository, even with both integrations off:
+    /// the tab itself carries the empty state that says what is missing. The
+    /// GitHub-backed tabs still follow their switch.
+    #[test]
+    fn pipelines_is_always_a_detail_tab() {
+        let (tx, _rx) = async_channel::unbounded();
+        let scratch = std::env::temp_dir().join(format!(
+            "warp-station-detail-tabs-{}.json",
+            std::process::id()
+        ));
+        std::fs::write(&scratch, "{}").expect("scratch settings");
+        let store = Store::with_settings(tx, Arc::new(SettingsService::at(scratch.clone())));
+
+        let tabs = store.detail_tabs();
+        assert!(tabs.contains(&WorkspaceTab::Pipelines));
+        assert!(tabs.contains(&WorkspaceTab::PullRequests));
+        assert!(tabs.contains(&WorkspaceTab::Issues));
+
+        store.update_settings(|settings| {
+            settings.repos.enable_github = false;
+            settings.repos.enable_azure_devops = false;
+        });
+        let tabs = store.detail_tabs();
+        assert!(tabs.contains(&WorkspaceTab::Pipelines));
+        assert!(!tabs.contains(&WorkspaceTab::PullRequests));
+        assert!(!tabs.contains(&WorkspaceTab::Issues));
+
+        let _ = std::fs::remove_file(&scratch);
     }
 
     #[test]

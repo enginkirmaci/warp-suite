@@ -1,6 +1,7 @@
 # UI audit against the OpenDesign warp-suite-v3 design
 
-Status: findings recorded, fixes not started. 2026-11-11.
+Status: first fix pass landed 2026-11-11 (see Resolution); the remaining
+items are listed at the end.
 Scope: warp-station, warp-agent, warp-notes (desktop GPUI apps), checked against
 `warp-suite-v3/DESIGN.md`, `source/warp.css`, `source/icons.js` and `app.html`
 in OpenDesign.
@@ -142,3 +143,41 @@ Menus were captured with a throwaway env hook in `ReposPage::new`
 (`WARP_STATION_MENU=launch|sort|tag|more|more-armed`) and in Notes' page
 constructor (`WARP_NOTES_MENU=row|quick|shortcuts`); both hooks were reverted
 and the binaries rebuilt clean.
+
+## Resolution (2026-11-11)
+
+Landed in this pass, with the full gate green (`cargo fmt --all --check`, clippy
+`-D warnings` and tests on station, station-core, notes, kit-diff, kit-markdown):
+
+| Finding | What changed | Where |
+|---|---|---|
+| S1 | Pipelines is a detail tab for every repository; its body owns the truth: "no GitHub or Azure DevOps remote", "both turned off", or the loading line while an enabled source settles | `store/mod.rs` `detail_tabs`, `ui/azure_tab.rs` |
+| S2 | Issues keeps Filter issues and Sort at any row count; the empty state names the next step or the missing integration; New stays target-gated | `ui/pr_issues.rs` |
+| S3 | History commit column 420 → 320, and the row now puts author, age, unpushed mark and SHA on the meta line so nothing clips | `ui/changes.rs` |
+| T1 | the find bar's count and button use the 12 px floor token | `kits/warpui-kit-markdown/src/editor/element.rs` |
+| M2 | Archive is an exclusive filter (on = archived alone, off = live alone); All/Needs attention/Favorites/Archive never double-light; counts follow | `store/projection.rs`, `ui/repos.rs` |
+| T2 | diff body 13/21 (`font_mono_meta` + `DIFF_LINE_HEIGHT`), every Station diff surface | `ui/changes.rs`, `ui/pull_request.rs`, `ui/azure_pull.rs`, `kits/warpui-kit-diff/src/lib.rs` |
+| T3 | README and summary prose at the 15 step | `ui/markdown.rs`, `ui/readme.rs` |
+| T4 | every dialog title is 15/600 (the shortcut sheet left the 22 step) | `ui/notes.rs`, `ui/dialogs.rs` |
+| R1/R2 | dialog cards: `overlay` surface, 10 radius, in Station and in every Notes scrim card | `ui/dialogs.rs`, `ui/notes.rs` |
+| I2 | `icon-window-restore` replaced with a 24-grid stroke-1.9 glyph in both apps | assets |
+| I4 | 7 px dialog arrows → the 12 px icon step; close icon uses the token | `ui/dialogs.rs` |
+| M3 | menu rows normalised to 32 (the armed remove row keeps its second line) | `ui/overview.rs`, `ui/repos.rs` |
+| M5 | shortcut sheet grouped as Tree / Editor tabs | `ui/notes.rs` |
+| M6 | quick open orders pinned → recent → rest, deduped, with a unit test | `ui/notes.rs` |
+| docs | diff 13/21, dialogs `overlay`/10 + 15/600 title, menu rows 32, running text 15/25 | `docs/agents/design-system.md`, OD `DESIGN.md` |
+
+Two audit entries were withdrawn after checking the prototype: the launcher
+dropdown repeating the "Open in" card (the prototype has both) and the tag
+menu's anchor (the prototype opens its menus at the same offset).
+
+Found and fixed during verification: with an exclusive filter the rail kept a
+selected repository the list no longer showed. `ensure_row_selected` now checks
+the projection, the four filter setters reconcile the selection, and an empty
+projection shows the detail's empty state.
+
+Still open (not in this pass): M4 (repo ⋯ menu hides the GitHub entries without
+a remote), I1/I3/I5 (three icon languages, stray stroke weights, three sets),
+R3/R4 (hand-computed pill radii, the 3 px hover square), S4 (Summary title
+twice), S5 ("This app" twice), S6 (Agent's fourth scope chip), S7 (Agent's
+short summary line).

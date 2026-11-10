@@ -141,12 +141,11 @@ pub fn project_scoped(
     // buckets sort by key so the projection stays deterministic even when
     // the settings file lists the roots unsorted
     groups.sort_by_key(|(key, _, _)| key.to_lowercase());
-    // the Archive pill's "listed bottom": buckets holding only archived
+    // the archive partition's "listed bottom": buckets holding only archived
     // repos sink below buckets with any live one. Stable, so the key order
-    // holds inside each region and "other" still trails its own region —
-    // and a no-op while the pill is off, since archived repos then leave
-    // the projection entirely (a mixed group stays put; its archived rows
-    // already sink within it via the shared sort comparator).
+    // holds inside each region and "other" still trails its own region. The
+    // exclusive archive filter projects archived rows only, so every bucket
+    // carries the same key there and the rule only keeps "other" last.
     groups.sort_by_key(|(key, _, bucket)| {
         (
             bucket.iter().all(|&ix| repos[ix].is_archived()),
@@ -496,7 +495,7 @@ fn is_under(folder: &str, root: &str) -> bool {
     }
 }
 
-/// The flat pipeline: archived exclusion → OR-tag filter → sort. Returns
+/// The flat pipeline: archive split → OR-tag filter → sort. Returns
 /// indices into `repos`; grouping re-buckets these without re-sorting.
 /// A repo the "Needs attention" scope keeps: something is waiting on the
 /// developer — uncommitted work, an open issue, or commits still to push.
@@ -515,10 +514,11 @@ fn sort_indices(
     let mut rows: Vec<usize> = repos
         .iter()
         .enumerate()
-        // archived repos leave every view unless explicitly shown; the
-        // exclusion is independent of the OR-tag filter so an archived repo
-        // never satisfies a checked chip
-        .filter(|(_, repo)| show_archived || !repo.is_archived())
+        // `show_archived` is the exclusive Archive filter: on lists archived
+        // repos alone, off lists the live ones. The split is independent of
+        // the OR-tag filter so an archived repo never satisfies a checked
+        // chip outside the Archive view.
+        .filter(|(_, repo)| repo.is_archived() == show_archived)
         .filter(|(_, repo)| !attention_only || needs_attention(repo))
         .filter(|(_, repo)| {
             // OR semantics: a repo matches when it carries any checked tag
@@ -545,11 +545,12 @@ fn sort_indices(
 
     rows.sort_by(|&a, &b| {
         let (ra, rb) = (&repos[a], &repos[b]);
-        // archived repos sink below every live one when shown (the archived
-        // partition is empty otherwise, so this is a no-op then); favorites
-        // float within their partition; then the mode's order — `ascending`
-        // flips the comparator around the mode's default; name breaks ties.
-        // Repos without a commit date sink in BOTH LastActivity directions.
+        // archived repos sink below every live one when a projection mixes
+        // the two (the exclusive archive filter keeps one partition only, so
+        // this is a no-op there); favorites float within their partition;
+        // then the mode's order — `ascending` flips the comparator around the
+        // mode's default; name breaks ties. Repos without a commit date sink
+        // in BOTH LastActivity directions.
         ra.is_archived()
             .cmp(&rb.is_archived())
             .then_with(|| rb.is_favorite().cmp(&ra.is_favorite()))
@@ -896,7 +897,7 @@ mod tests {
     }
 
     #[test]
-    fn archived_repos_hide_by_default_and_sink_when_shown() {
+    fn the_archive_filter_lists_only_the_archived_repos() {
         let mut all = repos();
         all[1].tags.push("archived".into());
         let names = |show: bool| -> Vec<&str> {
@@ -909,13 +910,13 @@ mod tests {
         );
         assert_eq!(
             names(true),
-            vec!["alpha", "gamma", "beta"],
-            "shown archived repos sort below every live repo"
+            vec!["beta"],
+            "the Archive filter lists the archived repos alone"
         );
     }
 
     #[test]
-    fn archived_partition_keeps_favorites_first_within_itself() {
+    fn the_archive_view_keeps_favorites_first_within_itself() {
         let mut all = repos();
         // alpha: live favorite; beta: archived favorite; gamma: plain archived
         all[1].tags = vec!["archived".into(), "favorites".into()];
@@ -924,8 +925,8 @@ mod tests {
         let rows = flat(&all, &[], RepoSortMode::Branch, true, true);
         assert_eq!(
             repo_names(&rows, &all),
-            vec!["alpha", "beta", "gamma"],
-            "live repos first, then archived favorites, then the rest"
+            vec!["beta", "gamma"],
+            "the archive view holds only archived rows; favorites lead inside it"
         );
     }
 
@@ -1098,8 +1099,8 @@ mod tests {
         let rows = project(&all, &[], RepoSortMode::Name, true, true, None);
         assert_eq!(
             repo_names(&rows, &all),
-            vec!["alpha", "gamma", "beta"],
-            "grouping off reproduces the archived-last flat order with no headers"
+            vec!["beta"],
+            "grouping off reproduces the archive view's flat projection with no headers"
         );
     }
 
@@ -1151,7 +1152,7 @@ mod tests {
     }
 
     #[test]
-    fn archived_partition_stays_within_its_group() {
+    fn archive_rows_stay_within_their_group() {
         let mut all = grouped_repos();
         all[1].tags.push("archived".into()); // beta archives under /roots/a
         all[3].tags.push("archived".into()); // delta archives under other
@@ -1167,21 +1168,13 @@ mod tests {
         );
         assert_eq!(
             sketch(&rows, &all),
-            vec![
-                "#/roots/a(2)",
-                "alpha",
-                "beta",
-                "#/second/b(1)",
-                "gamma",
-                "#other(1)",
-                "delta",
-            ],
-            "shown archived repos sink within their own group (beta stays under /roots/a instead of dropping below gamma)"
+            vec!["#/roots/a(1)", "beta", "#other(1)", "delta"],
+            "the Archive view projects the archived rows only, each under its own group header"
         );
     }
 
     #[test]
-    fn archived_only_groups_sink_below_live_ones_when_shown() {
+    fn the_archive_view_lists_every_group_with_an_archived_repo() {
         let mut all = grouped_repos();
         all[0].tags.push("archived".into()); // alpha archives → /roots/a all-archived
         all[1].tags.push("archived".into()); // so does beta
@@ -1198,21 +1191,13 @@ mod tests {
         );
         assert_eq!(
             sketch(&rows, &all),
-            vec![
-                "#/second/b(1)",
-                "gamma",
-                "#/roots/a(2)",
-                "alpha",
-                "beta",
-                "#other(1)",
-                "delta",
-            ],
-            "the all-archived group sinks below the live one despite sorting first; 'other' still trails the archived region"
+            vec!["#/roots/a(2)", "alpha", "beta", "#other(1)", "delta"],
+            "the Archive view drops gamma's live-only group and keeps the archived groups"
         );
     }
 
     #[test]
-    fn a_mixed_group_stays_in_place_with_its_archived_rows_last() {
+    fn the_archive_view_lists_only_the_archived_rows_of_a_group() {
         let mut all = grouped_repos();
         all[1].tags.push("archived".into()); // only beta archives; /roots/a keeps a live repo
         let roots = vec!["/roots/a".to_string(), "/second/b".to_string()];
@@ -1227,21 +1212,13 @@ mod tests {
         );
         assert_eq!(
             sketch(&rows, &all),
-            vec![
-                "#/roots/a(2)",
-                "alpha",
-                "beta",
-                "#/second/b(1)",
-                "gamma",
-                "#other(1)",
-                "delta",
-            ],
-            "a group with any live repo holds its alphabetical place; the archived row sinks within it"
+            vec!["#/roots/a(1)", "beta"],
+            "only beta is archived, so the Archive view projects just beta under its group"
         );
     }
 
     #[test]
-    fn with_archived_hidden_the_sink_is_vacuous() {
+    fn with_the_archive_filter_off_live_groups_remain_alone() {
         let mut all = grouped_repos();
         all[0].tags.push("archived".into());
         all[1].tags.push("archived".into());
@@ -1259,7 +1236,7 @@ mod tests {
         assert_eq!(
             sketch(&rows, &all),
             vec!["#/second/b(1)", "gamma"],
-            "pill off: archived repos leave the projection, so no region reorder and no ghost headers"
+            "archive filter off: archived repos leave the projection, so no archived region and no ghost headers"
         );
     }
 

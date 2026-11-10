@@ -156,12 +156,7 @@ impl ItemListView {
     ) -> impl IntoElement + use<> {
         let this = cx.entity();
         let closed_view = this.clone();
-        let label = match (self.pull_requests, new_target.as_ref().map(|(s, _)| *s)) {
-            (true, Some(ActivitySource::Azure)) => "New pull request",
-            (true, _) => "New pull request",
-            (false, Some(ActivitySource::Azure)) => "New work item",
-            (false, _) => "New issue",
-        };
+        let label = new_verb(self.pull_requests, new_target.as_ref().map(|(s, _)| *s));
         let (open_id, closed_id) = if self.pull_requests {
             ("pr-state-open", "pr-state-closed")
         } else {
@@ -413,12 +408,7 @@ impl Render for ItemListView {
         let shown = |source: ActivitySource| self.store.read(cx).source_shown(&folder_text, source);
         let github_on = shown(ActivitySource::GitHub);
         let azure_on = shown(ActivitySource::Azure);
-        if !github_on && !azure_on {
-            return tab_card(empty_state(
-                "This repository is on neither GitHub nor Azure DevOps, or the credentials were rejected"
-                    .to_string(),
-            ));
-        }
+        let connected = github_on || azure_on;
 
         let mut open_items: Vec<ActivityItem> = Vec::new();
         if github_on && let Some(snapshot) = github.as_ref() {
@@ -465,14 +455,16 @@ impl Render for ItemListView {
         // The store dedupes (in-flight, cached, or failed-waiting-for-Retry),
         // so asking here is safe: Refresh clears the guard and the next draw
         // re-asks instead of leaving a stale or endless "Loading…".
-        if self.closed {
+        if self.closed && connected {
             let pull_requests = self.pull_requests;
             self.store.update(cx, |s, _| s.load_closed(pull_requests));
         }
         // the count is the list's own, before the filter: an empty tab and a
         // filter that matched nothing are different states
         let total = items.len();
-        let controls = !self.pull_requests && total > 0;
+        // the design gives Pull requests no filter, but Issues keeps its
+        // Filter issues field and Sort whether or not the list has rows
+        let controls = !self.pull_requests;
         if !self.pull_requests {
             sort.sort(&mut items);
             items.retain(|item| item.matches(&self.query));
@@ -501,7 +493,15 @@ impl Render for ItemListView {
                 url.map(|url| (ActivitySource::Azure, url))
             })
         };
-        let toolbar = self.render_toolbar(open_total, None, new_target, controls, sort, window, cx);
+        let toolbar = self.render_toolbar(
+            open_total,
+            None,
+            new_target.clone(),
+            controls,
+            sort,
+            window,
+            cx,
+        );
         let menu = (self.sort_open && controls).then(|| self.render_sort_menu(sort, cx));
 
         let state = if self.closed { "closed" } else { "open" };
@@ -535,15 +535,31 @@ impl Render for ItemListView {
                 .into_any_element()
         } else if closed_loading {
             empty_state(format!("Loading closed {title}…"))
-        } else if total == 0 {
+        } else if !connected {
             empty_note(
                 format!("No {state} {title}"),
-                if repo_name.is_empty() {
-                    String::new()
-                } else {
-                    format!("{repo_name} has nothing waiting here.")
-                },
+                missing_target_note(self.pull_requests, github_on, azure_on),
             )
+        } else if total == 0 {
+            let detail = if self.closed {
+                if repo_name.is_empty() {
+                    "Nothing has been closed here yet.".to_string()
+                } else {
+                    format!("{repo_name} has nothing closed here.")
+                }
+            } else {
+                match new_target.as_ref() {
+                    // the toolbar already carries the verb; the empty state
+                    // names it so the way forward is not a hunt
+                    Some((source, _)) => format!(
+                        "Use {} to {} the first one.",
+                        new_verb(self.pull_requests, Some(*source)),
+                        if self.pull_requests { "open" } else { "file" },
+                    ),
+                    None => missing_target_note(self.pull_requests, github_on, azure_on),
+                }
+            };
+            empty_note(format!("No {state} {title}"), detail)
         } else if items.is_empty() {
             let query = self.filter.read(cx).value().trim().to_string();
             no_match(&query, cx)
@@ -1046,14 +1062,26 @@ fn no_match(query: &str, cx: &mut Context<ItemListView>) -> gpui::AnyElement {
         .into_any_element()
 }
 
-fn tab_card(content: impl IntoElement) -> gpui::AnyElement {
-    div()
-        .size_full()
-        .min_h_0()
-        .flex()
-        .flex_col()
-        .child(content)
-        .into_any_element()
+/// The New verb's label for this list and platform.
+fn new_verb(pull_requests: bool, source: Option<ActivitySource>) -> &'static str {
+    match (pull_requests, source) {
+        (true, _) => "New pull request",
+        (false, Some(ActivitySource::Azure)) => "New work item",
+        (false, _) => "New issue",
+    }
+}
+
+/// What an empty list asks for when it has no known create target: name the
+/// integration whose remote or credentials are missing.
+fn missing_target_note(pull_requests: bool, github_on: bool, azure_on: bool) -> String {
+    let azure = azure_on && !github_on;
+    let integration = if azure { "Azure DevOps" } else { "GitHub" };
+    let action = match (pull_requests, azure) {
+        (true, _) => "open a pull request",
+        (false, true) => "file a work item",
+        (false, false) => "file an issue",
+    };
+    format!("Connect {integration} to {action}.")
 }
 
 fn empty_state(text: String) -> gpui::AnyElement {

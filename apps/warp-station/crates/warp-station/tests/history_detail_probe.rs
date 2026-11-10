@@ -158,11 +158,19 @@ fn the_diff_body_stays_open_and_selectable(cx: &mut TestAppContext) {
 
     // Dragging across a line selects it; the mouse-up is still inside the
     // diff, so it must not reach the file's toggle either.
-    let patch = vcx
-        .debug_bounds("commit-detail-patch")
-        .expect("the patch is still open");
-    let start = point(patch.origin.x + px(36.), patch.origin.y + px(30.));
-    let end = point(patch.origin.x + px(220.), patch.origin.y + px(30.));
+    assert!(
+        vcx.debug_bounds("commit-detail-patch").is_some(),
+        "the patch is still open"
+    );
+    // drag inside the diff's own text column, whose origin moves with the
+    // code font: a fixed offset from the card would land in the gutter once
+    // the diff drew one step smaller
+    let text = vcx
+        .debug_bounds("diff-text")
+        .expect("the patch draws its code column");
+    let line = text.size.height / 4.;
+    let start = point(text.origin.x + px(2.), text.origin.y + line * 1.5);
+    let end = point(text.origin.x + px(180.), text.origin.y + line * 1.5);
     vcx.simulate_mouse_down(start, MouseButton::Left, Modifiers::default());
     vcx.simulate_mouse_move(end, Some(MouseButton::Left), Modifiers::default());
     vcx.simulate_mouse_up(end, MouseButton::Left, Modifiers::default());

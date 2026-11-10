@@ -844,7 +844,7 @@ impl ReposPage {
                 "scope-all",
                 "All",
                 Some(stats.total),
-                !attention_only && active_tags.is_empty(),
+                !attention_only && active_tags.is_empty() && !show_archived,
                 cx.listener(|this, _, _, cx| {
                     this.store.update(cx, |s, cx| {
                         s.clear_filters(cx);
@@ -860,8 +860,17 @@ impl ReposPage {
                 Some(stats.attention),
                 attention_only,
                 cx.listener(|this, _, _, cx| {
-                    this.store
-                        .update(cx, |s, cx| s.set_attention_only(true, cx));
+                    this.store.update(cx, |s, cx| {
+                        s.set_attention_only(true, cx);
+                        if s.tag_filters.iter().any(|t| {
+                            t.eq_ignore_ascii_case(warp_station_core::repo_store::FAVORITES_TAG)
+                        }) {
+                            s.toggle_tag_filter(warp_station_core::repo_store::FAVORITES_TAG, cx);
+                        }
+                        if s.show_archived {
+                            s.toggle_show_archived(cx);
+                        }
+                    });
                 }),
             ))
             .child(segment(
@@ -874,6 +883,16 @@ impl ReposPage {
                 cx.listener(|this, _, _, cx| {
                     this.store.update(cx, |s, cx| {
                         s.toggle_tag_filter(warp_station_core::repo_store::FAVORITES_TAG, cx);
+                        // the segments are single-select: switching Favorites
+                        // on turns the attention scope off
+                        if s.tag_filters.iter().any(|t| {
+                            t.eq_ignore_ascii_case(warp_station_core::repo_store::FAVORITES_TAG)
+                        }) {
+                            s.set_attention_only(false, cx);
+                        }
+                        if s.show_archived {
+                            s.toggle_show_archived(cx);
+                        }
                     });
                 }),
             ))
@@ -883,7 +902,22 @@ impl ReposPage {
                 Some(archived_count),
                 show_archived,
                 cx.listener(|this, _, _, cx| {
-                    this.store.update(cx, |s, cx| s.toggle_show_archived(cx));
+                    this.store.update(cx, |s, cx| {
+                        // one segment at a time: entering the Archive view
+                        // drops the other segment filters
+                        if !s.show_archived {
+                            s.set_attention_only(false, cx);
+                            if s.tag_filters.iter().any(|t| {
+                                t.eq_ignore_ascii_case(warp_station_core::repo_store::FAVORITES_TAG)
+                            }) {
+                                s.toggle_tag_filter(
+                                    warp_station_core::repo_store::FAVORITES_TAG,
+                                    cx,
+                                );
+                            }
+                        }
+                        s.toggle_show_archived(cx);
+                    });
                 }),
             ));
 

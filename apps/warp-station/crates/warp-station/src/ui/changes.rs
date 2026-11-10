@@ -69,7 +69,7 @@ const HISTORY_ROW_HEIGHT: f32 = 58.;
 /// The file list and commit box's width.
 const FILE_COLUMN_W: f32 = 320.;
 /// The commit list's width.
-const HISTORY_COLUMN_W: f32 = 420.;
+const HISTORY_COLUMN_W: f32 = 320.;
 /// The git toolbar's height.
 const TOOLBAR_H: f32 = 52.;
 /// The branch selector's width.
@@ -522,7 +522,7 @@ impl ChangesView {
                             wrap: self.diff_wrap,
                         },
                         &self.diff_scroll,
-                        theme::font_control(),
+                        theme::font_mono_meta(),
                         window,
                         cx,
                     ),
@@ -1078,6 +1078,7 @@ impl ChangesView {
                         div()
                             .flex_1()
                             .min_w_0()
+                            .overflow_hidden()
                             .flex()
                             .flex_col()
                             .child(
@@ -1091,51 +1092,88 @@ impl ChangesView {
                                     .child(row.subject.clone()),
                             )
                             .child(
+                                // the design's commit meta line: author, age and
+                                // the SHA share one row under the subject, so a
+                                // 320 column never squeezes the hash out
                                 div()
-                                    .text_size(px(theme::font_meta()))
-                                    .text_color(theme::text_dim())
-                                    .child(format!("{} · {}", row.author, row.rel)),
+                                    .flex()
+                                    .flex_row()
+                                    .items_center()
+                                    .gap_1()
+                                    .min_w_0()
+                                    .overflow_hidden()
+                                    .child(
+                                        div()
+                                            .flex_1()
+                                            .min_w_0()
+                                            .text_size(px(theme::font_meta()))
+                                            .text_color(theme::text_dim())
+                                            .overflow_hidden()
+                                            .whitespace_nowrap()
+                                            .text_ellipsis()
+                                            .child(format!("{} · {}", row.author, row.rel)),
+                                    )
+                                    .when(unpushed_mark, |meta| {
+                                        // the design asks for an unpushed mark,
+                                        // not a word: the arrow keeps the SHA on
+                                        // a 320 column
+                                        meta.child(
+                                            div()
+                                                .id(SharedString::from(format!(
+                                                    "unpushed-{}",
+                                                    row.short_hash
+                                                )))
+                                                .role(gpui::Role::Status)
+                                                .aria_label("unpushed")
+                                                .flex_shrink_0()
+                                                .text_size(px(theme::font_meta()))
+                                                .font_weight(FontWeight::MEDIUM)
+                                                .text_color(theme::AHEAD)
+                                                .tooltip(crate::ui::tooltip_text("Not pushed yet"))
+                                                .child("\u{2191}"),
+                                        )
+                                    })
+                                    .child(
+                                        // hash chip: clicking copies the full SHA without
+                                        // drilling in
+                                        div()
+                                            .id(SharedString::from(format!(
+                                                "copy-sha-{}",
+                                                row.short_hash
+                                            )))
+                                            .a11y_button(format!("Copy SHA {}", row.short_hash))
+                                            .cursor_pointer()
+                                            .flex_shrink_0()
+                                            .rounded_md()
+                                            .px_1()
+                                            .text_size(px(theme::font_meta()))
+                                            .font_family(gpui::SharedString::from(
+                                                theme::code_font(),
+                                            ))
+                                            .text_color(theme::text_faint())
+                                            .hover(|s| s.text_color(theme::blue_bright()))
+                                            .on_click({
+                                                let store = self.store.clone();
+                                                let full = row.hash.clone();
+                                                let short = row.short_hash.clone();
+                                                move |_, _, cx| {
+                                                    cx.stop_propagation();
+                                                    cx.write_to_clipboard(
+                                                        gpui::ClipboardItem::new_string(
+                                                            full.clone(),
+                                                        ),
+                                                    );
+                                                    store.update(cx, |s, cx| {
+                                                        s.notify_success(format!(
+                                                            "Copied {short} to clipboard"
+                                                        ));
+                                                        cx.notify();
+                                                    });
+                                                }
+                                            })
+                                            .child(row.short_hash.clone()),
+                                    ),
                             ),
-                    )
-                    .when(unpushed_mark, |row| {
-                        row.child(
-                            div()
-                                .flex_shrink_0()
-                                .text_size(px(theme::font_meta()))
-                                .font_weight(FontWeight::MEDIUM)
-                                .text_color(theme::AHEAD)
-                                .child("↑ unpushed"),
-                        )
-                    })
-                    .child(
-                        // hash chip: clicking copies the full SHA without
-                        // drilling in
-                        div()
-                            .id(SharedString::from(format!("copy-sha-{}", row.short_hash)))
-                            .a11y_button(format!("Copy SHA {}", row.short_hash))
-                            .cursor_pointer()
-                            .rounded_md()
-                            .px_1()
-                            .text_size(px(theme::font_meta()))
-                            .font_family(gpui::SharedString::from(theme::code_font()))
-                            .text_color(theme::text_faint())
-                            .hover(|s| s.text_color(theme::blue_bright()))
-                            .on_click({
-                                let store = self.store.clone();
-                                let full = row.hash.clone();
-                                let short = row.short_hash.clone();
-                                move |_, _, cx| {
-                                    cx.stop_propagation();
-                                    cx.write_to_clipboard(gpui::ClipboardItem::new_string(
-                                        full.clone(),
-                                    ));
-                                    store.update(cx, |s, cx| {
-                                        s.notify_success(format!("Copied {short} to clipboard"));
-                                        cx.notify();
-                                    });
-                                }
-                            })
-                            .child(row.short_hash.clone()),
                     ),
             )
             .into_any_element()
@@ -1460,7 +1498,7 @@ impl ChangesView {
                             warpui_kit_diff::render_diff(
                                 patch,
                                 None,
-                                theme::font_control(),
+                                theme::font_mono_meta(),
                                 window,
                                 cx,
                             ),
