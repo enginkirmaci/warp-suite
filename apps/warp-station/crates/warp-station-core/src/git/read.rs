@@ -807,6 +807,13 @@ fn status_options(opts: &mut StatusOptions) {
 /// Patch options matching the git CLI: the indent heuristic git anchors hunks
 /// with by default, and the repo's configured diff.algorithm (libgit2 has no
 /// histogram; patience anchors the same way on ordinary diffs).
+///
+/// Trailing whitespace is never a change. A worktree that holds LF lines in a
+/// CRLF repo (an editor or a tool rewrote part of the file) would otherwise
+/// read as a hit on every such line: the two sides carry the same text, so the
+/// pane drew a red row and a green row that look identical. That is the
+/// `--ignore-space-at-eol` comparison, and it is the one an editor makes when
+/// it compares two buffers line by line.
 fn diff_options(repo: &Repository) -> git2::DiffOptions {
     let mut opts = git2::DiffOptions::new();
     let algorithm = repo
@@ -816,6 +823,7 @@ fn diff_options(repo: &Repository) -> git2::DiffOptions {
         .map(|s| s.trim().to_lowercase())
         .unwrap_or_default();
     opts.indent_heuristic(true);
+    opts.ignore_whitespace_eol(true);
     match algorithm.as_str() {
         "histogram" | "patience" => {
             opts.patience(true);
@@ -1218,6 +1226,61 @@ mod untracked_patch_tests {
             .expect("untracked row");
         assert_eq!(counts.additions, Some(3));
         assert_eq!(counts.deletions, Some(0));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+/// A worktree that mixes line endings must not read as a rewrite. The rows
+/// carry the same text, so painting them changed shows two identical lines,
+/// one red and one green, for a file that only moved one line.
+#[cfg(test)]
+mod eol_patch_tests {
+    use super::*;
+
+    /// A repo whose one committed file uses CRLF, so the worktree copy below
+    /// can go back with LF on some lines only.
+    fn crlf_repo(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("ws-read-eol-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let repo = git2::Repository::init(&dir).unwrap();
+        std::fs::write(dir.join("a.cs"), "one\r\ntwo\r\nthree\r\nfour\r\n").unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(Path::new("a.cs")).unwrap();
+        index.write().unwrap();
+        let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+        let sig = git2::Signature::now("t", "t@example.com").unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])
+            .unwrap();
+        dir
+    }
+
+    #[test]
+    fn a_line_ending_mix_alone_is_no_patch() {
+        let dir = crlf_repo("mixed");
+        std::fs::write(dir.join("a.cs"), "one\ntwo\r\nthree\nfour\r\n").unwrap();
+        let patch = change_file_patch(&dir, "a.cs", false).expect("a patch result");
+        assert!(patch.is_empty(), "no content moved, so no rows: {patch:?}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_real_edit_keeps_only_its_pair_through_a_line_ending_mix() {
+        let dir = crlf_repo("real");
+        std::fs::write(dir.join("a.cs"), "one\ntwo\r\nTHREE\nfour\r\n").unwrap();
+        let patch = change_file_patch(&dir, "a.cs", false).expect("a patch result");
+        assert!(patch.contains("-three"), "patch was: {patch:?}");
+        assert!(patch.contains("+THREE"), "patch was: {patch:?}");
+        // one deletion and one addition: the EOL-only lines are context
+        let del = patch
+            .lines()
+            .filter(|line| line.starts_with('-') && !line.starts_with("---"))
+            .count();
+        let add = patch
+            .lines()
+            .filter(|line| line.starts_with('+') && !line.starts_with("+++"))
+            .count();
+        assert_eq!((del, add), (1, 1), "patch was: {patch:?}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

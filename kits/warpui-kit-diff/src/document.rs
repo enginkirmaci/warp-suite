@@ -535,6 +535,18 @@ pub fn patch_from_hunks(hunks: &[HunkText<'_>]) -> String {
         let group = &hunks[first..index];
         // a lone null-old hunk is a whole created file, not a hunk of one
         let created = group.len() == 1 && group[0].old.is_none();
+        // The pair is diffed on line content, so a hunk whose sides only
+        // disagree on line endings or trailing whitespace has no change at
+        // all. Emitting it would draw two identical rows, one red and one
+        // green, for a file that did not move.
+        let bodies: Vec<Vec<(char, &str)>> = group
+            .iter()
+            .map(hunk_body)
+            .filter(|body| body.iter().any(|(marker, _)| *marker != ' '))
+            .collect();
+        if bodies.is_empty() {
+            continue;
+        }
         if created {
             patch.push_str("--- /dev/null\n");
         } else {
@@ -547,14 +559,13 @@ pub fn patch_from_hunks(hunks: &[HunkText<'_>]) -> String {
         patch.push('\n');
         let mut old_start = if created { 0 } else { 1 };
         let mut new_start = 1;
-        for hunk in group {
-            let body = hunk_body(hunk);
+        for body in &bodies {
             let old_count = body.iter().filter(|row| row.0 != '+').count();
             let new_count = body.iter().filter(|row| row.0 != '-').count();
             patch.push_str(&format!(
                 "@@ -{old_start},{old_count} +{new_start},{new_count} @@\n"
             ));
-            for (marker, line) in body {
+            for &(marker, line) in body {
                 patch.push(marker);
                 patch.push_str(line);
                 patch.push('\n');
@@ -572,7 +583,13 @@ fn hunk_body<'a>(hunk: &HunkText<'a>) -> Vec<(char, &'a str)> {
         // no before-image: every line of the after-text is an addition
         return hunk.new.lines().map(|line| ('+', line)).collect();
     };
-    TextDiff::from_lines(old, hunk.new)
+    // Compare line content, not line endings. `from_lines` keeps the
+    // terminator on every token, so the same text with `\r\n` on one side and
+    // `\n` on the other reads as a delete and an add of identical lines.
+    // `lines()` drops the terminator, and with it the stray `\r`.
+    let old_lines: Vec<&str> = old.lines().collect();
+    let new_lines: Vec<&str> = hunk.new.lines().collect();
+    TextDiff::from_slices(&old_lines, &new_lines)
         .iter_all_changes()
         .map(|change| {
             let marker = match change.tag() {
@@ -580,7 +597,7 @@ fn hunk_body<'a>(hunk: &HunkText<'a>) -> Vec<(char, &'a str)> {
                 ChangeTag::Insert => '+',
                 ChangeTag::Equal => ' ',
             };
-            (marker, change.value().trim_end_matches(['\r', '\n']))
+            (marker, change.value())
         })
         .collect()
 }
@@ -919,5 +936,61 @@ mod tests {
         assert_eq!(rows[1].kind, RowKind::Context);
         assert_eq!(rows[1].text, "");
         assert_eq!(rows.len(), 4, "context, blank context, delete, add");
+    }
+
+    /// A CRLF pair is the same text twice, not a change: `from_lines` used to
+    /// keep the terminator, so every line of a rewritten file came back as a
+    /// delete and an add of identical text.
+    #[test]
+    fn line_endings_alone_are_no_change() {
+        let hunks = [HunkText {
+            path: "a.cs",
+            old: Some("one\r\ntwo\r\nthree\r\n"),
+            new: "one\ntwo\nthree\n",
+        }];
+        assert_eq!(patch_from_hunks(&hunks), "");
+    }
+
+    #[test]
+    fn a_real_change_beside_a_line_ending_rewrite_keeps_only_the_change() {
+        let hunks = [HunkText {
+            path: "a.cs",
+            old: Some("one\r\ntwo\r\nthree\r\n"),
+            new: "one\nTWO\nthree\n",
+        }];
+        let patch = patch_from_hunks(&hunks);
+        let doc = DiffDocument::parse(&patch);
+        let rows = &doc.files[0].hunks[0].rows;
+        assert_eq!(rows.len(), 4, "one, the pair, three: {patch:?}");
+        assert_eq!(rows[1].kind, RowKind::Del);
+        assert_eq!(rows[1].text, "two");
+        assert_eq!(rows[2].kind, RowKind::Add);
+        assert_eq!(rows[2].text, "TWO");
+        assert_eq!(rows[0].kind, RowKind::Context);
+        assert_eq!(rows[3].kind, RowKind::Context);
+        assert_eq!((doc.added(), doc.removed()), (1, 1));
+    }
+
+    /// A tool that rewrites a file can report one hunk per edit; the ones that
+    /// only moved a line ending must not become rows of their own.
+    #[test]
+    fn a_line_ending_hunk_is_dropped_beside_a_real_one() {
+        let hunks = [
+            HunkText {
+                path: "a.cs",
+                old: Some("a\r\nb\r\n"),
+                new: "a\nb\n",
+            },
+            HunkText {
+                path: "a.cs",
+                old: Some("x\n"),
+                new: "y\n",
+            },
+        ];
+        let patch = patch_from_hunks(&hunks);
+        let doc = DiffDocument::parse(&patch);
+        assert_eq!(doc.files[0].hunks.len(), 1, "one hunk: {patch:?}");
+        assert_eq!(doc.files[0].hunks[0].rows.len(), 2, "x, y: {patch:?}");
+        assert_eq!((doc.added(), doc.removed()), (1, 1));
     }
 }
