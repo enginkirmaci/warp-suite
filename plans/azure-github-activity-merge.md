@@ -1,8 +1,20 @@
 # Azure DevOps × GitHub: one activity surface
 
-Status: proposal. No Rust change has landed. The OpenDesign prototype
-(`warp-suite-v3`) has been updated to this shape so the plan can be reviewed as
-pixels. Decisions D1–D6 below are proposals; settle them before phase 1.
+Status: built. The Rust work of D1–D6 is in: `github::refresh` lists Actions
+runs (D2), `activity.rs` holds the shared run and row vocabulary, the Pipelines
+workbench merges both sources newest first with a tag per row (D5), and the Pull
+requests and Issues tabs list GitHub and Azure rows in one work list each, with
+their platforms' references (`#482`, `!214`, `#3381`), a source tag per row,
+per-source closed/loading/failed states, and the totals summed on the rail, the
+tab strip, the list head and the Overview (D1, D3, D4, D6). The Azure pull
+request's pane moved from the Pipelines tab to the merged list, whose rows are
+now its only entry; the Azure item cards are gone.
+
+What is left is the design sync (step 7): `source/app.src.html` still draws the
+pre-merge lists, so the OpenDesign bundle needs rebuilding from the updated
+source and `DESIGN.md` re-checked. The Rust acceptance list in §9 passes; no
+Azure work item has a detail pane of its own — its row opens on Azure DevOps,
+recorded in `plans/pull-request-surface.md`.
 
 ## 1. What changes
 
@@ -49,11 +61,13 @@ dashboard. Azure PRs open on Azure DevOps; GitHub PRs keep the in-app pane.
   GitHub one: pull requests by `completed`/`abandoned`, work items whose state
   is `Done`/`Closed`/`Removed`. The cache key becomes
   `(folder, kind, source)`; a missing answer is retryable, not empty.
-- **D5 — Pipelines is one runs card.** The toolbar carries the latest run's
-  state (with its source), and the body is one full-width "Recent runs" card,
-  newest first. The two Azure item cards are deleted. A repository that resolves
-  both sources shows one interleaved list with a source tag per row; no source
-  filter is needed while a repository normally resolves one remote.
+- **D5 — Pipelines is one run list.** The toolbar carries the latest run's
+  state (with its source), and the workbench's 320 list holds every run from
+  both sources, newest first, each row tagged. The two Azure item cards stay
+  until the union lists land, since they are today's only entry to an Azure
+  item; they are then deleted. A repository that resolves both sources shows
+  one interleaved list; no source filter is needed while a repository normally
+  resolves one remote.
 - **D6 — totals live on the repo entry.** `RepoEntry` gains
   `azure_pull_count` and `azure_work_item_count` (serde defaults, written when
   an Azure snapshot settles). The rail, projection, list summary, tab strip
@@ -75,8 +89,15 @@ One vocabulary for the three surfaces:
   is_draft, review_decision, updated_at, created_at, comments, head_ref,
   base_ref, work_item_type, assigned_to }`. `reference()` and `matches()` live
   here. GitHub and Azure constructors keep the mapping in one place.
-- `ActivityRun { source, id, name, run_label, branch, state, url, at }` with
-  `is_failed()`, `is_running()`, `is_succeeded()`, `display_branch()`.
+- `ActivityRun { source, id, name, label, branch, state, url, at, sha, trigger,
+  start, finish }` with `is_failed()`, `is_running()`, `is_succeeded()`,
+  `display_branch()`, `short_sha()`, `trigger_word()`, `at_key()` and the two
+  constructors `of_github` / `of_azure`. **Landed.** `RunState` (Queued,
+  Running, Succeeded, Failed, Skipped) carries `word()` and the predicates, so
+  both platforms print one vocabulary; `sort_newest_first` orders the list.
+- `RunJob`, `RunStage` and `RunDetail` moved here from `azure.rs` (which
+  re-exports them): both sources produce them, one from a timeline and one from
+  `gh run view`. `duration_between` and `log_tail` came with them.
 - `ActivityCounts { pulls, issues, runs }` for the rail and tab strip.
 - `IssueSort` moves here from `github.rs`; it sorts `ActivityItem` by updated,
   created, comments. GitHub's parser re-exports or uses the shared type.
@@ -85,11 +106,21 @@ No network, no UI and no gpui in this module.
 
 ### 3.2 `github.rs`
 
-- `GitHubRun { id, name, display_title, branch, status, conclusion, url,
-  created_at }`; `conclusion` may be absent while queued or running.
-- `GitHubSnapshot.runs: Vec<GitHubRun>`.
+- `GitHubRun { id, number, name, title, branch, status, conclusion, url,
+  created_at }`; `conclusion` is absent while queued or running (gh answers
+  `""`, which the parser drops). **Landed**, with `parse_runs`. `number` is one
+  field more than this plan first listed: the design's row prints `#1284`, and
+  `databaseId` is too long for it. A payload without one falls back to the
+  display title.
+- `GitHubSnapshot.runs: Vec<GitHubRun>`. **Landed.**
+- `github::run_detail(folder, gh_exe, run_id) -> Option<RunDetail>`: one
+  `gh run view <id> --json …jobs` for the head facts and the job cards (a job
+  is the card, its steps are the rows), joined with
+  `gh run view <id> --log-failed` for the excerpt. GitHub's words are
+  normalized to the app's (`in_progress` → `inProgress`, `failure` → `failed`,
+  `cancelled` → `canceled`) so one row renderer draws both.
 - `refresh` runs `gh run list --limit 10 --json
-  databaseId,workflowName,displayTitle,headBranch,status,conclusion,url,createdAt`
+  databaseId,number,workflowName,displayTitle,headBranch,status,conclusion,url,createdAt`
   in the same `tokio::join!` as the two list calls. Parse defensively like the
   other gh payloads.
 - The parsers already tolerate shape drift; a missing runs payload is an empty
@@ -177,19 +208,34 @@ No network, no UI and no gpui in this module.
   `New pull request` / `New work item` on Azure; hidden when that source has no
   web base.
 
-### 5.3 `azure_tab.rs` → `pipelines_tab.rs`
+### 5.3 `azure_tab.rs` (the Pipelines workbench)
 
-- `PipelinesView` reads the GitHub snapshot's runs and the Azure snapshot's
-  pipelines.
-- Toolbar: latest run's state and name, plus its source tag; Refresh unchanged.
-- Body: one full-width card of `ActivityRun` rows. Each row: state glyph,
-  workflow/pipeline name and run/build label, then branch · state word · source
-  tag · age, and an open-in-new control.
-- The failed tint stays for either source; a running row spins.
-- Empty states: no runs loaded yet, no runs at all, and one source unavailable
-  (the other's runs still show).
-- The `Pipelines` / `Pull requests` / `Work items` cards and `items_card` /
-  `item_row` are deleted.
+**Landed.** The tab keeps the design's workbench shape — the 320 list, a
+hairline, the selected run's detail — and the list now interleaves both
+sources:
+
+- `PipelinesView::render` reads the GitHub snapshot's runs and the Azure
+  snapshot's pipelines, maps both through `ActivityRun::of_*` and sorts with
+  `sort_newest_first`. The tab renders when **either** source is available; a
+  GitHub-only repository gets it too (`Store::detail_tabs`), which is what the
+  "tabs by capability" rule in §1 asks for.
+- Toolbar: the latest run's state and its source tag; Refresh unchanged.
+- A row: state glyph, workflow/pipeline name and run number, branch · state
+  word · source tag, then the age. The failed tint stays for either source; a
+  running row spins.
+- The detail: the head facts (the detail's own call is fresher, and for Actions
+  it is the only source of the commit and the trigger), the 44 strip
+  (state/Started/Duration/Trigger), one card per stage with job rows, the log
+  card. An Actions run's cards are its jobs and its rows are the steps.
+- Empty states: no runs at all says "Nothing has run yet" **and** which source
+  answered, so an unconnected source is never read as "nothing ran".
+- The Azure `Pull requests` / `Work items` cards stay under the runs until the
+  union lists land; the code is `items_section` / `item_row`, not the plan's
+  `items_card`.
+
+The file keeps its `azure_tab.rs` name in this pass; renaming it to
+`pipelines_tab.rs` rides along with the union lists, when `AzureView` stops
+owning an Azure item.
 
 ### 5.4 Repo row and list summary (`repos_list.rs`, `repos.rs`)
 

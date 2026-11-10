@@ -1117,7 +1117,39 @@ fn needs_you_section(
             ),
             &mut any,
         ));
-    } else if github && repo.github_pr_count > 0 {
+    } else if let Some(pull) = azure.and_then(|snapshot| snapshot.pulls.first()) {
+        let mut bits: Vec<String> = Vec::new();
+        if let (Some(head), Some(base)) = (
+            pull.source_ref_name.as_deref(),
+            pull.target_ref_name.as_deref(),
+        ) {
+            bits.push(format!(
+                "{} → {}",
+                head.trim_start_matches("refs/heads/"),
+                base.trim_start_matches("refs/heads/")
+            ));
+        }
+        if let Some(state) = pull.state.clone() {
+            bits.push(state);
+        }
+        let item = pull.clone();
+        let target = entities.clone();
+        rows = rows.child(next(
+            needy_row(
+                &format!("insp-azure-pr-{}", pull.number),
+                "icons/icon-git-pull-request.svg",
+                theme::PR,
+                format!("!{} {}", pull.number, pull.title),
+                bits.join(" · "),
+                needy_link("insp-open-azure-pr", "Open", {
+                    Box::new(move |_, _, cx| {
+                        target.update(cx, |s, cx| s.open_azure_pull(item.clone(), cx));
+                    })
+                }),
+            ),
+            &mut any,
+        ));
+    } else if (github || azure.is_some()) && repo.pull_total() > 0 {
         rows = rows.child(next(
             needy_row(
                 "insp-pulls-unloaded",
@@ -1125,10 +1157,10 @@ fn needs_you_section(
                 theme::PR,
                 format!(
                     "{} open {}",
-                    repo.github_pr_count,
-                    count_word(repo.github_pr_count, "pull request", "pull requests")
+                    repo.pull_total(),
+                    count_word(repo.pull_total(), "pull request", "pull requests")
                 ),
-                "Waiting for the GitHub pass".to_string(),
+                "Waiting for the activity pass".to_string(),
                 needy_link(
                     "insp-open-prs",
                     "Open",
@@ -1162,7 +1194,33 @@ fn needs_you_section(
             ),
             &mut any,
         ));
-    } else if github && repo.github_issue_count > 0 {
+    } else if let Some(item) = azure.and_then(|snapshot| snapshot.work_items.first()) {
+        let mut bits: Vec<String> = Vec::new();
+        if let Some(kind) = item.work_item_type.clone() {
+            bits.push(kind);
+        }
+        if let Some(state) = item.state.clone() {
+            bits.push(state);
+        }
+        let url = item.url.clone();
+        rows = rows.child(next(
+            needy_row(
+                &format!("insp-azure-wi-{}", item.number),
+                "icons/icon-circle-dot.svg",
+                theme::ISSUE,
+                format!("#{} {}", item.number, item.title),
+                bits.join(" · "),
+                needy_link("insp-open-azure-wi", "Open", {
+                    Box::new(move |_, _, _| {
+                        if !url.is_empty() {
+                            let _ = warp_station_core::terminal::open_folder(&url);
+                        }
+                    })
+                }),
+            ),
+            &mut any,
+        ));
+    } else if (github || azure.is_some()) && repo.issue_total() > 0 {
         rows = rows.child(next(
             needy_row(
                 "insp-issues-unloaded",
@@ -1170,10 +1228,10 @@ fn needs_you_section(
                 theme::ISSUE,
                 format!(
                     "{} open {}",
-                    repo.github_issue_count,
-                    count_word(repo.github_issue_count, "issue", "issues")
+                    repo.issue_total(),
+                    count_word(repo.issue_total(), "issue", "issues")
                 ),
-                "Waiting for the GitHub pass".to_string(),
+                "Waiting for the activity pass".to_string(),
                 needy_link(
                     "insp-open-issues",
                     "Open",

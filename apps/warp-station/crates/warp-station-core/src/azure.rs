@@ -16,8 +16,14 @@ WHERE [System.TeamProject] = @project \
 AND [System.State] NOT IN ('Done', 'Closed', 'Removed', 'Completed') \
 ORDER BY [System.ChangedDate] DESC";
 
-const WORK_ITEM_FIELDS: &str =
-    "System.Id,System.Title,System.State,System.WorkItemType,System.AssignedTo";
+const WORK_ITEM_FIELDS: &str = "System.Id,System.Title,System.State,System.WorkItemType,\
+                                 System.AssignedTo,System.ChangedDate";
+
+/// The closed half: the states the open query excludes.
+const CLOSED_WORK_ITEM_QUERY: &str = "SELECT [System.Id] FROM WorkItems \
+WHERE [System.TeamProject] = @project \
+AND [System.State] IN ('Done', 'Closed', 'Removed', 'Completed') \
+ORDER BY [System.ChangedDate] DESC";
 
 // ---- remote parsing -----------------------------------------------------------
 
@@ -220,10 +226,20 @@ pub struct AzureItem {
     pub number: u64,
     pub title: String,
     pub url: String,
+    /// Who raised it (a pull request) or who it is assigned to (a work item).
     pub author: Option<String>,
     pub labels: Vec<String>,
     pub is_draft: bool,
     pub state: Option<String>,
+    /// Pull requests: `refs/heads/feat/x` and the branch it lands on.
+    pub source_ref_name: Option<String>,
+    pub target_ref_name: Option<String>,
+    /// Work items: `Bug`, `User Story`, …
+    pub work_item_type: Option<String>,
+    /// Work items: the assignee, when one is set.
+    pub assigned_to: Option<String>,
+    /// Work items: when it last changed, which is the row's age.
+    pub changed_at: Option<String>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -242,16 +258,18 @@ pub struct PipelineRun {
     /// ISO timestamps, as Azure answers them.
     pub start: Option<String>,
     pub finish: Option<String>,
+    /// When the build entered the queue (else when it finished): the merged
+    /// run list sorts on this across sources.
+    pub at: Option<String>,
 }
 
 impl PipelineRun {
+    /// A build that is actually going. `notStarted` and `postponed` are the
+    /// queue, and the design gives the queue a clock, not a spinner.
     pub fn is_running(&self) -> bool {
         !self.is_failed()
             && !self.is_succeeded()
-            && matches!(
-                self.status.as_deref(),
-                Some("notStarted" | "inProgress" | "postponed")
-            )
+            && matches!(self.status.as_deref(), Some("inProgress"))
     }
     pub fn is_failed(&self) -> bool {
         matches!(self.result.as_deref(), Some("failed" | "canceled"))
@@ -303,59 +321,9 @@ impl PipelineRun {
     }
 }
 
-/// One job inside a run's stage, as the timeline lists it.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct RunJob {
-    pub name: String,
-    /// `inProgress`, `completed` or `pending`.
-    pub state: Option<String>,
-    /// `succeeded`, `failed`, `partiallySucceeded`, `canceled` or `skipped`.
-    pub result: Option<String>,
-    pub start: Option<String>,
-    pub finish: Option<String>,
-}
-
-impl RunJob {
-    pub fn is_failed(&self) -> bool {
-        matches!(
-            self.result.as_deref(),
-            Some("failed" | "canceled" | "partiallySucceeded")
-        )
-    }
-
-    pub fn is_running(&self) -> bool {
-        !self.is_failed() && self.state.as_deref() == Some("inProgress")
-    }
-
-    pub fn is_done(&self) -> bool {
-        self.state.as_deref() == Some("completed") && !self.is_failed()
-    }
-}
-
-/// One stage of a run, with the jobs it holds. The design draws one card per
-/// stage and the jobs under it.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct RunStage {
-    pub name: String,
-    pub jobs: Vec<RunJob>,
-}
-
-impl RunStage {
-    pub fn failed(&self) -> usize {
-        self.jobs.iter().filter(|job| job.is_failed()).count()
-    }
-
-    pub fn done(&self) -> usize {
-        self.jobs.iter().filter(|job| job.is_done()).count()
-    }
-}
-
-/// One run's detail: the stage cards and the tail of its log.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct RunDetail {
-    pub stages: Vec<RunStage>,
-    pub log: String,
-}
+// The run detail's parts are source-neutral and live in `activity`; they are
+// re-exported here so the Azure surface keeps one import path.
+pub use crate::activity::{RunDetail, RunJob, RunStage, duration_between, log_tail};
 
 #[derive(Clone, Debug, Default)]
 pub struct AzureSnapshot {
@@ -375,6 +343,22 @@ impl AzureSnapshot {
     }
     pub fn pipeline_ok(&self) -> bool {
         self.pipelines.first().is_some_and(|p| p.is_succeeded())
+    }
+
+    /// The project's "new pull request" page: the repository's web URL plus
+    /// the create path Azure answers there.
+    pub fn new_pull_request_url(&self) -> Option<String> {
+        self.url
+            .as_ref()
+            .map(|url| format!("{}/pullrequestcreate", url.trim_end_matches('/')))
+    }
+
+    /// The project's "new work item" page. The snapshot's URL is the
+    /// repository's, so the project is what comes before `/_git/`.
+    pub fn new_work_item_url(&self) -> Option<String> {
+        let url = self.url.as_ref()?.trim_end_matches('/');
+        let project = url.split("/_git/").next().unwrap_or(url);
+        Some(format!("{project}/_workitems/create/Bug"))
     }
 }
 
@@ -450,66 +434,130 @@ pub async fn refresh(folder: &Path, pat: &str, custom_base: &str) -> AzureSnapsh
     }
 }
 
+/// The closed pull requests or work items, for the tab that shows them.
+/// `None` is a failed call — the tab offers Retry rather than an empty list
+/// that would read as "nothing here".
+pub async fn closed_items(
+    folder: &Path,
+    pat: &str,
+    custom_base: &str,
+    pull_requests: bool,
+) -> Option<Vec<AzureItem>> {
+    let remote = remote_for(folder, custom_base)?;
+    let client = Client::new(pat);
+    let repo_id = repository_id(&client, &remote).await?;
+    if pull_requests {
+        let payload = client
+            .get_json::<serde_json::Value>(&format!(
+                "{}/{}/_apis/git/repositories/{repo_id}/pullrequests?api-version=7.1&searchCriteria.status=all&$top={ITEM_LIMIT}",
+                remote.base_url, remote.project
+            ))
+            .await?;
+        let mut items = parse_items(&payload);
+        // `all` carries the active ones too, and those belong to the open tab
+        items.retain(|item| matches!(item.state.as_deref(), Some("completed" | "abandoned")));
+        items.sort_by_key(|item| std::cmp::Reverse(item.number));
+        Some(items)
+    } else {
+        Some(fetch_work_items_for(&client, &remote, CLOSED_WORK_ITEM_QUERY).await)
+    }
+}
+
+/// The repository's GUID, which every git-scoped endpoint needs.
+async fn repository_id(client: &Client, remote: &AzureRemote) -> Option<String> {
+    let meta = client
+        .get_json::<serde_json::Value>(&format!(
+            "{}/{}/_apis/git/repositories/{}?api-version=7.1",
+            remote.base_url, remote.project, remote.repository
+        ))
+        .await?;
+    meta.get("id").and_then(|v| v.as_str()).map(str::to_string)
+}
+
+/// The rows one pull-request payload carries. The open and closed fetches
+/// read the same shape, so the mapping lives once.
+fn parse_items(payload: &serde_json::Value) -> Vec<AzureItem> {
+    payload
+        .get("value")
+        .and_then(|v| v.as_array())
+        .map(|rows| rows.iter().filter_map(parse_pull_item).collect())
+        .unwrap_or_default()
+}
+
+fn parse_pull_item(p: &serde_json::Value) -> Option<AzureItem> {
+    let number = p.get("pullRequestId").and_then(|v| v.as_u64())?;
+    Some(AzureItem {
+        number,
+        title: p
+            .get("title")
+            .and_then(|t| t.as_str())
+            .unwrap_or_default()
+            .to_string(),
+        url: p
+            .pointer("/_links/web/href")
+            .and_then(|u| u.as_str())
+            .unwrap_or_default()
+            .to_string(),
+        author: p
+            .pointer("/createdBy/displayName")
+            .and_then(|a| a.as_str())
+            .or_else(|| p.pointer("/createdBy/uniqueName").and_then(|a| a.as_str()))
+            .map(str::to_string),
+        labels: p
+            .get("labels")
+            .and_then(|l| l.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|l| {
+                        l.get("name")
+                            .and_then(|n| n.as_str())
+                            .filter(|n| !n.trim().is_empty())
+                            .map(str::to_string)
+                    })
+                    .collect()
+            })
+            .unwrap_or_default(),
+        is_draft: p.get("isDraft").and_then(|d| d.as_bool()).unwrap_or(false),
+        state: p.get("status").and_then(|s| s.as_str()).map(str::to_string),
+        source_ref_name: p
+            .get("sourceRefName")
+            .and_then(|r| r.as_str())
+            .map(str::to_string),
+        target_ref_name: p
+            .get("targetRefName")
+            .and_then(|r| r.as_str())
+            .map(str::to_string),
+        work_item_type: None,
+        assigned_to: None,
+        changed_at: None,
+    })
+}
+
 async fn fetch_pulls(client: &Client, remote: &AzureRemote, repo_id: &str) -> Vec<AzureItem> {
     let Some(payload) = client
         .get_json::<serde_json::Value>(&format!(
-            "{}/{}/_apis/git/repositories/{}/pullrequests?api-version=7.1&searchCriteria.status=active&$top={ITEM_LIMIT}",
-            remote.base_url, remote.project, repo_id
+            "{}/{}/_apis/git/repositories/{repo_id}/pullrequests?api-version=7.1&searchCriteria.status=active&$top={ITEM_LIMIT}",
+            remote.base_url, remote.project
         ))
         .await
     else {
         return Vec::new();
     };
-    let mut items: Vec<AzureItem> = payload
-        .get("value")
-        .and_then(|v| v.as_array())
-        .map(|rows| {
-            rows.iter()
-                .filter_map(|p| {
-                    let number = p.get("pullRequestId").and_then(|v| v.as_u64())?;
-                    Some(AzureItem {
-                        number,
-                        title: p
-                            .get("title")
-                            .and_then(|t| t.as_str())
-                            .unwrap_or_default()
-                            .to_string(),
-                        url: p
-                            .pointer("/_links/web/href")
-                            .and_then(|u| u.as_str())
-                            .unwrap_or_default()
-                            .to_string(),
-                        author: p
-                            .pointer("/createdBy/displayName")
-                            .and_then(|a| a.as_str())
-                            .or_else(|| p.pointer("/createdBy/uniqueName").and_then(|a| a.as_str()))
-                            .map(str::to_string),
-                        labels: p
-                            .get("labels")
-                            .and_then(|l| l.as_array())
-                            .map(|arr| {
-                                arr.iter()
-                                    .filter_map(|l| {
-                                        l.get("name")
-                                            .and_then(|n| n.as_str())
-                                            .filter(|n| !n.trim().is_empty())
-                                            .map(str::to_string)
-                                    })
-                                    .collect()
-                            })
-                            .unwrap_or_default(),
-                        is_draft: p.get("isDraft").and_then(|d| d.as_bool()).unwrap_or(false),
-                        state: None,
-                    })
-                })
-                .collect()
-        })
-        .unwrap_or_default();
-    items.sort_by_key(|i| i.number);
+    let mut items = parse_items(&payload);
+    // newest first: the list's own order, before any sort the tab applies
+    items.sort_by_key(|item| std::cmp::Reverse(item.number));
     items
 }
 
 async fn fetch_work_items(client: &Client, remote: &AzureRemote) -> Vec<AzureItem> {
+    fetch_work_items_for(client, remote, WORK_ITEM_QUERY).await
+}
+
+async fn fetch_work_items_for(
+    client: &Client,
+    remote: &AzureRemote,
+    query: &str,
+) -> Vec<AzureItem> {
     // WIQL for the ids, then one batch call for the fields (WIQL results
     // carry ids only)
     #[derive(serde::Serialize)]
@@ -520,9 +568,7 @@ async fn fetch_work_items(client: &Client, remote: &AzureRemote) -> Vec<AzureIte
         "{}/{}/_apis/wit/wiql?api-version=7.1&$top={ITEM_LIMIT}",
         remote.base_url, remote.project
     );
-    let wiql_body = WiqlRequest {
-        query: WORK_ITEM_QUERY,
-    };
+    let wiql_body = WiqlRequest { query };
     let wiql_result: Option<serde_json::Value> = client.post_json(&wiql_url, &wiql_body).await;
     let Some(wiql) = wiql_result else {
         return Vec::new();
@@ -571,6 +617,7 @@ async fn fetch_work_items(client: &Client, remote: &AzureRemote) -> Vec<AzureIte
                                 .map(str::to_string)
                         }
                     };
+                    let work_item_type = field("System.WorkItemType");
                     Some(AzureItem {
                         number: id,
                         title: field("System.Title")?,
@@ -579,11 +626,14 @@ async fn fetch_work_items(client: &Client, remote: &AzureRemote) -> Vec<AzureIte
                             remote.base_url, remote.project
                         ),
                         author: field("System.AssignedTo"),
-                        labels: field("System.WorkItemType")
-                            .map(|t| vec![t])
-                            .unwrap_or_default(),
+                        labels: work_item_type.clone().map(|t| vec![t]).unwrap_or_default(),
                         is_draft: false,
                         state: field("System.State"),
+                        source_ref_name: None,
+                        target_ref_name: None,
+                        work_item_type,
+                        assigned_to: field("System.AssignedTo"),
+                        changed_at: field("System.ChangedDate"),
                     })
                 })
                 .collect()
@@ -644,6 +694,9 @@ fn parse_build(b: &serde_json::Value) -> Option<PipelineRun> {
             .map(str::to_string),
         source_version: text("sourceVersion"),
         reason: text("reason"),
+        at: text("queueTime")
+            .or_else(|| text("finishTime"))
+            .or_else(|| text("startTime")),
         start: text("startTime"),
         finish: text("finishTime"),
     })
@@ -1557,12 +1610,17 @@ pub async fn run_detail(
         "{}/{}/_apis/build/builds/{build_id}",
         remote.base_url, remote.project
     );
+    let build_url = format!("{base}?api-version=7.1");
     let timeline_url = format!("{base}/timeline?api-version=7.1");
     let logs_url = format!("{base}/logs?api-version=7.1");
-    let (timeline, logs) = tokio::join!(
+    let (build, timeline, logs) = tokio::join!(
+        client.get_json::<serde_json::Value>(&build_url),
         client.get_json::<serde_json::Value>(&timeline_url),
         client.get_json::<serde_json::Value>(&logs_url),
     );
+    // the detail's head facts: fresher than the row's snapshot, and the only
+    // place a GitHub run would have had to carry them
+    let record = build.as_ref().and_then(parse_build);
     let stages = timeline.as_ref().map(parse_timeline).unwrap_or_default();
     // the last entry is the run's closing words, which is the excerpt worth
     // showing; a log that failed to list leaves the card empty
@@ -1570,11 +1628,22 @@ pub async fn run_detail(
         Some(url) => client
             .get_text(&url)
             .await
-            .map(|text| tail(&text, RUN_LOG_CAP))
+            .map(|text| log_tail(&text, RUN_LOG_CAP))
             .unwrap_or_default(),
         None => String::new(),
     };
-    Some(RunDetail { stages, log })
+    let (sha, trigger, start, finish) = match record {
+        Some(run) => (run.source_version, run.reason, run.start, run.finish),
+        None => (None, None, None, None),
+    };
+    Some(RunDetail {
+        sha,
+        trigger,
+        start,
+        finish,
+        stages,
+        log,
+    })
 }
 
 /// One record of a build's timeline, before it is grouped.
@@ -1686,39 +1755,6 @@ fn last_log_url(logs: Option<&serde_json::Value>) -> Option<String> {
         .get("url")?
         .as_str()
         .map(str::to_string)
-}
-
-/// Wall time between two Azure timestamps, in the app's words: `12s`, `4m 12s`,
-/// `1h 02m`. A run that has not finished counts up to now, so a running job's
-/// row still says something. Azure's "not started yet" sentinel (year 1) and a
-/// future start answer None.
-pub fn duration_between(start: Option<&str>, finish: Option<&str>) -> Option<String> {
-    let parse = |text: Option<&str>| {
-        let text = text?;
-        let at = chrono::DateTime::parse_from_rfc3339(text).ok()?;
-        (chrono::Datelike::year(&at) > 2000).then_some(at.with_timezone(&chrono::Local))
-    };
-    let start = parse(start)?;
-    let end = parse(finish).unwrap_or_else(chrono::Local::now);
-    let seconds = (end - start).num_seconds().max(0);
-    Some(match seconds {
-        0..=59 => format!("{seconds}s"),
-        60..=3599 => format!("{}m {:02}s", seconds / 60, seconds % 60),
-        _ => format!("{}h {:02}m", seconds / 3600, (seconds % 3600) / 60),
-    })
-}
-
-/// The end of a long text, cut on a line boundary so the excerpt never starts
-/// mid-line.
-fn tail(text: &str, cap: usize) -> String {
-    if text.len() <= cap {
-        return text.to_string();
-    }
-    let start = text.len() - cap;
-    match text[start..].find('\n') {
-        Some(offset) => text[start + offset + 1..].to_string(),
-        None => text[start..].to_string(),
-    }
 }
 
 // ---- the HTTP shape ------------------------------------------------------------
@@ -2020,10 +2056,10 @@ mod tests {
     #[test]
     fn the_log_excerpt_is_the_tail_cut_on_a_line() {
         let text = "line one\nline two\nline three\n";
-        assert_eq!(tail(text, 4096), text);
+        assert_eq!(log_tail(text, 4096), text);
 
         let long = "a".repeat(100) + "\nlast line\n";
-        let cut = tail(&long, 20);
+        let cut = log_tail(&long, 20);
         assert!(cut.ends_with("last line\n"), "cut was {cut:?}");
         assert!(!cut.contains("aaaa"), "the tail keeps the end only");
     }

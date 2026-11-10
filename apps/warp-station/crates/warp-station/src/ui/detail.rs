@@ -43,6 +43,7 @@ impl DetailViews {
                 ItemListView::new(
                     store.clone(),
                     pull.clone(),
+                    azure_pull.clone(),
                     new_pull.clone(),
                     issue_detail.clone(),
                     true,
@@ -54,6 +55,7 @@ impl DetailViews {
                 ItemListView::new(
                     store.clone(),
                     pull.clone(),
+                    azure_pull.clone(),
                     new_pull,
                     issue_detail,
                     false,
@@ -61,7 +63,7 @@ impl DetailViews {
                     cx,
                 )
             }),
-            pipelines: cx.new(|cx| AzureView::new(store.clone(), azure_pull, cx)),
+            pipelines: cx.new(|cx| AzureView::new(store.clone(), cx)),
             readme: cx.new(|cx| ReadmeView::new(store.clone(), cx)),
         }
     }
@@ -131,8 +133,8 @@ pub fn render(
     for tab in store.detail_tabs() {
         let count = match tab {
             WorkspaceTab::Changes => Some(repo.git_modified_count),
-            WorkspaceTab::PullRequests => Some(repo.github_pr_count),
-            WorkspaceTab::Issues => Some(repo.github_issue_count),
+            WorkspaceTab::PullRequests => Some(repo.pull_total()),
+            WorkspaceTab::Issues => Some(repo.issue_total()),
             _ => None,
         };
         let target = entities.clone();
@@ -169,6 +171,7 @@ pub fn render(
         .child(crate::ui::repos_list::stats(
             repo,
             settings.repos.enable_github,
+            settings.repos.enable_azure_devops,
             None,
         ));
 

@@ -320,7 +320,7 @@ fn row_action(
 /// The context line: branch, then what is waiting, each in its own hue. Zero
 /// counts leave, so a healthy repo reads as branch and clean. `row_ix` names the
 /// parts for the probes on a list row; the detail head passes `None`.
-pub fn stats(repo: &RepoEntry, github: bool, row_ix: Option<usize>) -> gpui::Div {
+pub fn stats(repo: &RepoEntry, github: bool, azure: bool, row_ix: Option<usize>) -> gpui::Div {
     let branch = repo.git_branch_name.clone().unwrap_or_else(|| "—".into());
     let mut meta = div()
         .flex()
@@ -350,8 +350,9 @@ pub fn stats(repo: &RepoEntry, github: bool, row_ix: Option<usize>) -> gpui::Div
                         .child(SharedString::from(branch)),
                 ),
         );
-    let (issues, pulls) = if github {
-        (repo.github_issue_count, repo.github_pr_count)
+    // both platforms add up: a row is a row whichever one answered
+    let (issues, pulls) = if github || azure {
+        (repo.issue_total(), repo.pull_total())
     } else {
         (0, 0)
     };
@@ -518,13 +519,7 @@ fn repo_row(
                 })
         });
 
-    let mut meta = stats(repo, facts.github, Some(row_ix));
-    if let Some(chips) = facts
-        .azure
-        .and_then(|snapshot| azure_chips(snapshot, row_ix))
-    {
-        meta = meta.child(chips);
-    }
+    let meta = stats(repo, facts.github, facts.azure.is_some(), Some(row_ix));
 
     let name_line = div()
         .flex()
@@ -723,38 +718,4 @@ fn counted(
             None => format!("{count}"),
         })
         .into_any_element()
-}
-
-/// The repo's Azure DevOps state: the newest pipeline run's glyph, then the
-/// open pull requests and work items. Nothing for a project with no activity.
-fn azure_chips(snapshot: &AzureSnapshot, row_ix: usize) -> Option<gpui::AnyElement> {
-    if snapshot.pipelines.is_empty() && snapshot.pulls.is_empty() && snapshot.work_items.is_empty()
-    {
-        return None;
-    }
-    let mut chips = div()
-        .debug_selector(move || format!("repo-azure-{row_ix}"))
-        .flex()
-        .items_center()
-        .gap(px(4.))
-        .text_color(theme::text_dim());
-    if !snapshot.pipelines.is_empty() {
-        let (glyph, color) = if snapshot.pipeline_running() {
-            ("icons/icon-play.svg", theme::blue_bright())
-        } else if snapshot.pipeline_failed() {
-            ("icons/icon-close.svg", theme::DANGER)
-        } else if snapshot.pipeline_ok() {
-            ("icons/icon-check.svg", theme::SUCCESS_BRIGHT)
-        } else {
-            ("icons/icon-clock.svg", theme::text_muted())
-        };
-        chips = chips.child(icon(glyph, px(11.), color));
-    }
-    if !snapshot.pulls.is_empty() {
-        chips = chips.child(format!("PR {}", snapshot.pulls.len()));
-    }
-    if !snapshot.work_items.is_empty() {
-        chips = chips.child(format!("WI {}", snapshot.work_items.len()));
-    }
-    Some(chips.into_any_element())
 }

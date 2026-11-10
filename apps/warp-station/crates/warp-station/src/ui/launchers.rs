@@ -300,6 +300,8 @@ mod tests {
             git_status_loaded: true,
             github_pr_count: 0,
             github_issue_count: 0,
+            azure_pull_count: 0,
+            azure_work_item_count: 0,
         }
     }
 

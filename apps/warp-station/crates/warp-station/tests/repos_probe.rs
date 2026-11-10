@@ -46,6 +46,8 @@ fn entry(name: &str, path: &str, tags: &[&str]) -> RepoEntry {
         git_status_loaded: true,
         github_pr_count: 0,
         github_issue_count: 0,
+        azure_pull_count: 0,
+        azure_work_item_count: 0,
     }
 }
 
@@ -1008,6 +1010,7 @@ fn a_settling_scan_keeps_counts_that_landed_while_it_waited(cx: &mut TestAppCont
                     "/probe/alpha".into(),
                     GitHubSnapshot {
                         url: Some("https://github.com/example/alpha".into()),
+                        runs: Vec::new(),
                         pulls: vec![GitHubItem {
                             number: 1,
                             ..Default::default()
@@ -1185,6 +1188,7 @@ fn activity_failures_keep_counts_and_the_eager_kick_retries(cx: &mut TestAppCont
 
     let snapshot = |available: bool, pulls: u32, issues: u32| GitHubSnapshot {
         url: Some("https://github.com/example/alpha".into()),
+        runs: Vec::new(),
         pulls: (0..pulls)
             .map(|ix| GitHubItem {
                 number: u64::from(ix) + 1,

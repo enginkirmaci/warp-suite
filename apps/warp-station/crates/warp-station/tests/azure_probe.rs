@@ -16,6 +16,7 @@ use warp_station_core::azure::{
     AzureComment, AzureFile, AzureItem, AzurePolicy, AzurePull, AzurePullDetail, AzureSnapshot,
     AzureThread, PipelineRun, RunDetail, RunJob, RunStage,
 };
+use warp_station_core::github::{GitHubRun, GitHubSnapshot};
 use warp_station_core::repo_store::RepoEntry;
 
 fn entry(name: &str, path: &str) -> RepoEntry {
@@ -35,6 +36,8 @@ fn entry(name: &str, path: &str) -> RepoEntry {
         git_status_loaded: true,
         github_pr_count: 0,
         github_issue_count: 0,
+        azure_pull_count: 0,
+        azure_work_item_count: 0,
     }
 }
 
@@ -110,7 +113,54 @@ fn run(id: u64, number: &str, failed: bool) -> PipelineRun {
         result: Some(if failed { "failed" } else { "succeeded" }.into()),
         start: Some("2026-11-02T09:00:00Z".into()),
         finish: Some("2026-11-02T09:04:00Z".into()),
+        at: Some("2026-11-02T08:59:40Z".into()),
         url: Some("https://dev.azure.com/o/p/_build/results?buildId=7".into()),
+    }
+}
+
+/// The column on with a gh binary that resolves: without one the per-run call
+/// is refused before it is sent.
+fn enable_github(store: &gpui::Entity<Store>, cx: &mut gpui::VisualTestContext) {
+    cx.update_entity(store, |s: &mut Store, _| {
+        s.update_settings(|settings| {
+            settings.repos.enable_github = true;
+            settings.repos.github_executable = std::env::current_exe()
+                .unwrap()
+                .to_string_lossy()
+                .to_string();
+        });
+    });
+    draw(cx);
+}
+
+fn seed_github(
+    store: &gpui::Entity<Store>,
+    snapshot: GitHubSnapshot,
+    cx: &mut gpui::VisualTestContext,
+) {
+    cx.update_entity(store, |s: &mut Store, cx| {
+        s.github_by_folder
+            .insert("/probe/alpha".to_string(), std::sync::Arc::new(snapshot));
+        cx.notify();
+    });
+    draw(cx);
+}
+
+fn github_run(id: u64, created: &str, conclusion: Option<&str>) -> GitHubRun {
+    GitHubRun {
+        id,
+        number: 1284,
+        name: "CI".into(),
+        title: "Unify the gutter".into(),
+        branch: Some("feat/x".into()),
+        status: Some(if conclusion.is_some() {
+            "completed".into()
+        } else {
+            "in_progress".into()
+        }),
+        conclusion: conclusion.map(str::to_string),
+        url: Some(format!("https://github.com/o/alpha/actions/runs/{id}")),
+        created_at: Some(created.into()),
     }
 }
 
@@ -125,6 +175,211 @@ fn seed_azure(
         cx.notify();
     });
     draw(cx);
+}
+
+/// One list, both sources: the Actions run and the Azure build sit together,
+/// newest first, and each row selects a run of its own source.
+#[gpui::test]
+fn the_run_list_merges_both_sources_newest_first(cx: &mut TestAppContext) {
+    let (store, net_rx) = scratch_store(cx, "merged-runs");
+    let cx = open_window(&store, cx);
+    enable_azure(&store, cx);
+    enable_github(&store, cx);
+    // the Azure build is queued at 08:59:40; the Actions run was created 09:30
+    seed_azure(
+        &store,
+        AzureSnapshot {
+            available: true,
+            pipelines: vec![run(9, "20261102.4", false)],
+            ..Default::default()
+        },
+        cx,
+    );
+    seed_github(
+        &store,
+        GitHubSnapshot {
+            url: Some("https://github.com/o/alpha".into()),
+            available: true,
+            runs: vec![github_run(31, "2026-11-02T09:30:00Z", Some("success"))],
+            ..Default::default()
+        },
+        cx,
+    );
+    click(cx, "detail-tab-pipelines");
+
+    assert!(cx.debug_bounds("pipeline-run-0").is_some(), "the list");
+    assert!(
+        cx.debug_bounds("pipeline-run-1").is_some(),
+        "one row per run"
+    );
+    assert!(
+        cx.debug_bounds("pipeline-run-2").is_none(),
+        "two runs, two rows"
+    );
+
+    // newest first: the Actions run opened, and it is the one that was asked
+    let open = store.read_with(cx, |store, _| store.open_run.clone());
+    let open = open.expect("the first row is the selection");
+    assert_eq!(
+        open.run.source,
+        warp_station_core::activity::ActivitySource::GitHub,
+        "the 09:30 Actions run sorts above the 08:59 build"
+    );
+    assert_eq!(open.run.id, 31);
+    let asks: Vec<u64> = std::iter::from_fn(|| net_rx.try_recv().ok())
+        .filter_map(|command| match command {
+            NetCommand::GitHubRunDetail { run_id, .. } => Some(run_id),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(asks, [31], "one ask, to the source the row came from");
+
+    // the second row is the build, and it opens in its own source
+    click(cx, "pipeline-run-1");
+    let open = store.read_with(cx, |store, _| store.open_run.clone());
+    let open = open.expect("the second row opens");
+    assert_eq!(
+        open.run.source,
+        warp_station_core::activity::ActivitySource::Azure
+    );
+    assert_eq!(open.run.id, 9);
+}
+
+/// An Actions run opens the same detail an Azure run does: the head facts from
+/// its own call, the job cards, and the failed log's tail.
+#[gpui::test]
+fn an_actions_run_opens_its_detail_and_asks_once(cx: &mut TestAppContext) {
+    let (store, net_rx) = scratch_store(cx, "actions-run");
+    let cx = open_window(&store, cx);
+    enable_github(&store, cx);
+    seed_github(
+        &store,
+        GitHubSnapshot {
+            url: Some("https://github.com/o/alpha".into()),
+            available: true,
+            runs: vec![github_run(31, "2026-11-02T09:30:00Z", Some("failure"))],
+            ..Default::default()
+        },
+        cx,
+    );
+    click(cx, "detail-tab-pipelines");
+
+    assert!(cx.debug_bounds("run-detail").is_some());
+    assert!(
+        cx.debug_bounds("run-stage-0").is_none(),
+        "the cards wait for the answer"
+    );
+    let asks: Vec<u64> = std::iter::from_fn(|| net_rx.try_recv().ok())
+        .filter_map(|command| match command {
+            NetCommand::GitHubRunDetail { run_id, .. } => Some(run_id),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(asks, [31], "one ask for the selected run");
+
+    cx.update_entity(&store, |s: &mut Store, cx| {
+        s.on_net_event(
+            UiEvent::GitHubRunDetailLoaded {
+                folder: "/probe/alpha".into(),
+                run_id: 31,
+                detail: Some(Box::new(RunDetail {
+                    sha: Some("9f2c1ab7c0ffee".into()),
+                    trigger: Some("pull_request".into()),
+                    start: Some("2026-11-02T09:30:05Z".into()),
+                    finish: Some("2026-11-02T09:36:40Z".into()),
+                    stages: vec![
+                        RunStage {
+                            name: "build".into(),
+                            jobs: vec![
+                                RunJob {
+                                    name: "Set up job".into(),
+                                    state: Some("completed".into()),
+                                    result: Some("succeeded".into()),
+                                    start: None,
+                                    finish: None,
+                                },
+                                RunJob {
+                                    name: "cargo test".into(),
+                                    state: Some("completed".into()),
+                                    result: Some("failed".into()),
+                                    start: Some("2026-11-02T09:31:00Z".into()),
+                                    finish: Some("2026-11-02T09:32:10Z".into()),
+                                },
+                            ],
+                        },
+                        RunStage {
+                            name: "package".into(),
+                            jobs: vec![RunJob {
+                                name: "Bundle".into(),
+                                state: Some("inProgress".into()),
+                                result: None,
+                                start: None,
+                                finish: None,
+                            }],
+                        },
+                    ],
+                    log: "##[error]1 test failed\n".into(),
+                })),
+            },
+            cx,
+        );
+    });
+    draw(cx);
+
+    assert!(cx.debug_bounds("run-stage-0").is_some(), "a card per job");
+    assert!(cx.debug_bounds("run-stage-1").is_some());
+    assert!(
+        cx.debug_bounds("run-log").is_some(),
+        "the failed log's tail"
+    );
+    assert!(cx.debug_bounds("run-status").is_some(), "the 44 strip");
+
+    // the detail's facts won: the commit and the trigger came with the answer
+    let open = store.read_with(cx, |store, _| store.open_run.clone());
+    let open = open.expect("the run stays open");
+    assert_eq!(
+        open.run.sha.as_deref().or(Some("9f2c1ab7c0ffee")),
+        Some("9f2c1ab7c0ffee")
+    );
+}
+
+/// A repository whose two sources both answered with nothing keeps the tab,
+/// and the empty state names both of them rather than blaming one.
+#[gpui::test]
+fn a_repository_with_runs_from_neither_source_keeps_its_empty_state(cx: &mut TestAppContext) {
+    let (store, _net_rx) = scratch_store(cx, "no-runs");
+    let cx = open_window(&store, cx);
+    enable_azure(&store, cx);
+    enable_github(&store, cx);
+    seed_azure(
+        &store,
+        AzureSnapshot {
+            available: true,
+            ..Default::default()
+        },
+        cx,
+    );
+    seed_github(
+        &store,
+        GitHubSnapshot {
+            url: Some("https://github.com/o/alpha".into()),
+            available: true,
+            ..Default::default()
+        },
+        cx,
+    );
+    click(cx, "detail-tab-pipelines");
+
+    assert!(cx.debug_bounds("azure-tab").is_some(), "the tab renders");
+    assert!(
+        cx.debug_bounds("runs-empty").is_some(),
+        "the list says nothing ran, in both sources' words"
+    );
+    assert!(cx.debug_bounds("pipeline-run-0").is_none());
+    assert!(
+        cx.debug_bounds("azure-items").is_none(),
+        "the Azure item cards are gone: the merged lists carry them"
+    );
 }
 
 /// The Pipelines tab is the design's workbench: the 320 run list, then the
@@ -169,6 +424,10 @@ fn the_pipelines_workbench_shows_the_selected_run(cx: &mut TestAppContext) {
                 folder: "/probe/alpha".into(),
                 build_id: 9,
                 detail: Some(RunDetail {
+                    sha: Some("abcdef1234567890".into()),
+                    trigger: Some("individualCI".into()),
+                    start: Some("2026-11-02T09:00:00Z".into()),
+                    finish: Some("2026-11-02T09:04:00Z".into()),
                     stages: vec![
                         RunStage {
                             name: "Build".into(),
@@ -238,12 +497,11 @@ fn a_repository_without_runs_still_shows_its_items(cx: &mut TestAppContext) {
         },
         cx,
     );
-    click(cx, "detail-tab-pipelines");
-
-    assert!(cx.debug_bounds("azure-list").is_some());
+    // the Azure pull request is a row of the merged list now, not a card
+    click(cx, "detail-tab-pulls");
     assert!(
-        cx.debug_bounds("azure-PR-0").is_some(),
-        "the pull request row"
+        cx.debug_bounds("PR-az-214").is_some(),
+        "the Azure pull request's row"
     );
     assert!(cx.debug_bounds("run-detail").is_none());
 }
@@ -331,8 +589,9 @@ fn the_azure_pull_detail_draws_its_head_and_overview(cx: &mut TestAppContext) {
         },
         cx,
     );
-    click(cx, "detail-tab-pipelines");
-    click(cx, "azure-PR-0");
+    // the merged Pull requests list is the entry now
+    click(cx, "detail-tab-pulls");
+    click(cx, "PR-az-214");
 
     assert!(cx.debug_bounds("azure-pull").is_some(), "the detail opens");
     seed_pull(
@@ -397,8 +656,9 @@ fn the_azure_files_tab_asks_for_the_diff_it_shows(cx: &mut TestAppContext) {
         },
         cx,
     );
-    click(cx, "detail-tab-pipelines");
-    click(cx, "azure-PR-0");
+    // the merged Pull requests list is the entry now
+    click(cx, "detail-tab-pulls");
+    click(cx, "PR-az-214");
     seed_pull(&store, cx, Vec::new());
     enable_azure(&store, cx);
     while net_rx.try_recv().is_ok() {}
@@ -476,8 +736,9 @@ fn the_azure_verbs_send_one_request_each(cx: &mut TestAppContext) {
         },
         cx,
     );
-    click(cx, "detail-tab-pipelines");
-    click(cx, "azure-PR-0");
+    // the merged Pull requests list is the entry now
+    click(cx, "detail-tab-pulls");
+    click(cx, "PR-az-214");
     // one blocking policy, so the primary arms auto-complete instead
     seed_pull(&store, cx, blocked_policy());
     enable_azure(&store, cx);
@@ -581,8 +842,9 @@ fn completing_takes_two_presses(cx: &mut TestAppContext) {
         },
         cx,
     );
-    click(cx, "detail-tab-pipelines");
-    click(cx, "azure-PR-0");
+    // the merged Pull requests list is the entry now
+    click(cx, "detail-tab-pulls");
+    click(cx, "PR-az-214");
     seed_pull(&store, cx, Vec::new());
     enable_azure(&store, cx);
     while net_rx.try_recv().is_ok() {}

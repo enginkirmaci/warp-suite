@@ -42,6 +42,11 @@ pub struct CachedRepo {
     /// The last GitHub pass's counts, restored alongside the git status.
     pub github_pr_count: u32,
     pub github_issue_count: u32,
+    /// The last Azure pass's counts. Both platforms add up in
+    /// [`Self::pull_total`] / [`Self::issue_total`], so a row is a row
+    /// whichever one answered.
+    pub azure_pull_count: u32,
+    pub azure_work_item_count: u32,
     /// Committer time of HEAD at the last probe (instant "2w ago" labels on
     /// startup before the status pass lands).
     pub git_last_commit_at: Option<String>,
@@ -80,9 +85,22 @@ pub struct RepoEntry {
     /// Open pull requests / issues from the GitHub pass (wave 4 fills these).
     pub github_pr_count: u32,
     pub github_issue_count: u32,
+    /// Open pull requests / work items from the Azure pass.
+    pub azure_pull_count: u32,
+    pub azure_work_item_count: u32,
 }
 
 impl RepoEntry {
+    /// Open pull requests across both platforms.
+    pub fn pull_total(&self) -> u32 {
+        self.github_pr_count + self.azure_pull_count
+    }
+
+    /// Open issues and work items across both platforms.
+    pub fn issue_total(&self) -> u32 {
+        self.github_issue_count + self.azure_work_item_count
+    }
+
     pub fn is_favorite(&self) -> bool {
         self.tags
             .iter()
@@ -140,6 +158,8 @@ fn cache_from_entry(repo: &RepoEntry) -> CachedRepo {
         git_status_loaded: repo.git_status_loaded,
         github_pr_count: repo.github_pr_count,
         github_issue_count: repo.github_issue_count,
+        azure_pull_count: repo.azure_pull_count,
+        azure_work_item_count: repo.azure_work_item_count,
         git_last_commit_at: repo.git_last_commit_at.map(|t| t.to_rfc3339()),
         git_last_fetch_at: repo.git_last_fetch_at.map(|t| t.to_rfc3339()),
     }
@@ -170,6 +190,8 @@ pub fn entry_from_cache(cached: &CachedRepo) -> RepoEntry {
         git_status_loaded: cached.git_status_loaded,
         github_pr_count: cached.github_pr_count,
         github_issue_count: cached.github_issue_count,
+        azure_pull_count: cached.azure_pull_count,
+        azure_work_item_count: cached.azure_work_item_count,
     }
 }
 
@@ -206,6 +228,8 @@ pub fn merge_scan(
             git_status_loaded: false,
             github_pr_count: 0,
             github_issue_count: 0,
+            azure_pull_count: 0,
+            azure_work_item_count: 0,
         };
         if let Some(prev) = prev {
             for tag in &prev.tags {
@@ -321,6 +345,8 @@ mod tests {
             git_status_loaded: true,
             github_pr_count: 0,
             github_issue_count: 0,
+            azure_pull_count: 0,
+            azure_work_item_count: 0,
         };
         let scanned = ScannedRepo {
             name: "repo".into(),
@@ -361,6 +387,8 @@ mod tests {
             git_status_loaded: false,
             github_pr_count: 0,
             github_issue_count: 0,
+            azure_pull_count: 0,
+            azure_work_item_count: 0,
         };
         let newer = chrono::Local::now() - chrono::Duration::hours(1);
         apply_status_probe(

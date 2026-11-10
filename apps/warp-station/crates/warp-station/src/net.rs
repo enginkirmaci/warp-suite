@@ -89,6 +89,13 @@ pub enum NetCommand {
         gh_exe: String,
         pull_requests: bool,
     },
+    /// The closed pull requests or work items from Azure DevOps.
+    AzureClosed {
+        folder: PathBuf,
+        pat: String,
+        custom_base: String,
+        pull_requests: bool,
+    },
     /// One pull request's full view.
     GitHubPull {
         folder: PathBuf,
@@ -144,6 +151,12 @@ pub enum NetCommand {
         custom_base: String,
     },
     /// One run's stages and the tail of its log, for the Pipelines detail.
+    /// One GitHub Actions run's jobs and failed log, for the Pipelines pane.
+    GitHubRunDetail {
+        folder: PathBuf,
+        gh_exe: String,
+        run_id: u64,
+    },
     AzureRunDetail {
         folder: PathBuf,
         pat: String,
@@ -492,6 +505,11 @@ pub enum UiEvent {
         pull_requests: bool,
         items: Option<Vec<warp_station_core::github::GitHubItem>>,
     },
+    AzureClosedLoaded {
+        folder: String,
+        pull_requests: bool,
+        items: Option<Vec<warp_station_core::azure::AzureItem>>,
+    },
     GitHubPullLoaded {
         folder: String,
         number: u64,
@@ -537,6 +555,11 @@ pub enum UiEvent {
     },
     AzureSettled {
         items: Vec<(String, warp_station_core::azure::AzureSnapshot)>,
+    },
+    GitHubRunDetailLoaded {
+        folder: String,
+        run_id: u64,
+        detail: Option<Box<warp_station_core::activity::RunDetail>>,
     },
     AzureRunDetailLoaded {
         folder: String,
@@ -852,6 +875,28 @@ fn spawn_read_intake(
                         });
                     });
                 }
+                NetCommand::AzureClosed {
+                    folder,
+                    pat,
+                    custom_base,
+                    pull_requests,
+                } => {
+                    let evt_tx = evt_tx.clone();
+                    tokio::spawn(async move {
+                        let items = warp_station_core::azure::closed_items(
+                            &folder,
+                            &pat,
+                            &custom_base,
+                            pull_requests,
+                        )
+                        .await;
+                        let _ = evt_tx.send_blocking(UiEvent::AzureClosedLoaded {
+                            folder: folder.to_string_lossy().to_string(),
+                            pull_requests,
+                            items,
+                        });
+                    });
+                }
                 NetCommand::GitHubPull {
                     folder,
                     gh_exe,
@@ -1093,6 +1138,22 @@ fn spawn_read_intake(
                             number,
                             action,
                             result,
+                        });
+                    });
+                }
+                NetCommand::GitHubRunDetail {
+                    folder,
+                    gh_exe,
+                    run_id,
+                } => {
+                    let evt_tx = evt_tx.clone();
+                    tokio::spawn(async move {
+                        let detail =
+                            warp_station_core::github::run_detail(&folder, &gh_exe, run_id).await;
+                        let _ = evt_tx.send_blocking(UiEvent::GitHubRunDetailLoaded {
+                            folder: folder.to_string_lossy().to_string(),
+                            run_id,
+                            detail: detail.map(Box::new),
                         });
                     });
                 }
@@ -1677,6 +1738,7 @@ async fn net_main(cmd_rx: Receiver<NetCommand>, evt_tx: Sender<UiEvent>) {
             // the intake answers these before they reach this queue
             NetCommand::GitHubDetails { .. }
             | NetCommand::GitHubClosed { .. }
+            | NetCommand::AzureClosed { .. }
             | NetCommand::GitHubPull { .. }
             | NetCommand::GitHubMerge { .. }
             | NetCommand::GitHubIssue { .. }
@@ -1686,6 +1748,7 @@ async fn net_main(cmd_rx: Receiver<NetCommand>, evt_tx: Sender<UiEvent>) {
             | NetCommand::CompareBranches { .. }
             | NetCommand::GitHubPullCreate { .. }
             | NetCommand::AzureRunDetail { .. }
+            | NetCommand::GitHubRunDetail { .. }
             | NetCommand::AzurePullDetail { .. }
             | NetCommand::AzurePullFiles { .. }
             | NetCommand::AzurePullCommits { .. }

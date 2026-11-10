@@ -27,6 +27,8 @@ fn entry(name: &str, path: &str) -> RepoEntry {
         git_status_loaded: true,
         github_pr_count: 0,
         github_issue_count: 0,
+        azure_pull_count: 0,
+        azure_work_item_count: 0,
     }
 }
 
@@ -597,6 +599,7 @@ fn rail_issue_rows_render_from_a_github_snapshot(cx: &mut TestAppContext) {
                 labels: Vec::new(),
                 is_draft: false,
                 review_decision: None,
+                state: None,
                 updated_at: None,
                 created_at: None,
                 comments: 0,
@@ -1158,27 +1161,59 @@ fn the_github_switch_takes_its_counts_off_the_row(cx: &mut TestAppContext) {
     assert!(cx.debug_bounds("repo-clean-0").is_some());
 }
 
+/// The Azure pass's counts land on the entry and sum with GitHub's: one row,
+/// one count, whichever platform answered. The platform-specific chips are
+/// gone now that the lists carry the rows.
 #[gpui::test]
-fn a_row_shows_its_azure_state_while_azure_is_on(cx: &mut TestAppContext) {
-    let (store, _net_rx) = scratch_store(cx, "row-azure", vec![entry("alpha", "/probe/alpha")]);
-    cx.update_entity(&store, |s: &mut Store, _| {
-        let snapshot = warp_station_core::azure::AzureSnapshot {
-            available: true,
-            pulls: vec![warp_station_core::azure::AzureItem::default()],
-            ..Default::default()
-        };
-        s.azure_by_folder
-            .insert("/probe/alpha".to_string(), std::sync::Arc::new(snapshot));
-    });
+fn a_row_sums_both_platforms_counts(cx: &mut TestAppContext) {
+    let mut repo = entry("alpha", "/probe/alpha");
+    repo.git_modified_count = 0;
+    repo.git_to_push_count = 0;
+    repo.github_pr_count = 1;
+    repo.github_issue_count = 1;
+    let (store, _net_rx) = scratch_store(cx, "row-azure", vec![repo]);
     let cx = open_window(&store, cx);
-    assert!(cx.debug_bounds("repo-azure-0").is_some());
+    draw(cx);
+    assert!(cx.debug_bounds("repo-prs-0").is_some());
+    assert!(
+        cx.debug_bounds("repo-azure-0").is_none(),
+        "no separate chips"
+    );
+
+    // the Azure pass settles: its counts reach the entry and the row's counts
+    // now read the union
+    cx.update_entity(&store, |s: &mut Store, cx| {
+        s.on_net_event(
+            UiEvent::AzureSettled {
+                items: vec![(
+                    "/probe/alpha".to_string(),
+                    warp_station_core::azure::AzureSnapshot {
+                        available: true,
+                        pulls: vec![warp_station_core::azure::AzureItem::default()],
+                        ..Default::default()
+                    },
+                )],
+            },
+            cx,
+        );
+    });
+    draw(cx);
+    let (pulls, issues) = store.read_with(cx, |s: &Store, _| {
+        let repo = &s.repos[0];
+        (repo.pull_total(), repo.issue_total())
+    });
+    assert_eq!(pulls, 2, "one GitHub and one Azure pull request");
+    assert_eq!(issues, 1);
 
     cx.update_entity(&store, |s: &mut Store, cx| {
         s.update_settings(|settings| settings.repos.enable_azure_devops = false);
         cx.notify();
     });
     draw(cx);
-    assert!(cx.debug_bounds("repo-azure-0").is_none());
+    assert!(
+        cx.debug_bounds("repo-azure-0").is_none(),
+        "the switch still takes the platform's rows away"
+    );
 }
 
 #[gpui::test]
@@ -1491,6 +1526,7 @@ fn github_item(number: u64, is_pull_request: bool) -> warp_station_core::github:
         labels: Vec::new(),
         is_draft: false,
         review_decision: None,
+        state: None,
         updated_at: None,
         created_at: None,
         comments: 0,
@@ -1511,6 +1547,7 @@ fn seed_github(
         available: true,
         // a resolved repository: the tab's New verb needs the link
         url: Some("https://github.com/o/alpha".into()),
+        runs: Vec::new(),
         pulls: (0..pulls).map(|n| github_item(n, true)).collect(),
         issues: (0..issues).map(|n| github_item(100 + n, false)).collect(),
     };
@@ -1726,7 +1763,7 @@ fn a_pull_request_opens_beside_the_list(cx: &mut TestAppContext) {
         "no verb until the full view says it is allowed"
     );
 
-    click(cx, "PR-1");
+    click(cx, "PR-gh-1");
     assert!(cx.debug_bounds("pull-request").is_some());
     assert_eq!(
         store.read_with(cx, |s, _| s.open_pull.as_ref().map(|o| o.item.number)),
@@ -1763,7 +1800,7 @@ fn a_narrow_pane_shows_one_column_and_back_returns(cx: &mut TestAppContext) {
         "nothing is selected in a narrow pane"
     );
 
-    click(cx, "PR-1");
+    click(cx, "PR-gh-1");
     draw(cx);
     assert!(cx.debug_bounds("pull-request").is_some());
     assert!(cx.debug_bounds("pr-list").is_none(), "the list steps aside");
@@ -1774,7 +1811,7 @@ fn a_narrow_pane_shows_one_column_and_back_returns(cx: &mut TestAppContext) {
     assert!(cx.debug_bounds("pr-list").is_some(), "Escape goes back");
     assert!(cx.debug_bounds("pull-request").is_none());
 
-    click(cx, "PR-1");
+    click(cx, "PR-gh-1");
     click(cx, "pull-back");
     draw(cx);
     assert!(cx.debug_bounds("pr-list").is_some(), "so does Back");
@@ -2187,7 +2224,7 @@ fn the_issue_workbench_shows_the_selected_issue(cx: &mut TestAppContext) {
     assert!(cx.debug_bounds("issue-open").is_some(), "the one primary");
 
     // a press picks that row, and asks for it
-    click(cx, "Issue-101");
+    click(cx, "Issue-gh-101");
     assert_eq!(
         store.read_with(cx, |s, _| s.open_issue.as_ref().map(|o| o.item.number)),
         Some(101)
@@ -2216,7 +2253,7 @@ fn a_narrow_issue_pane_keeps_one_column_and_back(cx: &mut TestAppContext) {
         "nothing is selected in a narrow pane"
     );
 
-    click(cx, "Issue-100");
+    click(cx, "Issue-gh-100");
     draw(cx);
     assert!(cx.debug_bounds("issue-detail").is_some());
     assert!(
@@ -2359,7 +2396,7 @@ fn the_merge_takes_two_presses_and_passing_checks(cx: &mut TestAppContext) {
     let cx = open_window(&store, cx);
     draw(cx);
     click(cx, "detail-tab-pulls");
-    click(cx, "PR-0");
+    click(cx, "PR-gh-0");
 
     let mut blocked = ready_pull(0);
     blocked.checks.push(GitHubCheck {
@@ -2404,14 +2441,14 @@ fn the_issue_filter_narrows_the_rows(cx: &mut TestAppContext) {
     let cx = open_window(&store, cx);
     draw(cx);
     click(cx, "detail-tab-issues");
-    assert!(cx.debug_bounds("Issue-100").is_some());
-    assert!(cx.debug_bounds("Issue-101").is_some());
+    assert!(cx.debug_bounds("Issue-gh-100").is_some());
+    assert!(cx.debug_bounds("Issue-gh-101").is_some());
 
     click(cx, "issue-filter");
     cx.simulate_keystrokes("1 0 1");
     draw(cx);
-    assert!(cx.debug_bounds("Issue-100").is_none());
-    assert!(cx.debug_bounds("Issue-101").is_some());
+    assert!(cx.debug_bounds("Issue-gh-100").is_none());
+    assert!(cx.debug_bounds("Issue-gh-101").is_some());
 
     cx.simulate_keystrokes("c");
     draw(cx);
@@ -2423,22 +2460,25 @@ fn the_issue_filter_narrows_the_rows(cx: &mut TestAppContext) {
 
     click(cx, "issue-clear-filter");
     draw(cx);
-    assert!(cx.debug_bounds("Issue-100").is_some());
+    assert!(cx.debug_bounds("Issue-gh-100").is_some());
 
     click(cx, "issue-filter");
     cx.simulate_keystrokes("1 0 1");
     draw(cx);
-    assert!(cx.debug_bounds("Issue-100").is_none());
+    assert!(cx.debug_bounds("Issue-gh-100").is_none());
     cx.simulate_keystrokes("escape");
     draw(cx);
     draw(cx);
-    assert!(cx.debug_bounds("Issue-100").is_some(), "Escape clears it");
+    assert!(
+        cx.debug_bounds("Issue-gh-100").is_some(),
+        "Escape clears it"
+    );
 }
 
 /// The menu marks the sort, a pick is remembered, and an outside press closes it.
 #[gpui::test]
 fn the_issue_sort_is_remembered(cx: &mut TestAppContext) {
-    use warp_station_core::github::IssueSort;
+    use warp_station_core::activity::IssueSort;
 
     let (store, _net_rx) = scratch_store(cx, "sort", vec![entry("alpha", "/probe/alpha")]);
     seed_github(&store, "/probe/alpha", 0, 2, cx);
@@ -2488,24 +2528,29 @@ fn the_closed_list_loads_when_it_is_asked_for(cx: &mut TestAppContext) {
     assert_eq!(asked, 1, "one ask however many frames draw");
 
     cx.update_entity(&store, |s: &mut Store, cx| {
-        s.github_closed.insert(
-            ("/probe/alpha".to_string(), true),
-            std::sync::Arc::new(vec![github_item(7, true)]),
+        use warp_station_core::activity::{ActivityItem, ActivitySource};
+        let rows: Vec<ActivityItem> = [github_item(7, true)]
+            .iter()
+            .map(ActivityItem::of_github)
+            .collect();
+        s.closed.insert(
+            ("/probe/alpha".to_string(), true, ActivitySource::GitHub),
+            std::sync::Arc::new(rows),
         );
         cx.notify();
     });
     draw(cx);
-    assert!(cx.debug_bounds("PR-7").is_some());
-    assert!(cx.debug_bounds("PR-0").is_none());
+    assert!(cx.debug_bounds("PR-gh-7").is_some());
+    assert!(cx.debug_bounds("PR-gh-0").is_none());
 
-    click(cx, "PR-7");
+    click(cx, "PR-gh-7");
     assert!(
         cx.debug_bounds("pull-request").is_some(),
         "a closed row opens its own detail"
     );
 
     click(cx, "pr-state-open");
-    assert!(cx.debug_bounds("PR-0").is_some());
+    assert!(cx.debug_bounds("PR-gh-0").is_some());
 }
 
 fn select(store: &gpui::Entity<Store>, folder: &str, cx: &mut gpui::VisualTestContext) {
@@ -3399,4 +3444,167 @@ fn the_last_arrangement_restores_on_a_restart(cx: &mut TestAppContext) {
             "and the selection follows the tab"
         );
     });
+}
+
+/// Both platforms' rows in one list: each carries its own reference shape and
+/// its own source tag, and one list orders them for you.
+#[gpui::test]
+fn the_pull_requests_list_unions_the_platforms(cx: &mut TestAppContext) {
+    use std::sync::Arc;
+    use warp_station_core::azure::{AzureItem, AzureSnapshot};
+
+    let (store, _net_rx) = scratch_store(cx, "union", vec![entry("alpha", "/probe/alpha")]);
+    seed_github(&store, "/probe/alpha", 1, 1, cx);
+    cx.update_entity(&store, |s: &mut Store, cx| {
+        s.update_settings(|settings| {
+            settings.repos.enable_azure_devops = true;
+            settings.repos.azure_devops_pat = "pat".into();
+        });
+        let snapshot = AzureSnapshot {
+            available: true,
+            url: Some("https://dev.azure.com/o/p/_git/r".into()),
+            pulls: vec![AzureItem {
+                number: 214,
+                title: "Sync the bridge".into(),
+                state: Some("active".into()),
+                source_ref_name: Some("refs/heads/fix/bridge".into()),
+                target_ref_name: Some("refs/heads/main".into()),
+                ..Default::default()
+            }],
+            work_items: vec![AzureItem {
+                number: 3381,
+                title: "Battery drains while syncing".into(),
+                state: Some("Active".into()),
+                work_item_type: Some("Bug".into()),
+                assigned_to: Some("engin".into()),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        s.azure_by_folder
+            .insert("/probe/alpha".to_string(), Arc::new(snapshot));
+        cx.notify();
+    });
+    let cx = open_window(&store, cx);
+    draw(cx);
+    click(cx, "detail-tab-pulls");
+
+    assert!(cx.debug_bounds("PR-gh-0").is_some(), "the GitHub row");
+    assert!(cx.debug_bounds("PR-az-214").is_some(), "the Azure row");
+    // one platform alone is what the badge says; a merged list leaves each
+    // row's own tag to say it
+    let open_count = store.read_with(cx, |s: &Store, _| {
+        let snapshot = s.github_by_folder.get("/probe/alpha").unwrap();
+        let azure = s.azure_by_folder.get("/probe/alpha").unwrap();
+        snapshot.pulls.len() + azure.pulls.len()
+    });
+    assert_eq!(open_count, 2);
+
+    // the tab strip counts the union, and so does the row
+    let (pulls, issues) = store.read_with(cx, |s: &Store, _| {
+        let repo = &s.repos[0];
+        (repo.pull_total(), repo.issue_total())
+    });
+    assert_eq!(
+        (pulls, issues),
+        (0, 0),
+        "the counts come from the pass, not the seeded maps"
+    );
+
+    click(cx, "detail-tab-issues");
+    assert!(
+        cx.debug_bounds("Issue-gh-100").is_some(),
+        "the GitHub issue"
+    );
+    assert!(
+        cx.debug_bounds("Issue-az-3381").is_some(),
+        "the Azure work item"
+    );
+
+    // an Azure pull request opens the Azure pane, not the GitHub one
+    click(cx, "detail-tab-pulls");
+    click(cx, "PR-az-214");
+    draw(cx);
+    assert!(
+        cx.debug_bounds("azure-pull").is_some(),
+        "the Azure pane took the column"
+    );
+    assert!(
+        cx.debug_bounds("pull-title").is_none(),
+        "the GitHub pane did not"
+    );
+}
+
+/// Closed asks both platforms once, and a failing one keeps the other's rows
+/// with a way to ask again.
+#[gpui::test]
+fn the_closed_list_asks_both_platforms(cx: &mut TestAppContext) {
+    use std::sync::Arc;
+    use warp_station_core::azure::AzureSnapshot;
+
+    let (store, net_rx) = scratch_store(cx, "closed-union", vec![entry("alpha", "/probe/alpha")]);
+    seed_github(&store, "/probe/alpha", 1, 0, cx);
+    cx.update_entity(&store, |s: &mut Store, cx| {
+        s.update_settings(|settings| {
+            settings.repos.enable_azure_devops = true;
+            settings.repos.azure_devops_pat = "pat".into();
+        });
+        s.azure_by_folder.insert(
+            "/probe/alpha".to_string(),
+            Arc::new(AzureSnapshot {
+                available: true,
+                ..Default::default()
+            }),
+        );
+        cx.notify();
+    });
+    use_a_located_gh(&store, cx);
+    let cx = open_window(&store, cx);
+    draw(cx);
+    click(cx, "detail-tab-pulls");
+    while net_rx.try_recv().is_ok() {}
+
+    click(cx, "pr-state-closed");
+    draw(cx);
+    let mut github = 0;
+    let mut azure = 0;
+    while let Ok(command) = net_rx.try_recv() {
+        match command {
+            NetCommand::GitHubClosed { .. } => github += 1,
+            NetCommand::AzureClosed { .. } => azure += 1,
+            _ => {}
+        }
+    }
+    assert_eq!(github, 1, "one ask per platform, however many frames draw");
+    assert_eq!(azure, 1, "the Azure half is asked too");
+
+    // GitHub answers; Azure fails. The row stays, and the note says which
+    // platform did not, with Retry.
+    cx.update_entity(&store, |s: &mut Store, cx| {
+        s.on_net_event(
+            UiEvent::GitHubClosedLoaded {
+                folder: "/probe/alpha".into(),
+                pull_requests: true,
+                items: Some(vec![github_item(7, true)]),
+            },
+            cx,
+        );
+        s.on_net_event(
+            UiEvent::AzureClosedLoaded {
+                folder: "/probe/alpha".into(),
+                pull_requests: true,
+                items: None,
+            },
+            cx,
+        );
+    });
+    draw(cx);
+    assert!(
+        cx.debug_bounds("PR-gh-7").is_some(),
+        "the answered rows stay"
+    );
+    assert!(
+        cx.debug_bounds("closed-retry-note").is_some(),
+        "the failed half is named beside the rows"
+    );
 }

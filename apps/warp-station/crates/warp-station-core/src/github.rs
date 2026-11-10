@@ -20,11 +20,20 @@ const GH_TIMEOUT: Duration = Duration::from_secs(20);
 /// Caps each list fetch (and therefore the chip counts).
 const ITEM_LIMIT: usize = 50;
 
+/// How much of a failed run's log the detail keeps.
+const RUN_LOG_CAP: usize = 8000;
+
 const PR_FIELDS: &str = "number,title,url,author,labels,isDraft,headRefName,baseRefName,\
-                         reviewDecision,updatedAt,createdAt";
-const ISSUE_FIELDS: &str = "number,title,url,author,labels,updatedAt,createdAt,comments";
+                         reviewDecision,updatedAt,createdAt,state";
+const ISSUE_FIELDS: &str = "number,title,url,author,labels,updatedAt,createdAt,comments,state";
 const ISSUE_VIEW_FIELDS: &str = "number,title,url,state,author,labels,assignees,\
                                createdAt,updatedAt,body,comments";
+/// How many workflow runs the activity pass lists.
+const RUN_LIST_LIMIT: usize = 10;
+const RUN_LIST_FIELDS: &str = "databaseId,number,workflowName,displayTitle,headBranch,\
+                              status,conclusion,url,createdAt";
+const RUN_VIEW_FIELDS: &str = "databaseId,workflowName,displayTitle,headBranch,headSha,\
+                               status,conclusion,url,createdAt,startedAt,updatedAt,event,jobs";
 const PULL_VIEW_FIELDS: &str = "number,title,url,author,state,isDraft,headRefName,baseRefName,\
                                 additions,deletions,mergeable,mergeStateStatus,reviewDecision,\
                                 updatedAt,createdAt,mergedAt,body,comments,reviews,\
@@ -45,7 +54,31 @@ pub struct GitHubItem {
     pub comments: u32,
     pub head_ref_name: Option<String>,
     pub base_ref_name: Option<String>,
+    /// `OPEN`, `CLOSED` or `MERGED` on a pull request; `OPEN` or `CLOSED` on
+    /// an issue. Empty when the payload left it out.
+    pub state: Option<String>,
     pub is_pull_request: bool,
+}
+
+/// One workflow run, as the activity pass lists it. `conclusion` is absent
+/// while the run is queued or still going.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct GitHubRun {
+    pub id: u64,
+    /// The run's own number: the design's `#1284` in the row.
+    pub number: u64,
+    /// The workflow's name.
+    pub name: String,
+    /// The run's display title — the commit subject or the event's own words.
+    pub title: String,
+    pub branch: Option<String>,
+    /// `queued`, `in_progress` or `completed`.
+    pub status: Option<String>,
+    /// `success`, `failure`, `cancelled`, `skipped`, … — absent until the run
+    /// finishes.
+    pub conclusion: Option<String>,
+    pub url: Option<String>,
+    pub created_at: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -276,56 +309,6 @@ pub struct GitHubPull {
     pub merged_at: Option<String>,
 }
 
-/// How the Issues tab orders its rows.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum IssueSort {
-    #[default]
-    Updated,
-    Newest,
-    Oldest,
-    Comments,
-}
-
-impl IssueSort {
-    pub const ALL: [Self; 4] = [Self::Updated, Self::Newest, Self::Oldest, Self::Comments];
-
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Updated => "Updated",
-            Self::Newest => "Newest",
-            Self::Oldest => "Oldest",
-            Self::Comments => "Most comments",
-        }
-    }
-
-    /// The word the settings file keeps.
-    pub fn key(self) -> &'static str {
-        match self {
-            Self::Updated => "updated",
-            Self::Newest => "newest",
-            Self::Oldest => "oldest",
-            Self::Comments => "comments",
-        }
-    }
-
-    pub fn from_key(key: Option<&str>) -> Self {
-        Self::ALL
-            .into_iter()
-            .find(|sort| Some(sort.key()) == key)
-            .unwrap_or_default()
-    }
-
-    /// gh's timestamps are all UTC in one format, so they sort as text.
-    pub fn sort(self, items: &mut [GitHubItem]) {
-        match self {
-            Self::Updated => items.sort_by(|a, b| b.updated_at.cmp(&a.updated_at)),
-            Self::Newest => items.sort_by(|a, b| b.created_at.cmp(&a.created_at)),
-            Self::Oldest => items.sort_by(|a, b| a.created_at.cmp(&b.created_at)),
-            Self::Comments => items.sort_by_key(|item| std::cmp::Reverse(item.comments)),
-        }
-    }
-}
-
 impl GitHubItem {
     /// The Issues filter: `query` is lowercase and trimmed, and looks through
     /// the number, title and labels.
@@ -409,6 +392,9 @@ pub struct GitHubSnapshot {
     pub url: Option<String>,
     pub pulls: Vec<GitHubItem>,
     pub issues: Vec<GitHubItem>,
+    /// The repository's recent workflow runs, newest first as gh lists them.
+    /// A failed run call is an empty list, never `available: false`.
+    pub runs: Vec<GitHubRun>,
     /// False when `gh repo view` failed (not a GitHub repo, or gh/auth
     /// trouble) — the cell stays empty instead of showing a misleading OK.
     pub available: bool,
@@ -466,16 +452,27 @@ pub async fn refresh(folder: &Path, gh_exe: &str) -> GitHubSnapshot {
     };
 
     let limit = ITEM_LIMIT.to_string();
+    let run_limit = RUN_LIST_LIMIT.to_string();
     let pr_args: Vec<&str> = vec!["pr", "list", "--json", PR_FIELDS, "--limit", &limit];
     let issue_args: Vec<&str> = vec!["issue", "list", "--json", ISSUE_FIELDS, "--limit", &limit];
-    let (pr_json, issue_json) = tokio::join!(
+    let run_args: Vec<&str> = vec![
+        "run",
+        "list",
+        "--json",
+        RUN_LIST_FIELDS,
+        "--limit",
+        &run_limit,
+    ];
+    let (pr_json, issue_json, run_json) = tokio::join!(
         run_gh(gh_exe, folder, &pr_args),
-        run_gh(gh_exe, folder, &issue_args)
+        run_gh(gh_exe, folder, &issue_args),
+        run_gh(gh_exe, folder, &run_args)
     );
     GitHubSnapshot {
         url: Some(url),
         pulls: parse_items(pr_json.as_deref(), true),
         issues: parse_items(issue_json.as_deref(), false),
+        runs: parse_runs(run_json.as_deref()),
         available: true,
     }
 }
@@ -543,6 +540,95 @@ pub async fn act_on_pull(
     let argv = action.argv(number);
     let args: Vec<&str> = argv.iter().map(String::as_str).collect();
     run_gh_checked(gh_exe, folder, &args).await.map(|_| ())
+}
+
+/// One workflow run's detail in the shape the Pipelines pane draws for an
+/// Azure run: the head facts, one card per job (a GitHub run has no stages, so
+/// the job is the card and its steps are the rows) and the tail of what the
+/// failed steps logged.
+pub async fn run_detail(
+    folder: &Path,
+    gh_exe: &str,
+    run_id: u64,
+) -> Option<crate::activity::RunDetail> {
+    let id = run_id.to_string();
+    let view_args = ["run", "view", &id, "--json", RUN_VIEW_FIELDS];
+    let log_args = ["run", "view", &id, "--log-failed"];
+    let (view, log) = tokio::join!(
+        run_gh(gh_exe, folder, &view_args),
+        run_gh(gh_exe, folder, &log_args)
+    );
+    let value: serde_json::Value = serde_json::from_str(&view?).ok()?;
+    Some(crate::activity::RunDetail {
+        sha: text(&value, "headSha"),
+        trigger: text(&value, "event"),
+        start: text(&value, "startedAt"),
+        finish: text(&value, "updatedAt"),
+        stages: parse_jobs(&value),
+        log: log
+            .map(|text| crate::activity::log_tail(&text, RUN_LOG_CAP))
+            .unwrap_or_default(),
+    })
+}
+
+/// A workflow run's jobs as stage cards, their steps as rows. GitHub's words
+/// are normalized to Azure's — `in_progress` → `inProgress`, `failure` →
+/// `failed` — so one row renderer draws both platforms.
+fn parse_jobs(value: &serde_json::Value) -> Vec<crate::activity::RunStage> {
+    value
+        .get("jobs")
+        .and_then(|jobs| jobs.as_array())
+        .map(|jobs| {
+            jobs.iter()
+                .map(|job| crate::activity::RunStage {
+                    name: text(job, "name").unwrap_or_else(|| "Job".to_string()),
+                    jobs: job
+                        .get("steps")
+                        .and_then(|steps| steps.as_array())
+                        .map(|steps| {
+                            steps
+                                .iter()
+                                .map(|step| crate::activity::RunJob {
+                                    name: text(step, "name").unwrap_or_default(),
+                                    state: step_state(step),
+                                    result: step_result(step),
+                                    start: text(step, "startedAt"),
+                                    finish: text(step, "completedAt"),
+                                })
+                                .collect()
+                        })
+                        .unwrap_or_default(),
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// `queued`, `in_progress`, `completed` → the app's `pending`, `inProgress`,
+/// `completed`.
+fn step_state(step: &serde_json::Value) -> Option<String> {
+    let word = match text(step, "status")?.as_str() {
+        "in_progress" => "inProgress",
+        "completed" => "completed",
+        _ => "pending",
+    };
+    Some(word.to_string())
+}
+
+/// `success`, `failure`, … → the app's `succeeded`, `failed`, …; an unfinished
+/// step has no result at all.
+fn step_result(step: &serde_json::Value) -> Option<String> {
+    if text(step, "status").as_deref() != Some("completed") {
+        return None;
+    }
+    let word = match text(step, "conclusion").as_deref() {
+        Some("success") | Some("neutral") => "succeeded",
+        Some("skipped") => "skipped",
+        Some("cancelled") => "canceled",
+        Some("failure" | "timed_out" | "action_required" | "startup_failure") => "failed",
+        _ => return None,
+    };
+    Some(word.to_string())
 }
 
 /// Opens the pull request and answers its number, read from the URL gh prints
@@ -631,6 +717,36 @@ fn parse_repo_details(json: &str) -> Option<GitHubRepoDetails> {
     })
 }
 
+/// The run list. A payload gh did not answer is an empty list, not an
+/// unavailable repository: the pull and issue lists still stand.
+fn parse_runs(json: Option<&str>) -> Vec<GitHubRun> {
+    let Some(json) = json else {
+        return Vec::new();
+    };
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(json) else {
+        return Vec::new();
+    };
+    let Some(items) = value.as_array() else {
+        return Vec::new();
+    };
+    items
+        .iter()
+        .filter_map(|item| {
+            Some(GitHubRun {
+                id: item.get("databaseId").and_then(|id| id.as_u64())?,
+                number: item.get("number").and_then(|n| n.as_u64()).unwrap_or(0),
+                name: text(item, "workflowName").unwrap_or_default(),
+                title: text(item, "displayTitle").unwrap_or_default(),
+                branch: text(item, "headBranch"),
+                status: text(item, "status"),
+                conclusion: text(item, "conclusion").filter(|word| !word.is_empty()),
+                url: text(item, "url"),
+                created_at: text(item, "createdAt"),
+            })
+        })
+        .collect()
+}
+
 fn parse_items(json: Option<&str>, is_pull_request: bool) -> Vec<GitHubItem> {
     let Some(json) = json else { return Vec::new() };
     let Ok(serde_json::Value::Array(items)) = serde_json::from_str::<serde_json::Value>(json)
@@ -690,6 +806,7 @@ fn parse_items(json: Option<&str>, is_pull_request: bool) -> Vec<GitHubItem> {
                     .get("baseRefName")
                     .and_then(|b| b.as_str())
                     .map(str::to_string),
+                state: text(&item, "state").filter(|state| !state.trim().is_empty()),
                 is_pull_request,
             })
         })
@@ -1085,85 +1202,6 @@ mod tests {
         }
     }
 
-    fn issue(number: u64, title: &str, created: &str, comments: u32) -> GitHubItem {
-        GitHubItem {
-            number,
-            title: title.into(),
-            labels: vec!["Bug".into()],
-            created_at: Some(created.into()),
-            updated_at: Some(created.into()),
-            comments,
-            ..Default::default()
-        }
-    }
-
-    #[test]
-    fn the_issue_sorts_order_their_rows() {
-        let mut items = vec![
-            issue(1, "a", "2026-01-01T00:00:00Z", 2),
-            issue(2, "b", "2026-03-01T00:00:00Z", 0),
-            issue(3, "c", "2026-02-01T00:00:00Z", 9),
-        ];
-        let numbers = |items: &[GitHubItem]| items.iter().map(|i| i.number).collect::<Vec<_>>();
-
-        IssueSort::Newest.sort(&mut items);
-        assert_eq!(numbers(&items), [2, 3, 1]);
-        IssueSort::Oldest.sort(&mut items);
-        assert_eq!(numbers(&items), [1, 3, 2]);
-        IssueSort::Comments.sort(&mut items);
-        assert_eq!(numbers(&items), [3, 1, 2]);
-    }
-
-    #[test]
-    fn the_sort_survives_its_settings_word() {
-        for sort in IssueSort::ALL {
-            assert_eq!(IssueSort::from_key(Some(sort.key())), sort);
-        }
-        assert_eq!(IssueSort::from_key(None), IssueSort::Updated);
-        assert_eq!(IssueSort::from_key(Some("gone")), IssueSort::Updated);
-    }
-
-    #[test]
-    fn the_filter_reads_the_number_the_title_and_the_labels() {
-        let item = issue(477, "Settings on Wayland", "2026-01-01T00:00:00Z", 0);
-
-        assert!(item.matches("#477"));
-        assert!(item.matches("wayland"));
-        assert!(item.matches("bug"));
-        assert!(!item.matches("windows"));
-    }
-
-    #[test]
-    fn issues_count_their_comments_from_the_list() {
-        let json = r#"[{"number": 7, "title": "t", "comments": [{}, {}], "createdAt": "2026-11-01T09:00:00Z"}]"#;
-
-        let items = parse_items(Some(json), false);
-
-        assert_eq!(items[0].comments, 2);
-        assert_eq!(items[0].created_at.as_deref(), Some("2026-11-01T09:00:00Z"));
-    }
-
-    #[test]
-    fn repo_details_read_the_nested_fields_gh_answers_with() {
-        let json = r#"{
-            "createdAt": "2026-09-18T10:00:00Z",
-            "defaultBranchRef": {"name": "main"},
-            "licenseInfo": {"name": "MIT License"},
-            "owner": {"login": "enginkirmaci"},
-            "primaryLanguage": {"name": "Rust"},
-            "repositoryTopics": [{"name": "gpui"}, {"name": "rust"}],
-            "url": "https://github.com/enginkirmaci/Warp Station"
-        }"#;
-
-        let details = parse_repo_details(json).expect("a details object");
-
-        assert_eq!(details.owner.as_deref(), Some("enginkirmaci"));
-        assert_eq!(details.primary_language.as_deref(), Some("Rust"));
-        assert_eq!(details.license.as_deref(), Some("MIT License"));
-        assert_eq!(details.default_branch.as_deref(), Some("main"));
-        assert_eq!(details.topics, ["gpui", "rust"]);
-    }
-
     /// gh answers `null`, not an empty value, for what a repo doesn't have.
     #[test]
     fn repo_details_tolerate_absent_fields() {
@@ -1279,6 +1317,90 @@ mod tests {
         assert_eq!((files[0].additions, files[0].deletions), (0, 1));
         assert_eq!(files[1].path, "new.rs");
         assert_eq!(files[1].status, "R");
+    }
+
+    const RUNS: &str = r#"[
+        {"databaseId": 31, "number": 1284, "workflowName": "CI", "displayTitle": "Unify the gutter",
+         "headBranch": "feat/x", "status": "completed", "conclusion": "success",
+         "url": "https://github.com/o/r/actions/runs/31", "createdAt": "2026-11-10T09:00:00Z"},
+        {"databaseId": 30, "number": 1281, "workflowName": "CI", "displayTitle": "Unify the gutter",
+         "headBranch": "feat/x", "status": "in_progress", "conclusion": "",
+         "url": "https://github.com/o/r/actions/runs/30", "createdAt": "2026-11-10T08:40:00Z"}
+    ]"#;
+
+    #[test]
+    fn a_run_list_reads_a_finished_run_and_one_still_going() {
+        let runs = parse_runs(Some(RUNS));
+
+        assert_eq!(runs.len(), 2);
+        assert_eq!(runs[0].id, 31);
+        assert_eq!(runs[0].number, 1284, "the number the row prints");
+        assert_eq!(runs[0].name, "CI");
+        assert_eq!(runs[0].branch.as_deref(), Some("feat/x"));
+        assert_eq!(runs[0].conclusion.as_deref(), Some("success"));
+        assert_eq!(runs[1].status.as_deref(), Some("in_progress"));
+        assert_eq!(
+            runs[1].conclusion, None,
+            "gh answers an empty conclusion while the run is going"
+        );
+    }
+
+    /// A run call that failed, or a payload with nothing in it, is an empty
+    /// list — never an unavailable repository, which would empty the other
+    /// activity surfaces with it.
+    #[test]
+    fn a_bare_run_payload_is_an_empty_list() {
+        assert!(parse_runs(None).is_empty());
+        assert!(parse_runs(Some("[]")).is_empty());
+        assert!(parse_runs(Some("{}")).is_empty());
+        assert!(parse_runs(Some("not json")).is_empty());
+        assert!(
+            parse_runs(Some(r#"[{"workflowName": "CI"}]"#)).is_empty(),
+            "a run without a databaseId is not a row"
+        );
+    }
+
+    const RUN_VIEW: &str = r#"{
+        "databaseId": 31, "workflowName": "CI", "displayTitle": "Unify the gutter",
+        "headBranch": "feat/x", "headSha": "9f2c1ab7c0ffee", "status": "completed",
+        "conclusion": "failure", "url": "https://github.com/o/r/actions/runs/31",
+        "createdAt": "2026-11-10T09:00:00Z", "startedAt": "2026-11-10T09:00:05Z",
+        "updatedAt": "2026-11-10T09:06:40Z", "event": "pull_request",
+        "jobs": [
+            {"name": "build", "status": "completed", "conclusion": "success",
+             "steps": [
+               {"name": "Set up job", "status": "completed", "conclusion": "success"},
+               {"name": "cargo test", "status": "completed", "conclusion": "failure",
+                "startedAt": "2026-11-10T09:01:00Z", "completedAt": "2026-11-10T09:02:10Z"}
+             ]},
+            {"name": "package", "status": "in_progress", "conclusion": "",
+             "steps": [{"name": "Bundle", "status": "in_progress", "conclusion": ""}]}
+        ]
+    }"#;
+
+    #[test]
+    fn a_run_detail_turns_its_jobs_into_cards() {
+        let value: serde_json::Value = serde_json::from_str(RUN_VIEW).expect("a run");
+        let stages = parse_jobs(&value);
+
+        assert_eq!(stages.len(), 2, "one card per job");
+        assert_eq!(stages[0].name, "build");
+        assert_eq!(stages[0].jobs.len(), 2, "the steps are the rows");
+        assert!(stages[0].jobs[1].is_failed(), "a failed step");
+        assert_eq!(stages[0].jobs[1].duration().as_deref(), Some("1m 10s"));
+        assert!(stages[1].jobs[0].is_running(), "a step still going");
+        assert_eq!(
+            stages[1].jobs[0].result, None,
+            "an unfinished step has no result"
+        );
+    }
+
+    #[test]
+    fn a_run_without_jobs_is_a_detail_with_no_cards() {
+        let value: serde_json::Value =
+            serde_json::from_str(r#"{"databaseId": 1, "status": "queued"}"#).expect("a run");
+
+        assert!(parse_jobs(&value).is_empty());
     }
 
     #[test]

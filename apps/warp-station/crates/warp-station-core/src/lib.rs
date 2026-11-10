@@ -2,6 +2,7 @@
 //! and mutations, GitHub/Azure DevOps activity, opencode integration, notes.
 //! No gpui dependencies — everything here must be testable without a display.
 
+pub mod activity;
 pub mod autostart;
 pub mod azure;
 pub mod clipboard_password;

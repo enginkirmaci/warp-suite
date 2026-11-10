@@ -128,10 +128,13 @@ pub struct Store {
     pub azure_by_folder:
         std::collections::HashMap<String, Arc<warp_station_core::azure::AzureSnapshot>>,
     pub github_details: Option<warp_station_core::github::GitHubRepoDetails>,
-    /// Closed pull requests or issues by (folder, pull_requests), loaded when
-    /// a tab first asks.
-    pub github_closed:
-        std::collections::HashMap<(String, bool), Arc<Vec<warp_station_core::github::GitHubItem>>>,
+    /// Closed rows by (folder, pull_requests, source), loaded when a tab
+    /// first asks and kept as the shared row vocabulary so the union reads
+    /// both sources the same way.
+    pub closed: std::collections::HashMap<
+        (String, bool, warp_station_core::activity::ActivitySource),
+        Arc<Vec<warp_station_core::activity::ActivityItem>>,
+    >,
     /// The pull request taking over the detail pane.
     pub open_pull: Option<OpenPull>,
     /// The issue selected in the Issues tab's workbench.
@@ -181,11 +184,14 @@ pub struct Store {
     /// The armed Abandon confirmation for an Azure pull request.
     pub confirm_azure_abandon: Option<(u64, String)>,
     /// The closed list is already asked for (in flight or cached). One ask per
-    /// (folder, pull_requests); cleared by Refresh, a merge, or Retry.
-    closed_requested: std::collections::HashSet<(String, bool)>,
-    /// Closed list requests that failed. The tab shows an error + Retry
-    /// instead of a "Loading…" that never ends (audit A2).
-    pub closed_failed: std::collections::HashSet<(String, bool)>,
+    /// (folder, pull_requests, source); cleared by Refresh, a merge, or Retry.
+    closed_requested:
+        std::collections::HashSet<(String, bool, warp_station_core::activity::ActivitySource)>,
+    /// Closed list requests that failed, per source. The tab shows an error +
+    /// Retry for that source instead of a "Loading…" that never ends (audit
+    /// A2), while the other source's rows stay.
+    pub closed_failed:
+        std::collections::HashSet<(String, bool, warp_station_core::activity::ActivitySource)>,
 
     // ---- wand (warp-agent) state ----
     pub wand_busy: Option<WandKind>,
@@ -394,7 +400,7 @@ impl Store {
             github_by_folder: std::collections::HashMap::new(),
             azure_by_folder: std::collections::HashMap::new(),
             github_details: None,
-            github_closed: std::collections::HashMap::new(),
+            closed: std::collections::HashMap::new(),
             open_pull: None,
             open_issue: None,
             pull_diff: std::collections::HashMap::new(),
@@ -893,14 +899,31 @@ impl Store {
                 cx.notify();
             }
             UiEvent::AzureSettled { items } => {
+                let by_folder = self.repo_index_by_folder();
+                let mut counts_changed = false;
                 for (folder, snapshot) in items {
                     // the freshness gate for the eager and open passes: a
                     // failed probe must not count as a fresh answer
                     if snapshot.available {
                         self.activity_landed_at
                             .insert(folder.clone(), std::time::Instant::now());
+                        if let Some(&ix) = by_folder.get(&folder) {
+                            let entry = &mut self.repos[ix];
+                            let pulls = snapshot.pulls.len() as u32;
+                            let work_items = snapshot.work_items.len() as u32;
+                            if entry.azure_pull_count != pulls
+                                || entry.azure_work_item_count != work_items
+                            {
+                                entry.azure_pull_count = pulls;
+                                entry.azure_work_item_count = work_items;
+                                counts_changed = true;
+                            }
+                        }
                     }
                     self.azure_by_folder.insert(folder, Arc::new(snapshot));
+                }
+                if counts_changed {
+                    self.persist_cache_soon(cx);
                 }
                 self.reproject();
                 cx.notify();
@@ -949,17 +972,48 @@ impl Store {
                 pull_requests,
                 items,
             } => {
-                let key = (folder, pull_requests);
+                use warp_station_core::activity::{ActivityItem, ActivitySource};
+                let key = (folder, pull_requests, ActivitySource::GitHub);
                 match items {
                     Some(items) => {
                         self.closed_failed.remove(&key);
-                        self.github_closed.insert(key, Arc::new(items));
+                        let rows: Vec<ActivityItem> =
+                            items.iter().map(ActivityItem::of_github).collect();
+                        self.closed.insert(key, Arc::new(rows));
                     }
                     None => {
                         // keep the guard so the tab does not re-ask every
                         // frame; the tab renders an error with Retry instead
                         self.closed_failed.insert(key);
                         self.notify_error("GitHub did not answer with the closed list");
+                    }
+                }
+                cx.notify();
+            }
+            UiEvent::AzureClosedLoaded {
+                folder,
+                pull_requests,
+                items,
+            } => {
+                use warp_station_core::activity::{ActivityItem, ActivityKind, ActivitySource};
+                let key = (folder, pull_requests, ActivitySource::Azure);
+                match items {
+                    Some(items) => {
+                        self.closed_failed.remove(&key);
+                        let kind = if pull_requests {
+                            ActivityKind::PullRequest
+                        } else {
+                            ActivityKind::Issue
+                        };
+                        let rows: Vec<ActivityItem> = items
+                            .iter()
+                            .map(|item| ActivityItem::of_azure(item, kind))
+                            .collect();
+                        self.closed.insert(key, Arc::new(rows));
+                    }
+                    None => {
+                        self.closed_failed.insert(key);
+                        self.notify_error("Azure DevOps did not answer with the closed list");
                     }
                 }
                 cx.notify();
@@ -998,10 +1052,7 @@ impl Store {
                         self.notify_success(format!("Merged #{number}"));
                         self.reload_open_pull();
                         self.kick_github_pass(&[std::path::PathBuf::from(&folder)]);
-                        let key = (folder, true);
-                        self.github_closed.remove(&key);
-                        self.closed_requested.remove(&key);
-                        self.closed_failed.remove(&key);
+                        self.forget_closed(&folder, true);
                     }
                     Err(err) if err.is_empty() => {
                         self.notify_error(format!("Could not merge #{number}"));
@@ -1068,10 +1119,7 @@ impl Store {
                         // the row may have moved between the open and closed
                         // lists, and the repo's counts changed with it
                         self.kick_github_pass(&[std::path::PathBuf::from(&folder)]);
-                        let key = (folder, true);
-                        self.github_closed.remove(&key);
-                        self.closed_requested.remove(&key);
-                        self.closed_failed.remove(&key);
+                        self.forget_closed(&folder, true);
                     }
                     Err(err) if err.is_empty() => {
                         self.notify_error("GitHub did not answer the pull request".to_string());
@@ -1080,16 +1128,31 @@ impl Store {
                 }
                 cx.notify();
             }
+            UiEvent::GitHubRunDetailLoaded {
+                folder,
+                run_id,
+                detail,
+            } => {
+                if let Some(open) = self.open_run.as_mut().filter(|open| {
+                    open.folder == folder
+                        && open.run.id == run_id
+                        && open.run.source == warp_station_core::activity::ActivitySource::GitHub
+                }) {
+                    open.failed = detail.is_none();
+                    open.detail = detail.map(|detail| *detail);
+                }
+                cx.notify();
+            }
             UiEvent::AzureRunDetailLoaded {
                 folder,
                 build_id,
                 detail,
             } => {
-                if let Some(open) = self
-                    .open_run
-                    .as_mut()
-                    .filter(|open| open.folder == folder && open.run.id == build_id)
-                {
+                if let Some(open) = self.open_run.as_mut().filter(|open| {
+                    open.folder == folder
+                        && open.run.id == build_id
+                        && open.run.source == warp_station_core::activity::ActivitySource::Azure
+                }) {
                     open.failed = detail.is_none();
                     open.detail = detail;
                 }
@@ -1243,10 +1306,7 @@ impl Store {
                         // the open list, the repo's counts and the pane all
                         // read from the pass
                         self.kick_github_pass(&[std::path::PathBuf::from(&folder)]);
-                        let key = (folder, true);
-                        self.github_closed.remove(&key);
-                        self.closed_requested.remove(&key);
-                        self.closed_failed.remove(&key);
+                        self.forget_closed(&folder, true);
                     }
                     Err(err) => {
                         if let Some(form) = self.new_pull.as_mut() {
@@ -2510,42 +2570,118 @@ impl Store {
             .map(|gh| gh.to_string_lossy().to_string())
     }
 
-    /// Asks once for the selected repo's closed list. The tab calls this as
-    /// it draws; the two guard sets make that a no-op after the first ask and
-    /// after a failure, so drawing cannot re-request (audit A2).
+    /// Whether a platform answers this repository at all: the switch is on,
+    /// and for Azure the pass resolved the remote.
+    pub fn source_shown(
+        &self,
+        folder: &str,
+        source: warp_station_core::activity::ActivitySource,
+    ) -> bool {
+        match source {
+            warp_station_core::activity::ActivitySource::GitHub => {
+                self.settings().repos.enable_github
+            }
+            warp_station_core::activity::ActivitySource::Azure => {
+                self.settings().repos.enable_azure_devops
+                    && self
+                        .azure_by_folder
+                        .get(folder)
+                        .is_some_and(|snapshot| snapshot.available)
+            }
+        }
+    }
+
+    /// Forgets one kind's closed rows for a repo on both platforms: a merge, a
+    /// close, a create or a refresh can move a row between the lists.
+    fn forget_closed(&mut self, folder: &str, pull_requests: bool) {
+        for source in [
+            warp_station_core::activity::ActivitySource::GitHub,
+            warp_station_core::activity::ActivitySource::Azure,
+        ] {
+            let key = (folder.to_string(), pull_requests, source);
+            self.closed.remove(&key);
+            self.closed_requested.remove(&key);
+            self.closed_failed.remove(&key);
+        }
+    }
+
+    /// Asks once for the selected repo's closed list, on every source that can
+    /// answer. The tab calls this as it draws; the guard sets make that a
+    /// no-op after the first ask and after a failure, so drawing cannot
+    /// re-request (audit A2).
     pub fn load_closed(&mut self, pull_requests: bool) {
+        use warp_station_core::activity::ActivitySource;
         let Some(folder) = self.selected_repo.clone() else {
             return;
         };
-        let key = (folder.clone(), pull_requests);
-        // an in-flight/cached ask, or a failure waiting for the user's Retry:
-        // either way this call is a no-op, so the tab may ask as it draws
-        if self.closed_requested.contains(&key) || self.closed_failed.contains(&key) {
-            return;
+        let github_on = self.settings().repos.enable_github;
+        let azure = self.settings();
+        let azure_on = azure.repos.enable_azure_devops;
+        // a source that resolved nothing last pass cannot answer a closed
+        // list either, so it is not asked
+        let azure_available = self
+            .azure_by_folder
+            .get(&folder)
+            .is_some_and(|snapshot| snapshot.available);
+
+        if github_on {
+            let key = (folder.clone(), pull_requests, ActivitySource::GitHub);
+            if !self.closed_requested.contains(&key) && !self.closed_failed.contains(&key) {
+                match self.gh_exe() {
+                    Some(gh_exe) => {
+                        self.closed_failed.remove(&key);
+                        self.closed_requested.insert(key);
+                        let _ = self.net.send_blocking(NetCommand::GitHubClosed {
+                            folder: std::path::PathBuf::from(&folder),
+                            gh_exe,
+                            pull_requests,
+                        });
+                    }
+                    // no gh: the same failure surface the tab shows for a
+                    // failed request
+                    None => {
+                        self.closed_failed.insert(key);
+                    }
+                }
+            }
         }
-        // no gh: the same failure surface the tab shows for a failed request
-        let Some(gh_exe) = self.gh_exe() else {
-            self.closed_failed.insert(key);
-            return;
-        };
-        self.closed_failed.remove(&key);
-        self.closed_requested.insert(key);
-        let _ = self.net.send_blocking(NetCommand::GitHubClosed {
-            folder: std::path::PathBuf::from(folder),
-            gh_exe,
-            pull_requests,
-        });
+
+        if azure_on && azure_available {
+            let key = (folder.clone(), pull_requests, ActivitySource::Azure);
+            if !self.closed_requested.contains(&key) && !self.closed_failed.contains(&key) {
+                match warp_station_core::azure::resolve_pat(&azure.repos.azure_devops_pat) {
+                    Some(pat) => {
+                        self.closed_failed.remove(&key);
+                        self.closed_requested.insert(key);
+                        let _ = self.net.send_blocking(NetCommand::AzureClosed {
+                            folder: std::path::PathBuf::from(&folder),
+                            pat,
+                            custom_base: azure.repos.azure_devops_url.clone(),
+                            pull_requests,
+                        });
+                    }
+                    None => {
+                        self.closed_failed.insert(key);
+                    }
+                }
+            }
+        }
     }
 
-    /// The closed tab's Retry: forget both the ask guard and the failure, then
-    /// ask again for the selected repo.
+    /// The closed tab's Retry: forget both guards for both sources, then ask
+    /// again for the selected repo.
     pub fn retry_closed(&mut self, pull_requests: bool) {
         let Some(folder) = self.selected_repo.clone() else {
             return;
         };
-        let key = (folder, pull_requests);
-        self.closed_requested.remove(&key);
-        self.closed_failed.remove(&key);
+        for source in [
+            warp_station_core::activity::ActivitySource::GitHub,
+            warp_station_core::activity::ActivitySource::Azure,
+        ] {
+            let key = (folder.clone(), pull_requests, source);
+            self.closed_requested.remove(&key);
+            self.closed_failed.remove(&key);
+        }
         self.load_closed(pull_requests);
     }
 
@@ -2559,13 +2695,15 @@ impl Store {
         cx.notify();
     }
 
-    pub fn issue_sort(&self) -> warp_station_core::github::IssueSort {
-        warp_station_core::github::IssueSort::from_key(self.settings().repos.issue_sort.as_deref())
+    pub fn issue_sort(&self) -> warp_station_core::activity::IssueSort {
+        warp_station_core::activity::IssueSort::from_key(
+            self.settings().repos.issue_sort.as_deref(),
+        )
     }
 
     pub fn set_issue_sort(
         &mut self,
-        sort: warp_station_core::github::IssueSort,
+        sort: warp_station_core::activity::IssueSort,
         cx: &mut Context<Self>,
     ) {
         self.update_settings(|s| s.repos.issue_sort = Some(sort.key().to_string()));
@@ -2574,6 +2712,76 @@ impl Store {
 
     /// Turns the detail pane into `item`, a row of the Pull requests tab. The
     /// row's own fields carry the head until the full view answers.
+    /// The row the tab's detail shows, whichever platform it came from.
+    pub fn open_activity(
+        &self,
+        pull_requests: bool,
+    ) -> Option<warp_station_core::activity::ActivityItem> {
+        if pull_requests {
+            // the pane is one or the other: an Azure pull request owns it
+            // when one is open, the GitHub one otherwise
+            if let Some(open) = self.open_azure_pull.as_ref() {
+                let item = &open.item;
+                return Some(warp_station_core::activity::ActivityItem {
+                    source: warp_station_core::activity::ActivitySource::Azure,
+                    kind: warp_station_core::activity::ActivityKind::PullRequest,
+                    number: item.number,
+                    title: item.title.clone(),
+                    url: item.url.clone(),
+                    state: item.state.clone(),
+                    ..Default::default()
+                });
+            }
+            let open = self.open_pull.as_ref()?;
+            let item = &open.item;
+            Some(warp_station_core::activity::ActivityItem {
+                source: warp_station_core::activity::ActivitySource::GitHub,
+                kind: warp_station_core::activity::ActivityKind::PullRequest,
+                number: item.number,
+                title: item.title.clone(),
+                url: item.url.clone(),
+                ..Default::default()
+            })
+        } else {
+            let open = self.open_issue.as_ref()?;
+            let item = &open.item;
+            Some(warp_station_core::activity::ActivityItem {
+                source: warp_station_core::activity::ActivitySource::GitHub,
+                kind: warp_station_core::activity::ActivityKind::Issue,
+                number: item.number,
+                title: item.title.clone(),
+                url: item.url.clone(),
+                ..Default::default()
+            })
+        }
+    }
+
+    /// Opens a row's own pane, by the platform that answered and what the row
+    /// is. A work item has no pane yet, so it opens on Azure.
+    pub fn open_activity_row(
+        &mut self,
+        item: warp_station_core::activity::ActivityItem,
+        cx: &mut Context<Self>,
+    ) {
+        use warp_station_core::activity::{ActivityKind, ActivitySource};
+        match (item.source, item.kind) {
+            (ActivitySource::GitHub, ActivityKind::PullRequest) => {
+                self.open_pull_request(item.to_github_item(), cx)
+            }
+            (ActivitySource::GitHub, ActivityKind::Issue) => {
+                self.open_issue(item.to_github_item(), cx)
+            }
+            (ActivitySource::Azure, ActivityKind::PullRequest) => {
+                self.open_azure_pull(item.to_azure_item(), cx)
+            }
+            (ActivitySource::Azure, ActivityKind::Issue) => {
+                if !item.url.is_empty() {
+                    let _ = warp_station_core::terminal::open_folder(&item.url);
+                }
+            }
+        }
+    }
+
     pub fn open_pull_request(
         &mut self,
         item: warp_station_core::github::GitHubItem,
@@ -2754,8 +2962,13 @@ impl Store {
         Some((pat, settings.repos.azure_devops_url.clone()))
     }
 
-    /// Selects a run in the Pipelines tab and asks for its stages and log.
-    pub fn open_run(&mut self, run: warp_station_core::azure::PipelineRun, cx: &mut Context<Self>) {
+    /// Selects a run in the Pipelines tab and asks its own source for the
+    /// stages and the log.
+    pub fn open_run(
+        &mut self,
+        run: warp_station_core::activity::ActivityRun,
+        cx: &mut Context<Self>,
+    ) {
         let Some(folder) = self.selected_repo.clone() else {
             return;
         };
@@ -2778,8 +2991,11 @@ impl Store {
         open
     }
 
-    /// The selected run's detail, asked for once per run.
+    /// The selected run's detail, asked for once per run: the timeline and log
+    /// for an Azure pipeline, `gh run view` and the failed log for an Actions
+    /// run.
     pub fn load_run_detail(&mut self, cx: &mut Context<Self>) {
+        use warp_station_core::activity::ActivitySource;
         let Some(open) = self.open_run.as_ref() else {
             return;
         };
@@ -2787,20 +3003,41 @@ impl Store {
         if open.detail.is_some() || open.failed || self.run_detail_requested.contains(&key) {
             return;
         }
-        let Some((pat, custom_base)) = self.azure_auth() else {
-            if let Some(open) = self.open_run.as_mut() {
-                open.failed = true;
+        let folder = std::path::PathBuf::from(&open.folder);
+        let run_id = open.run.id;
+        let command = match open.run.source {
+            ActivitySource::GitHub => {
+                let Some(gh_exe) = self.gh_exe() else {
+                    if let Some(open) = self.open_run.as_mut() {
+                        open.failed = true;
+                    }
+                    cx.notify();
+                    return;
+                };
+                NetCommand::GitHubRunDetail {
+                    folder,
+                    gh_exe,
+                    run_id,
+                }
             }
-            cx.notify();
-            return;
+            ActivitySource::Azure => {
+                let Some((pat, custom_base)) = self.azure_auth() else {
+                    if let Some(open) = self.open_run.as_mut() {
+                        open.failed = true;
+                    }
+                    cx.notify();
+                    return;
+                };
+                NetCommand::AzureRunDetail {
+                    folder,
+                    pat,
+                    custom_base,
+                    build_id: run_id,
+                }
+            }
         };
         self.run_detail_requested.insert(key);
-        let _ = self.net.send_blocking(NetCommand::AzureRunDetail {
-            folder: std::path::PathBuf::from(&open.folder),
-            pat,
-            custom_base,
-            build_id: open.run.id,
-        });
+        let _ = self.net.send_blocking(command);
     }
 
     // ---- the Pipelines tab's Azure pull request ------------------------------
@@ -3266,11 +3503,19 @@ impl Store {
                 .as_ref()
                 .and_then(|folder| self.azure_by_folder.get(folder))
                 .is_some_and(|snapshot| snapshot.available);
+        // GitHub Actions runs feed the same workbench, so a GitHub repository
+        // has a Pipelines tab of its own even without an Azure remote.
+        let actions = settings.repos.enable_github
+            && self
+                .selected_repo
+                .as_ref()
+                .and_then(|folder| self.github_by_folder.get(folder))
+                .is_some_and(|snapshot| snapshot.available);
         WorkspaceTab::ALL
             .into_iter()
             .filter(|tab| match tab {
                 WorkspaceTab::PullRequests | WorkspaceTab::Issues => settings.repos.enable_github,
-                WorkspaceTab::Pipelines => azure,
+                WorkspaceTab::Pipelines => azure || actions,
                 WorkspaceTab::Overview | WorkspaceTab::Changes | WorkspaceTab::History => true,
             })
             .collect()
@@ -3784,8 +4029,9 @@ impl Store {
         let _ = self.net.send_blocking(NetCommand::LoadChanges {
             folder: path.clone(),
         });
-        self.closed_requested.retain(|(key, _)| key != &folder);
-        self.closed_failed.retain(|(key, _)| key != &folder);
+        self.closed_requested.retain(|(key, _, _)| key != &folder);
+        self.closed_failed.retain(|(key, _, _)| key != &folder);
+        self.closed.retain(|(key, _, _), _| key != &folder);
         self.kick_github_pass(std::slice::from_ref(&path));
         self.reload_open_pull();
         if !self.history.is_empty() {
@@ -4187,12 +4433,14 @@ pub struct OpenAzurePull {
     pub armed_complete: bool,
 }
 
-/// One run open in the Pipelines tab: its row until the timeline answers.
+/// One run open in the Pipelines tab: its row until its own source answers
+/// with the stages and the log. The row is source-neutral, so the same
+/// selection serves a GitHub Actions run and an Azure Pipeline.
 #[derive(Clone, Debug)]
 pub struct OpenRun {
     pub folder: String,
-    pub run: warp_station_core::azure::PipelineRun,
-    pub detail: Option<warp_station_core::azure::RunDetail>,
+    pub run: warp_station_core::activity::ActivityRun,
+    pub detail: Option<warp_station_core::activity::RunDetail>,
     /// The detail call failed: the pane says so instead of spinning.
     pub failed: bool,
 }
@@ -4382,6 +4630,8 @@ mod tests {
             git_status_loaded: true,
             github_pr_count: 0,
             github_issue_count: 0,
+            azure_pull_count: 0,
+            azure_work_item_count: 0,
         };
         store.repos = vec![
             entry("alpha", "/probe/alpha", 0),

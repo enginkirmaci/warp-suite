@@ -69,6 +69,8 @@ fn changes_view_draws_over_real_data(cx: &mut TestAppContext) {
             git_status_loaded: true,
             github_pr_count: 0,
             github_issue_count: 0,
+            azure_pull_count: 0,
+            azure_work_item_count: 0,
         }]);
         store.select_repo(&here.to_string_lossy(), cx);
         store.set_changes(snapshot);
@@ -123,6 +125,8 @@ fn history_and_drill_down_draw(cx: &mut TestAppContext) {
             git_status_loaded: true,
             github_pr_count: 0,
             github_issue_count: 0,
+            azure_pull_count: 0,
+            azure_work_item_count: 0,
         }]);
         store.select_repo(&here.to_string_lossy(), cx);
         store.set_changes(warp_station_core::git::read::change_snapshot(&here));
@@ -240,6 +244,8 @@ fn git_verbs_and_commit_follow_the_repo_state(cx: &mut TestAppContext) {
             git_status_loaded: true,
             github_pr_count: 0,
             github_issue_count: 0,
+            azure_pull_count: 0,
+            azure_work_item_count: 0,
         }]);
         store.select_repo("/probe/alpha", cx);
         store.open_detail_tab(warp_station::store::WorkspaceTab::Changes, cx);
@@ -643,6 +649,8 @@ fn a_failed_generation_disarms_generate_and_commit(cx: &mut TestAppContext) {
             git_status_loaded: true,
             github_pr_count: 0,
             github_issue_count: 0,
+            azure_pull_count: 0,
+            azure_work_item_count: 0,
         }]);
         store.select_repo("/probe/alpha", cx);
         store.open_detail_tab(warp_station::store::WorkspaceTab::Changes, cx);
@@ -885,6 +893,8 @@ fn branch_delete_gates_on_kind_current_and_two_clicks(cx: &mut TestAppContext) {
             git_status_loaded: true,
             github_pr_count: 0,
             github_issue_count: 0,
+            azure_pull_count: 0,
+            azure_work_item_count: 0,
         }]);
         store.select_repo("/probe/alpha", cx);
         store.open_detail_tab(warp_station::store::WorkspaceTab::Changes, cx);
@@ -1040,6 +1050,8 @@ fn branch_new_branch_form_creates_and_closes(cx: &mut TestAppContext) {
             git_status_loaded: true,
             github_pr_count: 0,
             github_issue_count: 0,
+            azure_pull_count: 0,
+            azure_work_item_count: 0,
         }]);
         store.select_repo("/probe/alpha", cx);
         store.open_detail_tab(warp_station::store::WorkspaceTab::Changes, cx);
@@ -1149,6 +1161,8 @@ fn the_history_list_lays_out_only_its_visible_rows(cx: &mut TestAppContext) {
             git_status_loaded: true,
             github_pr_count: 0,
             github_issue_count: 0,
+            azure_pull_count: 0,
+            azure_work_item_count: 0,
         }]);
         store.select_repo(&here.to_string_lossy(), cx);
         store.set_changes(warp_station_core::git::read::change_snapshot(&here));
@@ -1234,6 +1248,8 @@ fn a_queued_generation_offers_its_own_cancel(cx: &mut TestAppContext) {
             git_status_loaded: true,
             github_pr_count: 0,
             github_issue_count: 0,
+            azure_pull_count: 0,
+            azure_work_item_count: 0,
         }
     }
 

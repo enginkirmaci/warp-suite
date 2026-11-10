@@ -1,23 +1,27 @@
-//! The Pipelines tab: the design's workbench. A 320 run list, a hairline, then
-//! the selected run — its state, branch and commit, start, duration and
-//! trigger, one card per stage with its jobs, and the tail of its log. Below
-//! 900 px of pane the two take turns and Back returns to the list.
+//! The Pipelines tab: the design's workbench. A 320 run list — GitHub Actions
+//! and Azure Pipelines interleaved, newest first, each row tagged with the
+//! source it came from — a hairline, then the selected run: its state, branch
+//! and commit, start, duration and trigger, one card per stage with its jobs,
+//! and the tail of its log. Below 900 px of pane the two take turns and Back
+//! returns to the list.
 //!
-//! The project's Azure pull requests and work items live under the runs in the
-//! same column: they are the only entry to an Azure item, and a pull request
-//! opens its own detail in the pane.
+//! The run detail is source-neutral: the row is an `ActivityRun`, and each
+//! source answers with the same `RunDetail` — a timeline for Azure, one
+//! `gh run view` for Actions. The project's Azure pull requests and work items
+//! live under the runs in the same column: they are the only entry to an Azure
+//! item, and a pull request opens its own detail in the pane.
 
 use crate::store::Store;
 use crate::theme;
-use crate::ui::azure_pull::AzurePullView;
 use crate::ui::diff_controls;
 use crate::ui::pull_request::{plural, source_tag};
 use crate::ui::{A11y, icon};
 use gpui::prelude::*;
 use gpui::{AnyElement, Context, Entity, FontWeight, Rgba, SharedString, Window, div, px};
-use warp_station_core::azure::{
-    AzureItem, AzureSnapshot, PipelineRun, RunDetail, RunJob, RunStage, duration_between,
+use warp_station_core::activity::{
+    ActivityRun, ActivitySource, RunDetail, RunJob, RunStage, duration_between, sort_newest_first,
 };
+use warp_station_core::azure::AzureSnapshot;
 use warpui_kit_core::{motion, shell};
 
 /// The workbench's list column, and the pane width under which it and the
@@ -31,28 +35,23 @@ const LOG_ROWS: usize = 120;
 
 pub struct AzureView {
     pub store: Entity<Store>,
-    /// The Azure pull request the tab shows instead of a run, when one is open.
-    pull: Entity<AzurePullView>,
 }
 
 impl AzureView {
-    pub fn new(store: Entity<Store>, pull: Entity<AzurePullView>, cx: &mut Context<Self>) -> Self {
+    pub fn new(store: Entity<Store>, cx: &mut Context<Self>) -> Self {
         cx.observe(&store, |_, _, cx| cx.notify()).detach();
-        Self { store, pull }
+        Self { store }
     }
 
-    /// Escape: the open Azure pull request first, then the selected run on a
-    /// narrow pane. Returns whether it took the key.
+    /// Whether the pane is too narrow for both columns.
+    fn stacked(&self, cx: &Context<Self>) -> bool {
+        self.store.read(cx).pane_width < STACKED_PANE
+    }
+
+    /// Escape: the selected run on a narrow pane. Returns whether it took the
+    /// key.
     pub fn dismiss(&mut self, cx: &mut Context<Self>) -> bool {
-        if self.pull.update(cx, |view, cx| view.dismiss(cx)) {
-            return true;
-        }
-        if self.store.read(cx).open_azure_pull.is_some() {
-            self.store
-                .update(cx, |store, cx| store.close_azure_pull(cx));
-            return true;
-        }
-        if self.pull.read(cx).stacked && self.store.read(cx).open_run.is_some() {
+        if self.stacked(cx) && self.store.read(cx).open_run.is_some() {
             self.store.update(cx, |store, cx| store.close_run(cx));
             return true;
         }
@@ -63,23 +62,41 @@ impl AzureView {
 impl Render for AzureView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl gpui::IntoElement {
         let folder = self.store.read(cx).selected_repo.clone();
-        let snapshot = folder
+        let azure = folder
             .as_ref()
             .and_then(|f| self.store.read(cx).azure_by_folder.get(f).cloned());
-
-        let Some(snapshot) = snapshot else {
-            return empty_state(
-                "No Azure DevOps activity loaded — the pass fills after the scan settles".into(),
-            );
-        };
-        if !snapshot.available {
-            return empty_state(
-                "This repository has no Azure DevOps remote (or the PAT was rejected)".into(),
-            );
+        let github = folder
+            .as_ref()
+            .and_then(|f| self.store.read(cx).github_by_folder.get(f).cloned());
+        let azure_ok = azure.as_ref().is_some_and(|snapshot| snapshot.available);
+        let github_ok = github.as_ref().is_some_and(|snapshot| snapshot.available);
+        if !azure_ok && !github_ok {
+            return empty_state(if azure.is_none() && github.is_none() {
+                "No activity loaded yet — the pass fills after the scan settles".into()
+            } else {
+                "This repository has no GitHub or Azure DevOps remote (or the token was rejected)"
+                    .into()
+            });
         }
 
-        let toolbar = self.render_toolbar(&snapshot);
-        let body = self.render_workbench(&snapshot, window, cx);
+        // one list, both sources, newest first
+        let mut runs: Vec<ActivityRun> = Vec::new();
+        if let Some(snapshot) = azure.as_ref().filter(|snapshot| snapshot.available) {
+            runs.extend(snapshot.pipelines.iter().map(ActivityRun::of_azure));
+        }
+        if let Some(snapshot) = github.as_ref().filter(|snapshot| snapshot.available) {
+            runs.extend(snapshot.runs.iter().map(ActivityRun::of_github));
+        }
+        sort_newest_first(&mut runs);
+
+        let toolbar = self.render_toolbar(runs.first());
+        let body = self.render_workbench(
+            &runs,
+            azure.as_deref().filter(|snapshot| snapshot.available),
+            github_ok,
+            window,
+            cx,
+        );
         div()
             .debug_selector(|| "azure-tab".into())
             .size_full()
@@ -93,46 +110,43 @@ impl Render for AzureView {
 }
 
 impl AzureView {
-    /// The latest run's state, where the other tabs put their toolbar, plus a
-    /// refresh for the pass that filled it.
-    fn render_toolbar(&self, snapshot: &AzureSnapshot) -> AnyElement {
-        let (glyph, color, word, busy) = if snapshot.pipelines.is_empty() {
-            (
+    /// The latest run's state of either source, where the other tabs put their
+    /// toolbar, plus a refresh for the pass that filled it.
+    fn render_toolbar(&self, latest: Option<&ActivityRun>) -> AnyElement {
+        let (glyph, color, word, busy) = match latest {
+            None => (
                 "icons/icon-clock.svg",
                 theme::text_muted(),
-                "No pipeline runs",
+                "No runs yet".to_string(),
                 false,
-            )
-        } else if snapshot.pipeline_running() {
-            (
+            ),
+            Some(run) if run.is_running() => (
                 "icons/icon-spinner.svg",
                 theme::BEHIND,
-                "Latest run in progress",
+                "Latest run in progress".to_string(),
                 true,
-            )
-        } else if snapshot.pipeline_failed() {
-            (
+            ),
+            Some(run) if run.is_failed() => (
                 "icons/icon-close.svg",
                 theme::DANGER,
-                "Latest run failed",
+                "Latest run failed".to_string(),
                 false,
-            )
-        } else if snapshot.pipeline_ok() {
-            (
+            ),
+            Some(run) if run.is_succeeded() => (
                 "icons/icon-check.svg",
                 theme::SUCCESS_BRIGHT,
-                "Latest run succeeded",
+                "Latest run succeeded".to_string(),
                 false,
-            )
-        } else {
-            (
+            ),
+            Some(_) => (
                 "icons/icon-clock.svg",
                 theme::text_muted(),
-                "Latest run queued",
+                "Latest run queued".to_string(),
                 false,
-            )
+            ),
         };
         let store = self.store.clone();
+        let source = latest.map(|run| run.source);
         let latest = div()
             .flex()
             .items_center()
@@ -169,6 +183,7 @@ impl AzureView {
             .border_color(theme::hairline())
             .child(latest)
             .child(div().flex_1())
+            .children(source.map(|source| source_tag(source.label())))
             .child(
                 div()
                     .id("azure-refresh")
@@ -195,53 +210,49 @@ impl AzureView {
 
     fn render_workbench(
         &mut self,
-        snapshot: &AzureSnapshot,
+        runs: &[ActivityRun],
+        azure: Option<&AzureSnapshot>,
+        github_ok: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let pane_width = self.store.read(cx).pane_width;
         let stacked = pane_width < STACKED_PANE;
-        let detail_width = if stacked {
-            pane_width
-        } else {
-            pane_width - WORK_LIST
-        };
         // the first run is the selection where both columns show; the pane
         // never opens on an empty detail
-        let pull_open = self.store.read(cx).open_azure_pull.is_some();
         let open = self.store.read(cx).open_run.clone();
-        // an open pull request owns the column: a run must not take it back
-        if !stacked && !pull_open && open.is_none() && !snapshot.pipelines.is_empty() {
-            let first = snapshot.pipelines[0].clone();
+        if !stacked && open.is_none() && !runs.is_empty() {
+            let first = runs[0].clone();
             self.store.update(cx, |store, cx| store.open_run(first, cx));
         }
-        self.pull.update(cx, |view, _| {
-            view.stacked = stacked;
-            view.column_width = detail_width;
-        });
         let selected = self
             .store
             .read(cx)
             .open_run
             .as_ref()
-            .map(|open| open.run.id);
+            .map(|open| (open.run.source, open.run.id));
         let store = self.store.clone();
         let this = cx.entity();
 
         let mut rows = div().flex().flex_col();
-        for (ix, run) in snapshot.pipelines.iter().enumerate() {
-            rows =
-                rows.child(self.render_run_row(ix, run, selected == Some(run.id), &store, &this));
+        for (ix, run) in runs.iter().enumerate() {
+            rows = rows.child(self.render_run_row(
+                ix,
+                run,
+                selected == Some((run.source, run.id)),
+                &store,
+                &this,
+            ));
         }
-        if snapshot.pipelines.is_empty() {
-            rows = rows.child(
-                div()
-                    .px_4()
-                    .py_3()
-                    .text_size(px(theme::font_meta()))
-                    .text_color(theme::text_muted())
-                    .child("Nothing has run yet"),
-            );
+        if runs.is_empty() {
+            rows = rows.child(no_runs_note(azure.is_some(), github_ok));
+        }
+        let mut sources: Vec<&'static str> = Vec::new();
+        if azure.is_some_and(|snapshot| !snapshot.pipelines.is_empty()) {
+            sources.push(ActivitySource::Azure.label());
+        }
+        if github_ok {
+            sources.push(ActivitySource::GitHub.label());
         }
         let list = div()
             .id("azure-runs-column")
@@ -266,13 +277,13 @@ impl AzureView {
                     .border_color(theme::hairline())
                     .text_size(px(theme::font_meta()))
                     .text_color(theme::text_dim())
-                    .child(if snapshot.pipelines.is_empty() {
+                    .child(if runs.is_empty() {
                         "No runs".to_string()
                     } else {
-                        format!("Recent {}", snapshot.pipelines.len())
+                        format!("Recent {}", runs.len())
                     })
                     .child(div().flex_1())
-                    .child(source_tag("Azure")),
+                    .children(sources.into_iter().map(source_tag)),
             )
             .child(
                 div()
@@ -281,8 +292,7 @@ impl AzureView {
                     .flex_1()
                     .min_h_0()
                     .overflow_y_scroll()
-                    .child(rows)
-                    .child(self.items_section(snapshot, &store, cx)),
+                    .child(rows),
             );
         let detail = div()
             .flex_1()
@@ -290,14 +300,10 @@ impl AzureView {
             .h_full()
             .flex()
             .flex_col()
-            .child(if pull_open {
-                self.pull.clone().into_any_element()
-            } else {
-                self.run_detail(window, cx)
-            });
+            .child(self.run_detail(window, cx));
 
         if stacked {
-            if pull_open || selected.is_some() {
+            if selected.is_some() {
                 div()
                     .size_full()
                     .min_h_0()
@@ -326,12 +332,12 @@ impl AzureView {
         }
     }
 
-    /// One run row: state glyph, pipeline name and run number, branch and state
-    /// word, then its age.
+    /// One run row: state glyph, workflow or pipeline name and run number,
+    /// branch and state word, then its age and the source it came from.
     fn render_run_row(
         &self,
         ix: usize,
-        run: &PipelineRun,
+        run: &ActivityRun,
         selected: bool,
         store: &Entity<Store>,
         _this: &Entity<Self>,
@@ -339,13 +345,13 @@ impl AzureView {
         let (glyph, color) = run_glyph(run);
         let branch = run.display_branch();
         let age = run
-            .start
+            .at
             .as_deref()
-            .or(run.finish.as_deref())
             .and_then(warp_station_core::rel_time::format_rfc3339);
         let row_run = run.clone();
         let target = store.clone();
         let selector = format!("pipeline-run-{ix}");
+        let title = format!("{} {}", run.name, run.label);
         div()
             .border_t_1()
             .border_color(theme::row_line())
@@ -353,13 +359,7 @@ impl AzureView {
                 div()
                     .id(SharedString::from(selector.clone()))
                     .debug_selector(move || selector.clone())
-                    .a11y_button(format!(
-                        "{} {}",
-                        run.definition_name
-                            .clone()
-                            .unwrap_or_else(|| "Pipeline".into()),
-                        run.build_number
-                    ))
+                    .a11y_button(title.clone())
                     .cursor_pointer()
                     .flex()
                     .items_center()
@@ -397,13 +397,7 @@ impl AzureView {
                                     .text_size(px(theme::font_name()))
                                     .font_weight(FontWeight::SEMIBOLD)
                                     .text_color(theme::text())
-                                    .child(format!(
-                                        "{} {}",
-                                        run.definition_name
-                                            .clone()
-                                            .unwrap_or_else(|| "Pipeline".into()),
-                                        run.build_number
-                                    )),
+                                    .child(title),
                             )
                             .child(
                                 div()
@@ -437,7 +431,7 @@ impl AzureView {
                                     })
                                     .child(run.state_word())
                                     .child("·")
-                                    .child(source_tag("Azure")),
+                                    .child(source_tag(run.source.label())),
                             ),
                     )
                     .children(age.map(|age| {
@@ -451,113 +445,23 @@ impl AzureView {
             .into_any_element()
     }
 
-    /// The project's pull requests and work items, under the runs in the same
-    /// column: they are today's only entry to an Azure item.
-    fn items_section(
-        &self,
-        snapshot: &AzureSnapshot,
-        store: &Entity<Store>,
-        _cx: &mut Context<Self>,
-    ) -> AnyElement {
-        div()
-            .debug_selector(|| "azure-items".into())
-            .border_t_1()
-            .border_color(theme::hairline())
-            .mt_2()
-            .pt_2()
-            .flex()
-            .flex_col()
-            .child(self.items_group(
-                "Pull requests",
-                "No active pull requests",
-                &snapshot.pulls,
-                "icons/icon-git-pull-request.svg",
-                theme::PR,
-                "PR",
-                store,
-                true,
-            ))
-            .child(self.items_group(
-                "Work items",
-                "No active work items",
-                &snapshot.work_items,
-                "icons/icon-issue.svg",
-                theme::ISSUE,
-                "WI",
-                store,
-                false,
-            ))
-            .into_any_element()
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    fn items_group(
-        &self,
-        title: &'static str,
-        empty: &'static str,
-        items: &[AzureItem],
-        glyph: &'static str,
-        color: Rgba,
-        kind: &'static str,
-        store: &Entity<Store>,
-        opens_in_app: bool,
-    ) -> AnyElement {
-        let mut column = div()
-            .debug_selector(|| title.into())
-            .flex()
-            .flex_col()
-            .pb_2()
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    .h(px(34.))
-                    .px_4()
-                    .text_size(px(theme::font_meta()))
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .text_color(theme::text_dim())
-                    .child(title)
-                    .child(
-                        div()
-                            .font_weight(FontWeight::MEDIUM)
-                            .text_color(theme::text_muted())
-                            .child(format!("{}", items.len())),
-                    )
-                    .child(div().flex_1())
-                    .child(source_tag("Azure")),
-            );
-        if items.is_empty() {
-            column = column.child(
-                div()
-                    .px_4()
-                    .pb_2()
-                    .text_size(px(theme::font_meta()))
-                    .text_color(theme::text_muted())
-                    .child(empty),
-            );
-        }
-        for (ix, item) in items.iter().enumerate() {
-            column = column.child(item_row(ix, item, glyph, color, kind, store, opens_in_app));
-        }
-        column.into_any_element()
-    }
-
     /// The selected run's detail, or the empty state that says how to pick one.
     fn run_detail(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let store = self.store.read(cx);
         let Some(open) = store.open_run.clone() else {
-            return diff_controls::state(if self.pull.read(cx).stacked {
+            return diff_controls::state(if self.stacked(cx) {
                 "Select a run"
             } else {
                 "Select a run from the list"
             });
         };
         let detail = open.detail.as_ref();
-        let run = &open.run;
+        // the detail's own call is fresher than the row's snapshot, and for
+        // Actions it is the only place the commit and the trigger exist
+        let run = effective(&open.run, detail);
 
         let mut title_row = div().flex().flex_row().flex_wrap().items_center().gap_2();
-        if self.pull.read(cx).stacked {
+        if self.stacked(cx) {
             let store = self.store.clone();
             title_row = title_row.child(
                 div()
@@ -596,15 +500,9 @@ impl AzureView {
                     .text_size(px(theme::font_screen_title()))
                     .font_weight(FontWeight::SEMIBOLD)
                     .text_color(theme::text())
-                    .child(format!(
-                        "{} {}",
-                        run.definition_name
-                            .clone()
-                            .unwrap_or_else(|| "Pipeline".into()),
-                        run.build_number
-                    )),
+                    .child(format!("{} {}", run.name, run.label)),
             )
-            .child(state_pill(run));
+            .child(state_pill(&run));
         let url = run.url.clone().unwrap_or_default();
         if !url.is_empty() {
             title_row = title_row.child(primary_button("run-open", "Open run", move |_, _, _| {
@@ -642,14 +540,14 @@ impl AzureView {
                         ),
                 )
             })
-            .children(run.short_source().map(|sha| {
+            .children(run.short_sha().map(|sha| {
                 div()
                     .font_family(theme::code_font())
                     .text_size(px(theme::font_mono_meta()))
                     .text_color(theme::text_muted())
                     .child(sha)
             }))
-            .child(source_tag("Azure"));
+            .child(source_tag(run.source.label()));
 
         let head = div()
             .flex_shrink_0()
@@ -663,7 +561,7 @@ impl AzureView {
             .child(title_row)
             .child(sub);
 
-        let strip = run_strip(run);
+        let strip = run_strip(&run);
 
         let body = div()
             .id("run-body")
@@ -679,10 +577,10 @@ impl AzureView {
                     .flex_col()
                     .gap_4()
                     .child(match (detail, open.failed) {
-                        (Some(detail), _) => stages_body(detail),
+                        (Some(detail), _) => stages_body(detail, run.source),
                         (None, true) => empty_note(
                             "Could not read the run",
-                            "Azure DevOps did not answer with its timeline.",
+                            "The source did not answer with its jobs.",
                         ),
                         (None, false) => diff_controls::state("Reading the run…"),
                     })
@@ -704,8 +602,54 @@ impl AzureView {
     }
 }
 
+/// The row with the detail's fresher facts laid over it: the commit, the
+/// trigger and the times only the detail's own call carries.
+fn effective(run: &ActivityRun, detail: Option<&RunDetail>) -> ActivityRun {
+    let mut run = run.clone();
+    if let Some(detail) = detail {
+        run.sha = detail.sha.clone().or(run.sha);
+        run.trigger = detail.trigger.clone().or(run.trigger);
+        run.start = detail.start.clone().or(run.start);
+        run.finish = detail.finish.clone().or(run.finish);
+    }
+    run
+}
+
+/// A repository with no runs, in both sources' words: which one answered is
+/// part of the message, so an unconnected source is never read as "nothing
+/// ran".
+fn no_runs_note(azure: bool, github: bool) -> AnyElement {
+    let detail = match (azure, github) {
+        (true, true) => "GitHub and Azure DevOps both answered with no runs.",
+        (true, false) => "Azure DevOps answered; GitHub is not connected here.",
+        (false, true) => "GitHub answered; Azure DevOps is not connected here.",
+        (false, false) => "Neither source is connected here.",
+    };
+    div()
+        .debug_selector(|| "runs-empty".into())
+        .px_4()
+        .py_3()
+        .flex()
+        .flex_col()
+        .gap_1()
+        .child(
+            div()
+                .text_size(px(theme::font_body()))
+                .font_weight(FontWeight::SEMIBOLD)
+                .text_color(theme::text_dim())
+                .child("Nothing has run yet"),
+        )
+        .child(
+            div()
+                .text_size(px(theme::font_meta()))
+                .text_color(theme::text_muted())
+                .child(detail),
+        )
+        .into_any_element()
+}
+
 /// The run's state glyph and its ink.
-fn run_glyph(run: &PipelineRun) -> (&'static str, Rgba) {
+fn run_glyph(run: &ActivityRun) -> (&'static str, Rgba) {
     if run.is_running() {
         ("icons/icon-spinner.svg", theme::BEHIND)
     } else if run.is_failed() {
@@ -732,8 +676,8 @@ fn run_glyph_element(ix: usize, glyph: &'static str, color: Rgba) -> AnyElement 
 
 /// The 44 status strip: the state, when it started, how long it took and what
 /// started it — the facts the head has no room for.
-fn run_strip(run: &PipelineRun) -> AnyElement {
-    let (_, color) = run_glyph(run);
+fn run_strip(run: &ActivityRun) -> AnyElement {
+    let (glyph, color) = run_glyph(run);
     let mut facts = div()
         .flex()
         .flex_row()
@@ -755,7 +699,7 @@ fn run_strip(run: &PipelineRun) -> AnyElement {
                     )
                     .into_any_element()
                 } else {
-                    icon(run_glyph(run).0, px(theme::icon_tiny()), color).into_any_element()
+                    icon(glyph, px(theme::icon_tiny()), color).into_any_element()
                 })
                 .child(run.state_word()),
         );
@@ -790,12 +734,12 @@ fn run_strip(run: &PipelineRun) -> AnyElement {
         .text_color(theme::text_dim())
         .child(facts)
         .child(div().flex_1())
-        .child(source_tag("Azure"))
+        .child(source_tag(run.source.label()))
         .into_any_element()
 }
 
-fn state_pill(run: &PipelineRun) -> AnyElement {
-    let (_, color) = run_glyph(run);
+fn state_pill(run: &ActivityRun) -> AnyElement {
+    let (glyph, color) = run_glyph(run);
     div()
         .flex_shrink_0()
         .flex()
@@ -808,18 +752,21 @@ fn state_pill(run: &PipelineRun) -> AnyElement {
         .text_size(px(theme::font_meta()))
         .font_weight(FontWeight::SEMIBOLD)
         .text_color(color)
-        .child(icon(run_glyph(run).0, px(theme::icon_tiny()), color))
+        .child(icon(glyph, px(theme::icon_tiny()), color))
         .child(run.state_word())
         .into_any_element()
 }
 
 /// One card per stage, its jobs under it. A failed job takes the removed-line
 /// tint, a running one a spinner, a queued or skipped one a clock.
-fn stages_body(detail: &RunDetail) -> AnyElement {
+fn stages_body(detail: &RunDetail, source: ActivitySource) -> AnyElement {
     if detail.stages.is_empty() {
         return empty_note(
             "No stages reported",
-            "Azure DevOps answered with an empty timeline.",
+            match source {
+                ActivitySource::Azure => "Azure DevOps answered with an empty timeline.",
+                ActivitySource::GitHub => "GitHub answered with no jobs for this run.",
+            },
         );
     }
     let mut column = div().flex().flex_col().gap_4();
@@ -908,7 +855,7 @@ fn job_row(stage_ix: usize, job_ix: usize, job: &RunJob) -> AnyElement {
     } else {
         ("icons/icon-clock.svg", theme::text_muted())
     };
-    let time = duration_between(job.start.as_deref(), job.finish.as_deref()).unwrap_or_default();
+    let time = job.duration().unwrap_or_default();
     let selector = format!("run-job-{stage_ix}-{job_ix}");
     let spinner_id = selector.clone();
     div()
@@ -1016,6 +963,15 @@ fn log_card(log: &str) -> AnyElement {
         .bg(theme::well())
         .font_family(theme::code_font())
         .text_size(px(theme::font_mono_meta()));
+    if log.trim().is_empty() {
+        // a run with nothing to report: an Azure build without log entries,
+        // or an Actions run whose steps all passed
+        lines = lines.child(
+            div()
+                .text_color(theme::text_muted())
+                .child("Nothing logged for this run"),
+        );
+    }
     for line in log
         .lines()
         .rev()
@@ -1050,85 +1006,6 @@ fn log_line_color(line: &str) -> Rgba {
     } else {
         theme::text_dim()
     }
-}
-
-/// One Azure item row: its number and title, then the meta line. A pull
-/// request opens in the pane; a work item opens on Azure DevOps.
-#[allow(clippy::too_many_arguments)]
-fn item_row(
-    ix: usize,
-    item: &AzureItem,
-    glyph: &'static str,
-    color: Rgba,
-    kind: &'static str,
-    store: &Entity<Store>,
-    opens_in_app: bool,
-) -> AnyElement {
-    let url = item.url.clone();
-    let meta = [item.author.clone(), item.state.clone()]
-        .into_iter()
-        .flatten()
-        .collect::<Vec<_>>()
-        .join(" · ");
-    let selector = format!("azure-{kind}-{ix}");
-    let target = store.clone();
-    let clicked = item.clone();
-    let item = item.clone();
-    div()
-        .id(SharedString::from(selector.clone()))
-        .debug_selector(move || selector.clone())
-        .a11y_button(format!("{kind} !{} {}", item.number, item.title))
-        .cursor_pointer()
-        .flex()
-        .items_center()
-        .gap_2p5()
-        .min_h(px(44.))
-        .px_4()
-        .py_1p5()
-        .border_t_1()
-        .border_color(theme::row_line())
-        .hover(|row| row.bg(theme::raised()))
-        .on_click(move |_, _, cx| {
-            if opens_in_app {
-                target.update(cx, |store, cx| {
-                    store.open_azure_pull(clicked.clone(), cx);
-                });
-            } else if !url.is_empty() {
-                let _ = warp_station_core::terminal::open_folder(&url);
-            }
-        })
-        .child(icon(glyph, px(theme::icon_small()), color))
-        .child(
-            div()
-                .flex_1()
-                .min_w_0()
-                .flex()
-                .flex_col()
-                .gap_0p5()
-                .child(
-                    div()
-                        .min_w_0()
-                        .text_size(px(theme::font_body()))
-                        .text_color(theme::text())
-                        .overflow_hidden()
-                        .whitespace_nowrap()
-                        .text_ellipsis()
-                        .child(format!("!{} {}", item.number, item.title)),
-                )
-                .when(!meta.is_empty(), |column| {
-                    column.child(
-                        div()
-                            .min_w_0()
-                            .text_size(px(theme::font_meta()))
-                            .text_color(theme::text_muted())
-                            .overflow_hidden()
-                            .whitespace_nowrap()
-                            .text_ellipsis()
-                            .child(meta),
-                    )
-                }),
-        )
-        .into_any_element()
 }
 
 /// A failed run's row keeps the removed-line tint, as the design asks.

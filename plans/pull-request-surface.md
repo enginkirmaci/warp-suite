@@ -3,10 +3,13 @@
 Status: built. Phases 1–5 landed (core data, net/store, the workbench, the
 pull request's own three tabs and its verbs, the embedded New pull request
 form), plus the Issues workbench, the Files rail stacking, the Azure
-pull-request detail and the Pipelines run detail. What the GitHub list still
-lacks is the GitHub+Azure union, which belongs to
-`plans/azure-github-activity-merge.md`; the Azure rows keep their own card in
-the Pipelines tab until that lands. The design source is the OpenDesign project
+pull-request detail and the Pipelines run detail, and the Pipelines workbench
+now lists GitHub Actions and Azure Pipelines runs in one list (the shared run
+vocabulary lives in `activity.rs`), and the Pull requests and Issues tabs list
+both platforms' rows in one work list each — the union that
+`plans/azure-github-activity-merge.md` owned is in, so the Azure item cards are
+gone and an Azure pull request opens in the merged list's column. The design
+source is the OpenDesign project
 `warp-suite-v3` — `DESIGN.md` §5 "Work lists", "Pull requests tab", "Pull
 request", "New pull request", "Issues tab" — and the prototype's `prList`,
 `prDetail`, `newPrView`, `issueDetail`, `runDetail` and `pipelines`.
@@ -110,11 +113,11 @@ replaced the whole detail pane with the pull request and had no list beside it.
   The workbench's column is under that on any window narrower than ~1728 px
   (`window − rail − list − 320`), so this is the common case, not the edge.
 
-- **D16 — an Azure pull request opens from the Pipelines tab.** The union list
-  owns the Pull requests tab, so the Azure rows the app already has stay where
-  they are: under the runs, in the Pipelines tab's column. A press opens the
-  detail in that tab's detail column, over the run detail, and Back returns to
-  the runs. The pane is the same shape as D1–D9, with Azure's own data and
+- **D16 — an Azure pull request opens from the Pipelines tab.** *Superseded:
+  the union list landed, so an Azure row sits in the Pull requests list and its
+  pane is that tab's detail column.* The original shape was the card under the
+  runs, opening the detail over the run detail; the pane itself (head, strip,
+  tabs, verbs) did not change when it moved. The pane is the same shape as D1–D9, with Azure's own data and
   verbs behind it: state pill Active/Completed/Abandoned, review split
   Approve/Decline (a vote), primary Complete / Set auto-complete /
   Auto-complete set / Reopen, Abandon through the page's card.
@@ -151,11 +154,10 @@ replaced the whole detail pane with the pull request and had no list beside it.
   A timeline groups jobs under their stage by walking up the parent chain, so a
   multi-config phase in between still files the job under its stage; tasks are
   not job rows. The detail asks once per run and keeps the answer.
-- **D22 — the Azure items keep a home.** A repository with no runs still gets
-  the tab, the run column's "Nothing has run yet", and the project's pull
-  requests and work items under it in the same column. They are the only entry
-  to an Azure item until the union list lands, so they are not hidden behind an
-  empty state.
+- **D22 — a repository with no runs still gets the tab.** It shows the run
+  column's "Nothing has run yet" and nothing else: the project's pull requests
+  and work items moved to the merged lists when the union landed, so the
+  Pipelines tab draws runs only.
 
 ## 3. What landed
 
@@ -229,18 +231,21 @@ replaced the whole detail pane with the pull request and had no list beside it.
 
 ## 4. Open work
 
-1. **The GitHub+Azure union list.** The Azure rows have a detail now, but the
-   Pull requests tab still lists GitHub rows only; the `!214` reference and the
-   `Source` tag in one merged list belong to
-   `plans/azure-github-activity-merge.md`, another session's plan. This plan
-   does not own it. When it lands, the Azure row's click points at
-   `Store::open_azure_pull` and the Pipelines card can shrink to a count.
-2. **GitHub Actions runs.** The Pipelines detail draws Azure's runs; a GitHub
-   repository has no run list yet (`gh run list` is that other plan's D2). The
-   tab's empty state for a GitHub repo is the honest shape until then.
+1. **The Azure work item's detail.** Its row is in the merged Issues list, but
+   a work item has no pane of its own yet: the row opens on Azure DevOps. The
+   design's issue detail wants state, type, assignee, description and activity
+   for it, which is one more REST read (`wit/workitems/{id}` plus its comments).
+   The other two questions are settled: the union list landed
+   (`plans/azure-github-activity-merge.md`) and the Azure pull request opens in
+   the merged list's column.
+2. **GitHub Actions runs — done.** `github::refresh` lists ten runs with the
+   same pass, `activity.rs` makes them one vocabulary with Azure's, and the
+   workbench interleaves the two newest-first one row at a time; an Actions run
+   opens its own detail from `gh run view`. A GitHub-only repository gets the
+   tab (`Store::detail_tabs`). Reported in that plan's D2/D5.
 3. **Azure's `+adds −dels`.** Azure serves no line counts with its change list;
    the counts the GitHub subtitle carries are absent on Azure (D17). Filling
    them means diffing every file on open, which is the one thing the pane
    deliberately does not do up front.
 4. Fold what is durable into `apps/warp-station/AGENTS.md` or delete this plan
-   once 1–3 are decided.
+   once 1 and 3 are decided.

@@ -501,7 +501,7 @@ fn is_under(folder: &str, root: &str) -> bool {
 /// A repo the "Needs attention" scope keeps: something is waiting on the
 /// developer — uncommitted work, an open issue, or commits still to push.
 pub fn needs_attention(repo: &RepoEntry) -> bool {
-    repo.git_modified_count > 0 || repo.github_issue_count > 0 || repo.git_to_push_count > 0
+    repo.git_modified_count > 0 || repo.issue_total() > 0 || repo.git_to_push_count > 0
 }
 
 fn sort_indices(
@@ -568,8 +568,8 @@ fn sort_indices(
                 }
                 RepoSortMode::GitHub => order_key(
                     ascending,
-                    ra.github_pr_count + ra.github_issue_count,
-                    rb.github_pr_count + rb.github_issue_count,
+                    ra.pull_total() + ra.issue_total(),
+                    rb.pull_total() + rb.issue_total(),
                 ),
                 RepoSortMode::Attention => {
                     order_key(ascending, needs_attention(ra), needs_attention(rb)).then_with(|| {
@@ -642,6 +642,8 @@ mod tests {
             git_status_loaded: false,
             github_pr_count: 0,
             github_issue_count: 0,
+            azure_pull_count: 0,
+            azure_work_item_count: 0,
         }
     }
 
