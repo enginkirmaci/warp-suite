@@ -105,7 +105,7 @@ impl Render for SnapItPage {
                     .rounded(px(6.))
                     .border_1()
                     .border_color(if selected {
-                        theme::ACCENT_BORDER
+                        theme::accent_hover()
                     } else {
                         theme::line_strong()
                     })

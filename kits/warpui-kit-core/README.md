@@ -2,7 +2,7 @@
 
 Theme palette, bundled fonts, type scale and shared control helpers for the **warpui-kit** family — the foundation the other family crates build on.
 
-The palette is Copper, the warp-suite-v3 design: one lifted warm ramp plus one hue per entity, shared by the family's desktop clients; `apply_kit_theme` maps it onto [gpui-kit](https://crates.io/crates/gpui-kit)'s shadcn-style theme tokens (with the two-pass mode-flip that survives the kit's `Theme::update` reload).
+Five palettes ship from the warp-suite-v3 design — Copper (the default), Plum, Pine, Blue and Gray. Each is one lifted ramp plus the fixed entity hues, shared by the family's desktop clients; `apply_kit_theme` maps the live one onto [gpui-kit](https://crates.io/crates/gpui-kit)'s shadcn-style theme tokens (with the two-pass mode-flip that survives the kit's `Theme::update` reload).
 
 ## What's inside
 

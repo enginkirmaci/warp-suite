@@ -153,12 +153,13 @@ together. When one changes, update the other side in the **same** commit.
   SnapIt included, imports its pre-versioning files once at the edge.
 - **Shared text size and palette** (`~/.warp/ui.json`: `text_size` is `small`,
   `normal`, `large` or `larger` — the old `compact` spelling reads as normal —
-  and `palette` is `copper`, `plum`, `pine` or `blue`): `warpui-kit-core` owns
-  the file and the one control that writes each key. A click applies in that
-  app at once; the other apps read the value when they next start. The apps'
-  old per-app `text_size`/`font_scale` settings only seed the file on its first run, so every app
-  must be on the same `warpui-kit-core`. Both keys are additive: a file that
-  lacks one keeps the other.
+  and `palette` is `copper`, `plum`, `pine`, `blue` or `gray`):
+  `warpui-kit-core` owns the file and the one control that writes each key. A
+  click applies in that app at once; the other apps read the value when they
+  next start. The apps' old per-app `text_size`/`font_scale` settings only seed
+  the file on its first run, so every app must be on the same
+  `warpui-kit-core`. Both keys are additive: a file that lacks one keeps the
+  other.
 
 - **warp-android-scribe bridge** (LAN `<nas-lan>:8787`, public
   `https://<nas-host>`): the Android IME posts a 16 kHz mono WAV to

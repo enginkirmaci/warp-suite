@@ -139,7 +139,7 @@ the standalone launch's chosen store (`--store` wins).
 ## Shared `ui.json`
 
 `schema_version`, `text_size` (`small`/`normal`/`large`/`larger`), `palette`
-(`copper`/`plum`/`pine`/`blue`), plus any key another app owns. A writer
+(`copper`/`plum`/`pine`/`blue`/`gray`), plus any key another app owns. A writer
 changes only its own key and preserves the rest.
 
 ## SnapIt

@@ -4,12 +4,11 @@
 
 // every shared font step and color const stays reachable as `theme::X`
 pub use warpui_kit_core::fonts::*;
-// the fixed semantic colors stay constants (they never follow the palette),
-// and the accent preset system rides along
+// the fixed semantic colors stay constants (they never follow the palette)
 pub use warpui_kit_core::palette::{
-    ACCENT_BORDER, ADD, AHEAD, AMBER_BRIGHT, AccentColors, BEHIND, BRANCH, CHANGES, DANGER, DEL,
-    DIFF_ADD_BG, DIFF_DEL_BG, GHOST_BORDER_HOVER, ISSUE, ON_DANGER, PR, SCRIM, SUCCESS_BRIGHT,
-    SUCCESS_DEEP, WARN, highlight_theme, tint,
+    ADD, AHEAD, AMBER_BRIGHT, BEHIND, BRANCH, CHANGES, DANGER, DEL, DIFF_ADD_BG, DIFF_DEL_BG,
+    GHOST_BORDER_HOVER, ISSUE, ON_DANGER, PR, SCRIM, SUCCESS_BRIGHT, SUCCESS_DEEP, WARN,
+    highlight_theme, tint,
 };
 // ---- gpui-kit theme mapping ------------------------------------------------
 
@@ -17,12 +16,10 @@ pub use warpui_kit_core::palette::{
 /// [`gpui_kit::init`], before opening windows (`Theme::update` refreshes every
 /// window, so a settings save can re-run it).
 pub fn apply_kit_theme(cx: &mut gpui::App) {
-    warpui_kit_core::apply_kit_theme(
-        AccentColors::default_colors(),
-        &active_tokens(),
-        surface(),
-        cx,
-    );
+    // the accent rides the live ramp, read at every retheme so a palette
+    // switch moves the kit's primary controls with the rest of the app
+    let accent = warpui_kit_core::palette::current_ramp().accent_colors();
+    warpui_kit_core::apply_kit_theme(accent, &active_tokens(), surface(), cx);
 }
 
 // ---- layout ----------------------------------------------------------------

@@ -192,11 +192,12 @@ when one side changes, update the other side in the **same commit**.
   live store never normalizes keys.
 - **Shared text size and palette** (`~/.warp/ui.json`): `text_size` is `small`,
   `normal`, `large` or `larger` (the old `compact` reads as normal); `palette`
-  is `copper`, `plum`, `pine` or `blue`. `warpui-kit-core` owns the file and
-  the one control that writes each key. A click applies in that app at once;
-  other apps read the value when they next start. Both keys are additive; a
-  writer must not drop the key it does not own. Writes use a sidecar lock and
-  an atomic rename. Reduced motion is per-app, not in this file.
+  is `copper`, `plum`, `pine`, `blue` or `gray`. `warpui-kit-core` owns the
+  file and the one control that writes each key. A click applies in that app
+  at once; other apps read the value when they next start. Both keys are
+  additive; a writer must not drop the key it does not own. Writes use a
+  sidecar lock and an atomic rename. Reduced motion is per-app, not in this
+  file.
 - **warp-android-scribe bridge** (`android-apps/warp-android-scribe`): LAN
   `http://<nas-lan>:8787` (UFW `<nas-subnet>`) and public
   `https://<nas-host>` through Cloudflare Tunnel -> Nginx Proxy

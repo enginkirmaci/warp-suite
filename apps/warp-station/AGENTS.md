@@ -71,9 +71,8 @@ Keep this order; several steps depend on the previous one:
   `--parent <pid>`. The default executable name is historical; the Rust port is
   `warp-snapit.exe`.
 - **Shared UI.** Text size and palette come from `~/.warp/ui.json` through
-  `warpui-kit-core`; the app stores neither. This app still pins the Copper
-  accent (see `../../docs/agents/design-system.md`); do not copy that signature
-  into a new app.
+  `warpui-kit-core`; the app stores neither, and the accent follows the live
+  palette like the other apps. Do not copy a fixed accent into a new app.
 - **Layout.** Everything lives under `~/.warp/station` (versioned
   `settings.json` plus the disposable `cache/repos.json` and
   `cache/models.json`), except the shared `~/.warp/ui.json`, `~/.warp/logs`,

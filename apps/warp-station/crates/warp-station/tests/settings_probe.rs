@@ -49,7 +49,7 @@ fn settings_page_draws_all_sections(cx: &mut TestAppContext) {
         "Appearance carries the shared text size control"
     );
     // the palette is a live picker now, the same control the other apps carry
-    for key in ["copper", "plum", "pine", "blue"] {
+    for key in ["copper", "plum", "pine", "blue", "gray"] {
         let selector: &'static str = Box::leak(format!("palette-{key}").into_boxed_str());
         assert!(
             cx.debug_bounds(selector).is_some(),

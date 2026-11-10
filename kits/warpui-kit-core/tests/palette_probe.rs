@@ -57,23 +57,30 @@ fn a_click_switches_the_surfaces_saves_and_runs_the_hook(cx: &mut TestAppContext
         );
     }
 
+    // the last segment is the one a too-wide control would clip, so click it
+    let last = palette::RAMPS.last().expect("at least one palette");
+    let selector: &'static str = Box::leak(format!("palette-{}", last.key).into_boxed_str());
     let before = palette::text();
-    let blue = cx.debug_bounds("palette-blue").expect("Blue segment");
-    cx.simulate_click(blue.center(), Modifiers::default());
+    let segment = cx.debug_bounds(selector).expect("the last segment");
+    cx.simulate_click(segment.center(), Modifiers::default());
     cx.run_until_parked();
 
-    assert_eq!(palette_key(), "blue", "the click switches the live palette");
+    assert_eq!(
+        palette_key(),
+        last.key,
+        "the click switches the live palette"
+    );
     assert_ne!(palette::text(), before, "the surfaces read the new ink");
     assert_eq!(
         palette::text(),
-        palette::normalize_ramp(Some("blue")).text,
-        "the ink is the blue palette's own"
+        last.text,
+        "the ink is the clicked palette's own"
     );
     assert_eq!(calls.get(), 1, "the host's kit-theme hook runs once");
 
     let saved = std::fs::read_to_string(home.join(".warp").join("ui.json")).expect("saved");
     let doc: serde_json::Value = serde_json::from_str(&saved).expect("valid json");
-    assert_eq!(doc["palette"], "blue");
+    assert_eq!(doc["palette"], last.key);
 
     // put the process back on the default for the other tests in this binary
     palette::set_ramp("copper");

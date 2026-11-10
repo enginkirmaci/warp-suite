@@ -14,8 +14,7 @@ size goes into core, where every app gets it, and never into one app.
 
 **Current state:** all three GPUI apps run the shared `bootstrap::init`, carry
 the text-size and palette pickers, and have a per-app Reduce motion switch. A
-palette click moves every surface in all three. The accent family follows the
-palette in warp-agent and warp-notes; warp-station still pins Copper (see
+palette click moves every surface and the accent family in all three (see
 [The accent](#the-accent)).
 
 | Part | Module | Read this when |
@@ -32,10 +31,17 @@ palette in warp-agent and warp-notes; warp-station still pins Copper (see
 
 ## Palettes
 
-Four ramps, in `palette::RAMPS`: **Copper** (the default), **Plum**, **Pine**
-and **Blue**. A `Ramp` carries six surfaces, three lines, three inks and the
-accent family; entity hues (`BRANCH`, `CHANGES`, `PR`, `ISSUE`, `BEHIND`,
-`AHEAD`) are fixed across ramps because they mean one thing each.
+Five ramps, in `palette::RAMPS`: **Copper** (the default), **Plum**, **Pine**,
+**Blue** and **Gray**. A `Ramp` carries six surfaces, three lines, three inks
+and the accent family; entity hues (`BRANCH`, `CHANGES`, `PR`, `ISSUE`,
+`BEHIND`, `AHEAD`) are fixed across ramps because they mean one thing each.
+
+Blue is the cool slate field; Gray is the neutral graphite field with a muted
+steel accent, for screens that should carry almost no colour cast. Gray's
+inks and primary label clear AA on every surface (text 11.9:1, text-2 8.5:1,
+text-3 5.6:1, accent-ink 7.7:1, primary label 7.0:1), and
+`palette::tests::every_palette_clears_aa_and_orders_its_ramp` measures every
+ramp, so a new palette cannot ship unmeasured.
 
 | Surface | Copper | Use |
 | --- | --- | --- |
@@ -83,11 +89,10 @@ palette switch moves surfaces and accent together.
 
 warp-agent reads it that way: its Accent picker and the preset normalization
 behind it are gone, and its store re-derives the accent with the fonts whenever
-the palette re-maps the kit theme. warp-notes now reads
-`current_ramp().accent_colors()` in its retheme, so a palette switch carries
-its primary controls too. warp-station is the remaining step: it still passes
-`AccentColors::default_colors()` (Copper). Do not add a second accent picker
-on top of either app.
+the palette re-maps the kit theme. warp-notes and warp-station read
+`current_ramp().accent_colors()` in their retheme, so a palette switch carries
+their primary controls too. Do not add a second accent picker on top of any
+app.
 
 The rules that are easy to get wrong:
 
@@ -335,7 +340,8 @@ mockup, and use the shared helper where one exists.
   `accent_hover()`, while warp-notes' primary button and warp-agent's shared
   `controls::button(…, BtnKind::Primary(accent), …)` dim to 0.9.
 - **Ghost action:** `ghost_bg()` / `ghost_border()` (station) read the live
-  ramp; `GHOST_BORDER_HOVER` is still a Copper constant (station pins Copper).
+  ramp; `GHOST_BORDER_HOVER` is still a Copper constant on the dialogs'
+  secondary hover edge.
 - **Head icon verb:** `controls::icon_button()` — 34 square on `panel()`,
   `line_strong()` edge, `raised()` hover, glyph as the child. Warp Station's
   detail head (`head_icon`) and warp-notes' note head (`…`) are this one.

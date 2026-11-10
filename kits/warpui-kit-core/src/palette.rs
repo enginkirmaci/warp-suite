@@ -1,8 +1,9 @@
-//! The shared palette: Copper, the warp-suite-v3 design. One lifted warm ramp
-//! whose darkest step is a recessed well, not the window, plus one hue per
-//! entity. Surfaces step well < chrome < base < panel < raised < overlay; the
-//! desktop clients name a few steps differently, so both spellings exist as
-//! aliases of the same constants.
+//! The shared palettes: Copper (the default), Plum, Pine, Blue and Gray, the
+//! warp-suite-v3 design. Each is one lifted ramp whose darkest step is a
+//! recessed well, not the window, plus the fixed entity hues. Surfaces step
+//! well < chrome < base < panel < raised < overlay; the desktop clients name a
+//! few steps differently, so both spellings exist as aliases of the same
+//! constants.
 
 use gpui::{Hsla, Rgba, hsla, rgba};
 use std::sync::Arc;
@@ -108,7 +109,7 @@ const fn ramp(key: &'static str, label: &'static str, hexes: [u32; 17]) -> Ramp 
 
 /// Every palette the settings control offers, in order. Copper first: it is
 /// the default, and a saved key that no longer exists lands on it.
-pub const RAMPS: [Ramp; 4] = [
+pub const RAMPS: [Ramp; 5] = [
     ramp(
         "copper",
         "Copper",
@@ -143,6 +144,17 @@ pub const RAMPS: [Ramp; 4] = [
             0x181A20FF, 0x1D2027FF, 0x22262EFF, 0x282D36FF, 0x2F3540FF, 0x363C48FF, 0x2A2F38FF,
             0x363C47FF, 0x49505CFF, 0xF0F4FBFF, 0xC9D2E0FF, 0x9FA9B8FF, 0x5B9DF5FF, 0x77B0F8FF,
             0x8FBBFAFF, 0x1E2F4AFF, 0x0A1626FF,
+        ],
+    ),
+    // the neutral graphite field with a muted steel accent, for screens that
+    // should carry almost no colour cast
+    ramp(
+        "gray",
+        "Gray",
+        [
+            0x121314FF, 0x161718FF, 0x1A1B1CFF, 0x1F2021FF, 0x272829FF, 0x2E2F30FF, 0x242526FF,
+            0x2E2F30FF, 0x404142FF, 0xF2F1EFFF, 0xCFCECBFF, 0xA8A7A4FF, 0x93A1AEFF, 0xA3B1BEFF,
+            0xB9C6D2FF, 0x252D34FF, 0x0E1418FF,
         ],
     ),
 ];
@@ -820,6 +832,24 @@ mod tests {
         assert_eq!(pine.base, rgba_hex(0x202625FF));
         assert_eq!(pine.accent, rgba_hex(0xE5C066FF));
         assert_eq!(pine.on_accent, rgba_hex(0x231B05FF));
+    }
+
+    /// Gray is the fifth palette: every token comes from the prototype's
+    /// `[data-palette="gray"]` block, so a port that drifts is caught here.
+    #[test]
+    fn gray_matches_the_design_prototype() {
+        assert_eq!(
+            *normalize_ramp(Some("gray")),
+            ramp(
+                "gray",
+                "Gray",
+                [
+                    0x121314FF, 0x161718FF, 0x1A1B1CFF, 0x1F2021FF, 0x272829FF, 0x2E2F30FF,
+                    0x242526FF, 0x2E2F30FF, 0x404142FF, 0xF2F1EFFF, 0xCFCECBFF, 0xA8A7A4FF,
+                    0x93A1AEFF, 0xA3B1BEFF, 0xB9C6D2FF, 0x252D34FF, 0x0E1418FF,
+                ],
+            )
+        );
     }
 
     #[test]
