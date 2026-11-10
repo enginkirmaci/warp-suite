@@ -170,11 +170,13 @@ impl Engine {
         }
     }
 
-    /// Returns true when the overlays were hidden and have just been shown;
-    /// the .NET app skips zone selection for that move.
-    fn show_overlays_if_needed(&mut self) -> bool {
+    /// Shows the overlays on the first move after drag detection, then leaves
+    /// them up. Selection runs on that same move: the hit test is arithmetic
+    /// and does not need the windows to exist first, and skipping it lost the
+    /// target when the pointer stopped on a zone and was released at once.
+    fn show_overlays_if_needed(&mut self) {
         if self.overlays.iter().all(Overlay::is_visible) {
-            return false;
+            return;
         }
 
         for index in 0..self.overlays.len() {
@@ -187,8 +189,6 @@ impl Engine {
             }
             self.overlays[index].show();
         }
-
-        true
     }
 
     fn paint_overlay(&mut self, index: usize) {
@@ -258,10 +258,7 @@ impl Engine {
             return;
         }
 
-        if self.show_overlays_if_needed() {
-            return;
-        }
-
+        self.show_overlays_if_needed();
         self.select(point);
     }
 
@@ -317,7 +314,12 @@ impl Engine {
                 continue;
             }
 
-            if let Some(zone) = overlay.hit_test(point.0, point.1) {
+            let current = match self.hover {
+                Some((hovered, _)) if hovered == index => Some(index),
+                _ => None,
+            };
+
+            if let Some(zone) = overlay.hit_test(point.0, point.1, current) {
                 if let Some(rect) = overlay.target(zone) {
                     found = Some((index, zone, rect, overlay.monitor.dpi));
                 }
@@ -344,6 +346,13 @@ impl Engine {
     fn drag_end(&mut self, was_left: bool) {
         if !self.drag.listening {
             return;
+        }
+
+        // Mouse moves are coalesced, so the last position the engine saw can
+        // be older than the release point. Resolve the drop at the latest
+        // pointer position before committing the target.
+        if self.drag.detected && self.overlays.iter().any(Overlay::is_visible) {
+            self.select(self.runtime.latest_point());
         }
 
         let active = self.drag.active.take();

@@ -79,6 +79,11 @@ impl Rect {
         self.bottom - self.top
     }
 
+    /// The centre of the rectangle, rounded down.
+    pub fn center(self) -> (i32, i32) {
+        (self.left + self.width() / 2, self.top + self.height() / 2)
+    }
+
     pub fn is_empty(self) -> bool {
         self.right <= self.left || self.bottom <= self.top
     }
