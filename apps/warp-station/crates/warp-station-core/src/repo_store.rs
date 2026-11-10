@@ -39,6 +39,9 @@ pub struct CachedRepo {
     pub git_has_remote: bool,
     pub git_branch_published: bool,
     pub git_status_loaded: bool,
+    /// The GitHub page the probe derived from `remote.origin.url`, so the
+    /// first frame after a launch already has the link the probe would fill.
+    pub github_web_url: Option<String>,
     /// The last GitHub pass's counts, restored alongside the git status.
     pub github_pr_count: u32,
     pub github_issue_count: u32,
@@ -82,6 +85,9 @@ pub struct RepoEntry {
     pub git_has_remote: bool,
     pub git_branch_published: bool,
     pub git_status_loaded: bool,
+    /// Transient, like the rest of the git status: the origin remote's GitHub
+    /// page, filled by the status probe (not a user setting).
+    pub github_web_url: Option<String>,
     /// Open pull requests / issues from the GitHub pass (wave 4 fills these).
     pub github_pr_count: u32,
     pub github_issue_count: u32,
@@ -156,6 +162,7 @@ fn cache_from_entry(repo: &RepoEntry) -> CachedRepo {
         git_has_remote: repo.git_has_remote,
         git_branch_published: repo.git_branch_published,
         git_status_loaded: repo.git_status_loaded,
+        github_web_url: repo.github_web_url.clone(),
         github_pr_count: repo.github_pr_count,
         github_issue_count: repo.github_issue_count,
         azure_pull_count: repo.azure_pull_count,
@@ -188,6 +195,7 @@ pub fn entry_from_cache(cached: &CachedRepo) -> RepoEntry {
         git_has_remote: cached.git_has_remote,
         git_branch_published: cached.git_branch_published,
         git_status_loaded: cached.git_status_loaded,
+        github_web_url: cached.github_web_url.clone(),
         github_pr_count: cached.github_pr_count,
         github_issue_count: cached.github_issue_count,
         azure_pull_count: cached.azure_pull_count,
@@ -226,6 +234,7 @@ pub fn merge_scan(
             git_has_remote: false,
             git_branch_published: false,
             git_status_loaded: false,
+            github_web_url: None,
             github_pr_count: 0,
             github_issue_count: 0,
             azure_pull_count: 0,
@@ -249,6 +258,7 @@ pub fn merge_scan(
             entry.git_has_remote = prev.git_has_remote;
             entry.git_branch_published = prev.git_branch_published;
             entry.git_status_loaded = prev.git_status_loaded;
+            entry.github_web_url = prev.github_web_url.clone();
             entry.github_pr_count = prev.github_pr_count;
             entry.github_issue_count = prev.github_issue_count;
         }
@@ -281,6 +291,7 @@ pub struct StatusProbe {
     pub last_fetch_at: Option<chrono::DateTime<chrono::Local>>,
     pub has_remote: bool,
     pub branch_on_remote: bool,
+    pub github_web_url: Option<String>,
 }
 
 /// Applies a probe onto an entry; the fetch timestamp is newer-wins (a
@@ -294,6 +305,7 @@ pub fn apply_status_probe(entry: &mut RepoEntry, probe: &StatusProbe) {
     entry.git_last_commit_at = probe.last_commit_at;
     entry.git_has_remote = probe.has_remote;
     entry.git_branch_published = probe.branch_on_remote;
+    entry.github_web_url = probe.github_web_url.clone();
     if let Some(fetch_at) = probe.last_fetch_at
         && entry
             .git_last_fetch_at
@@ -346,6 +358,7 @@ mod tests {
             github_pr_count: 0,
             github_issue_count: 0,
             azure_pull_count: 0,
+            github_web_url: None,
             azure_work_item_count: 0,
         };
         let scanned = ScannedRepo {
@@ -388,6 +401,7 @@ mod tests {
             github_pr_count: 0,
             github_issue_count: 0,
             azure_pull_count: 0,
+            github_web_url: None,
             azure_work_item_count: 0,
         };
         let newer = chrono::Local::now() - chrono::Duration::hours(1);
@@ -429,6 +443,7 @@ mod tests {
             "Tags":[{"Name":"favorites"}],"GitBranchName":"main",
             "GitModifiedCount":7,"GitToPushCount":2,"GitToPullCount":1,
             "GitHasRemote":true,"GitBranchPublished":true,"GitStatusLoaded":true,
+            "GithubWebUrl":"https://github.com/o/r",
             "GithubPrCount":3,"GithubIssueCount":4}]}"#;
         let file = imported(json);
         let entry = entry_from_cache(&file.repos[0]);
@@ -439,6 +454,10 @@ mod tests {
         assert!(entry.git_has_remote);
         assert!(entry.git_branch_published);
         assert!(entry.git_status_loaded);
+        assert_eq!(
+            entry.github_web_url.as_deref(),
+            Some("https://github.com/o/r")
+        );
         assert_eq!(entry.github_pr_count, 3);
         assert_eq!(entry.github_issue_count, 4);
 
@@ -450,6 +469,10 @@ mod tests {
         let back: RepoCacheFile = serde_json::from_str(&out).unwrap();
         let back = entry_from_cache(&back.repos[0]);
         assert_eq!(back.git_modified_count, 7);
+        assert_eq!(
+            back.github_web_url.as_deref(),
+            Some("https://github.com/o/r")
+        );
         assert_eq!(back.github_pr_count, 3);
         assert_eq!(back.github_issue_count, 4);
         assert!(back.git_status_loaded);

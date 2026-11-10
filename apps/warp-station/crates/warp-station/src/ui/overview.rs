@@ -383,7 +383,13 @@ pub(crate) fn popup_menu(
         })
     };
 
-    if let Some(url) = store.selected_github_url() {
+    // a GitHub snapshot names the page once `gh` answers; the probe's own
+    // `remote.origin.url` read fills the gap a repo without `gh` would
+    // otherwise fall into, and it is already on the first frame from the cache
+    if let Some(url) = store
+        .selected_github_url()
+        .or_else(|| repo.github_web_url.clone())
+    {
         let target = entities.clone();
         let page_url = url.clone();
         menu = menu.child(item(
@@ -608,7 +614,7 @@ fn tag_chip(tag: &str, entities: &Entity<Store>, folder: &str) -> AnyElement {
         .pl(px(8.))
         .flex()
         .items_center()
-        .rounded(px(12.))
+        .rounded_full()
         .bg(theme::raised())
         .text_size(px(theme::font_row_meta()))
         .text_color(theme::text_dim())
@@ -1499,7 +1505,7 @@ fn details_section(store: &Store) -> Option<AnyElement> {
                     .px_2()
                     .flex()
                     .items_center()
-                    .rounded(px(12.))
+                    .rounded_full()
                     .bg(theme::raised())
                     .text_size(px(theme::font_row_meta()))
                     .text_color(theme::text_dim())

@@ -256,19 +256,17 @@ impl Render for SummaryPage {
             )
             .child(rows);
 
-        let title = self
-            .selected
-            .as_deref()
-            .map_or_else(|| "Summary".to_string(), day_name);
+        // with nothing selected the list head already names the section: the
+        // detail head carries only the action, not a second title
         let notes_path = self.selected.clone();
-        let mut heading = div().flex_1().min_w_0().flex().flex_col().child(
-            div()
-                .text_size(px(theme::font_screen_title()))
-                .font_weight(FontWeight::SEMIBOLD)
-                .text_color(theme::text())
-                .child(title),
-        );
-        if let Some(path) = self.selected.as_deref() {
+        let heading = self.selected.as_deref().map(|path| {
+            let mut heading = div().flex_1().min_w_0().flex().flex_col().child(
+                div()
+                    .text_size(px(theme::font_screen_title()))
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .text_color(theme::text())
+                    .child(day_name(path)),
+            );
             heading = heading.child(
                 div()
                     .mt_0p5()
@@ -280,7 +278,8 @@ impl Render for SummaryPage {
                     .text_color(theme::text_muted())
                     .child(format!("Summaries/{}", file_name(path))),
             );
-        }
+            heading
+        });
         let head = div()
             .flex_shrink_0()
             .flex()
@@ -291,7 +290,7 @@ impl Render for SummaryPage {
             .py_4()
             .border_b_1()
             .border_color(theme::hairline())
-            .child(heading)
+            .child(heading.unwrap_or_else(|| div().flex_1()))
             .when_some(notes_path, |row, path| {
                 let store = self.store.clone();
                 row.child(

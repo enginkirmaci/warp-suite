@@ -28,8 +28,9 @@ const PATCH_TRUNCATION_SUFFIX: &str = "\n… (patch truncated)";
 
 /// One repo's status probe: branch, change count, ahead/behind vs the upstream
 /// as of the last fetch, the last commit's committer time, whether any remote
-/// is configured, and whether the current branch has a remote-tracking
-/// counterpart (the publish affordance's gate).
+/// is configured, whether the current branch has a remote-tracking
+/// counterpart (the publish affordance's gate), and the GitHub page its
+/// `origin` remote names.
 #[derive(Clone, Debug, Default)]
 pub struct Probe {
     pub branch_name: Option<String>,
@@ -39,6 +40,7 @@ pub struct Probe {
     pub last_commit_at: Option<DateTime<Local>>,
     pub has_remote: bool,
     pub branch_on_remote: bool,
+    pub github_web_url: Option<String>,
 }
 
 pub fn probe(folder: &Path) -> Option<Probe> {
@@ -79,6 +81,11 @@ pub fn probe(folder: &Path) -> Option<Probe> {
             ahead_behind(repo, &resolved)
         };
 
+        let github_web_url = repo
+            .find_remote("origin")
+            .ok()
+            .and_then(|remote| remote.url().ok().and_then(github_web_url_from_remote));
+
         Some(Probe {
             branch_name: Some(branch_name),
             modified_count: modified,
@@ -87,9 +94,76 @@ pub fn probe(folder: &Path) -> Option<Probe> {
             last_commit_at: resolved.peel_to_commit().ok().map(|c| to_local(c.time())),
             has_remote,
             branch_on_remote,
+            github_web_url,
         })
     })
     .flatten()
+}
+
+/// A repository's GitHub web page, derived from its `remote.origin.url`.
+///
+/// Accepts the shapes a clone hands out: the scp-style
+/// `git@github.com:owner/repo.git`, an `https://` or `ssh://` URL with the
+/// same `owner/repo` path, either with a trailing `.git` or `/`. Any other
+/// host — an Azure DevOps remote, say — yields `None` rather than a guessed
+/// page, and so does a path that is not exactly two segments.
+pub fn github_web_url_from_remote(remote: &str) -> Option<String> {
+    let (host, path) = split_remote(remote.trim())?;
+    if !host.eq_ignore_ascii_case("github.com") {
+        return None;
+    }
+    // the clone URL's decorative tail: `.git` and/or a trailing slash
+    let path = path.trim_end_matches('/');
+    let path = path
+        .strip_suffix(".git")
+        .or_else(|| path.strip_suffix(".GIT"))
+        .unwrap_or(path)
+        .trim_end_matches('/');
+    let mut segments = path.split('/').filter(|segment| !segment.is_empty());
+    let owner = segments.next()?;
+    let repo = segments.next()?;
+    if segments.next().is_some() {
+        return None;
+    }
+    let valid = |part: &str| {
+        part != "."
+            && part != ".."
+            && part
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+    };
+    if !valid(owner) || !valid(repo) {
+        return None;
+    }
+    Some(format!("https://github.com/{owner}/{repo}"))
+}
+
+/// Splits a git remote into its host and path: URL forms on `://`, the
+/// scp-style `[user@]host:path` otherwise. A scheme or path shape the parser
+/// does not know yields `None`.
+fn split_remote(remote: &str) -> Option<(&str, &str)> {
+    if remote.is_empty() || remote.contains(char::is_whitespace) {
+        return None;
+    }
+    if let Some((scheme, rest)) = remote.split_once("://") {
+        if !matches!(
+            scheme.to_ascii_lowercase().as_str(),
+            "http" | "https" | "ssh" | "git"
+        ) {
+            return None;
+        }
+        let (authority, path) = rest.split_once('/')?;
+        // a URL authority may carry a user and a port; neither names the page
+        let host = authority.rsplit('@').next()?.split(':').next()?;
+        return Some((host, path));
+    }
+    let (authority, path) = remote.split_once(':')?;
+    // a slash in the authority half is a local path or an unknown scheme
+    if authority.contains('/') {
+        return None;
+    }
+    let host = authority.rsplit('@').next()?;
+    Some((host, path))
 }
 
 /// Ahead/behind of the branch against its upstream, as of the last fetch.
@@ -1123,6 +1197,44 @@ fn cap(content: String, cap: usize, suffix: &str) -> String {
         format!("{head}{suffix}")
     } else {
         content
+    }
+}
+
+#[cfg(test)]
+mod github_remote_tests {
+    use super::*;
+
+    #[test]
+    fn accepts_every_github_remote_shape() {
+        for remote in [
+            "git@github.com:owner/repo.git",
+            "https://github.com/owner/repo.git",
+            "https://github.com/owner/repo",
+            "ssh://git@github.com/owner/repo.git",
+            "https://github.com/owner/repo/",
+            "https://github.com/owner/repo.git/",
+        ] {
+            assert_eq!(
+                github_web_url_from_remote(remote).as_deref(),
+                Some("https://github.com/owner/repo"),
+                "{remote}"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_other_hosts_and_odd_shapes() {
+        for remote in [
+            "git@gitlab.com:owner/repo.git",
+            "https://dev.azure.com/org/proj/_git/repo",
+            "",
+            "github.com",
+            "git@github.com:",
+            "git@github.com:owner",
+            "https://github.com/owner/repo/tree/main",
+        ] {
+            assert_eq!(github_web_url_from_remote(remote), None, "{remote}");
+        }
     }
 }
 

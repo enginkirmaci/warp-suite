@@ -1229,7 +1229,7 @@ impl MainWindow {
                         .min_w_0()
                         .h(px(28.))
                         .px_2p5()
-                        .rounded(px(14.))
+                        .rounded_full()
                         .bg(theme::panel())
                         .flex()
                         .items_center()

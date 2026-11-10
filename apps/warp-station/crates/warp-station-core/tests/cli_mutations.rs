@@ -147,6 +147,38 @@ async fn branch_create_and_checkout() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// The status probe reads the origin remote itself, so the repo menu knows the
+/// GitHub page without `gh` and without waiting for any pass.
+#[test]
+fn probe_reads_the_github_page_from_origin() {
+    let Some(dir) = scratch_repo("gh-url") else {
+        return;
+    };
+    git(
+        &dir,
+        &["remote", "add", "origin", "git@github.com:owner/repo.git"],
+    );
+    let probe = warp_station_core::git::read::probe(&dir).expect("probe");
+    assert_eq!(
+        probe.github_web_url.as_deref(),
+        Some("https://github.com/owner/repo")
+    );
+
+    // Azure keeps its own path: the parser must not invent a GitHub page.
+    git(
+        &dir,
+        &[
+            "remote",
+            "set-url",
+            "origin",
+            "https://dev.azure.com/org/proj/_git/repo",
+        ],
+    );
+    let probe = warp_station_core::git::read::probe(&dir).expect("probe");
+    assert_eq!(probe.github_web_url, None);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// A remote-tracking pick creates (or switches to) its local tracking branch
 /// instead of leaving a detached HEAD; a commit hash still detaches, as the
 /// history drill-down's checkout expects.

@@ -214,7 +214,7 @@ fn group_band(
         .flex()
         .items_center()
         .justify_center()
-        .rounded(px(3.))
+        .rounded(px(4.))
         .hover(|d| d.bg(theme::border_light()))
         .on_click(move |_, _, cx| {
             // the band's own press folds the group

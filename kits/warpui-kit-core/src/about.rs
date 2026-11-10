@@ -380,7 +380,7 @@ pub fn detail(
                 .gap_4()
                 .w_full()
                 .max_w(px(shell::GRID_WIDTH))
-                .child(hero(member, is_current, build, on_link.clone()))
+                .child(hero(member, build, on_link.clone()))
                 .child(
                     div()
                         .flex()
@@ -676,7 +676,7 @@ fn family(member: &SuiteApp, build: &Build) -> String {
     }
 }
 
-fn hero(member: &SuiteApp, is_current: bool, build: &Build, on_link: LinkFn) -> Div {
+fn hero(member: &SuiteApp, build: &Build, on_link: LinkFn) -> Div {
     let mut links = div()
         .flex()
         .flex_row()
@@ -711,8 +711,7 @@ fn hero(member: &SuiteApp, is_current: bool, build: &Build, on_link: LinkFn) -> 
                             .flex_row()
                             .items_center()
                             .gap_2()
-                            .child(tag(build.channel))
-                            .when(is_current, |row| row.child(tag("This app"))),
+                            .child(tag(build.channel)),
                     )
                     .child(
                         div()

@@ -165,7 +165,12 @@ Landed in this pass, with the full gate green (`cargo fmt --all --check`, clippy
 | M3 | menu rows normalised to 32 (the armed remove row keeps its second line) | `ui/overview.rs`, `ui/repos.rs` |
 | M5 | shortcut sheet grouped as Tree / Editor tabs | `ui/notes.rs` |
 | M6 | quick open orders pinned → recent → rest, deduped, with a unit test | `ui/notes.rs` |
-| docs | diff 13/21, dialogs `overlay`/10 + 15/600 title, menu rows 32, running text 15/25 | `docs/agents/design-system.md`, OD `DESIGN.md` |
+| docs | diff 13/21, dialogs `overlay`/10 + 15/600 title, menu rows 32, running text 15/25; the Agent's Running scope documented | `docs/agents/design-system.md`, OD `DESIGN.md` |
+| M4 | the repo ⋯ menu's GitHub rows fall back to the repository's own `remote.origin.url` (scp, https, ssh), so a repo without `gh` keeps Open in GitHub and Copy GitHub URL | `git/read.rs`, `repo_store.rs`, `net.rs`, `ui/overview.rs` |
+| S4 | the Summary detail no longer repeats the section title; an unselected pane shows only the action | `ui/summary.rs` |
+| S5 | the About hero no longer repeats the list row's `This app` tag | `kits/warpui-kit-core/src/about.rs` |
+| S6 | settled toward the app: OD documents the fourth Agent scope (`Running`) | OD `DESIGN.md` |
+| R3/R4 | pills use `rounded_full()`; the 18 px hover square is back on the 4/6/8 grid | `ui/overview.rs`, `ui/window.rs`, `ui/repos_list.rs` |
 
 Two audit entries were withdrawn after checking the prototype: the launcher
 dropdown repeating the "Open in" card (the prototype has both) and the tag
@@ -176,8 +181,6 @@ selected repository the list no longer showed. `ensure_row_selected` now checks
 the projection, the four filter setters reconcile the selection, and an empty
 projection shows the detail's empty state.
 
-Still open (not in this pass): M4 (repo ⋯ menu hides the GitHub entries without
-a remote), I1/I3/I5 (three icon languages, stray stroke weights, three sets),
-R3/R4 (hand-computed pill radii, the 3 px hover square), S4 (Summary title
-twice), S5 ("This app" twice), S6 (Agent's fourth scope chip), S7 (Agent's
-short summary line).
+Still open: I1/I3/I5 (the icon families, their stray strokes and the three
+overlapping sets — in progress), S7 (the Agent's summary line reads `0 open`
+with an empty store rather than the designed three-part shape).

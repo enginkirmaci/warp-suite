@@ -2049,6 +2049,7 @@ fn probe_one_with_seed(
             last_fetch_at: fetch_seed,
             has_remote: p.has_remote,
             branch_on_remote: p.branch_on_remote,
+            github_web_url: p.github_web_url,
         })
         .unwrap_or_else(|| StatusProbe {
             folder_path: folder.to_string_lossy().to_string(),

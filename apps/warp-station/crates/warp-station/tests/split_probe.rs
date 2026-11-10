@@ -28,6 +28,7 @@ fn entry(name: &str, path: &str) -> RepoEntry {
         github_pr_count: 0,
         github_issue_count: 0,
         azure_pull_count: 0,
+        github_web_url: None,
         azure_work_item_count: 0,
     }
 }
@@ -1296,6 +1297,10 @@ fn the_github_rows_wait_for_a_url(cx: &mut TestAppContext) {
         cx.debug_bounds("insp-menu-github").is_none(),
         "no URL yet, no GitHub row"
     );
+    assert!(
+        cx.debug_bounds("insp-menu-copy-url").is_none(),
+        "no URL yet, no copy row"
+    );
 
     cx.update_entity(&store, |s: &mut Store, cx| {
         let snapshot = warp_station_core::github::GitHubSnapshot {
@@ -1317,6 +1322,33 @@ fn the_github_rows_wait_for_a_url(cx: &mut TestAppContext) {
     assert_eq!(
         clipboard_text(cx).as_deref(),
         Some("https://example.invalid/alpha")
+    );
+}
+
+/// The status probe's own read of `remote.origin.url` keeps both GitHub rows
+/// on a repo with no snapshot: a plain GitHub remote and no `gh` must not
+/// lose them.
+#[gpui::test]
+fn the_github_rows_fall_back_to_the_repo_remote(cx: &mut TestAppContext) {
+    let mut alpha = entry("alpha", "/probe/alpha");
+    alpha.github_web_url = Some("https://github.com/owner/repo".into());
+    let (store, _net_rx) = scratch_store(cx, "github-remote", vec![alpha]);
+    let cx = open_window(&store, cx);
+
+    click(cx, "insp-more");
+    assert!(
+        cx.debug_bounds("insp-menu-github").is_some(),
+        "the remote names the page without a snapshot"
+    );
+    assert!(
+        cx.debug_bounds("insp-menu-copy-url").is_some(),
+        "and the copy row follows it"
+    );
+
+    click(cx, "insp-menu-copy-url");
+    assert_eq!(
+        clipboard_text(cx).as_deref(),
+        Some("https://github.com/owner/repo")
     );
 }
 

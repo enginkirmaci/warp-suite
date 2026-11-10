@@ -55,6 +55,7 @@ fn repo() -> RepoEntry {
         github_pr_count: 0,
         github_issue_count: 0,
         azure_pull_count: 0,
+        github_web_url: None,
         azure_work_item_count: 0,
     }
 }

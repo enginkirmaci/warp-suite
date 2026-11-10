@@ -70,6 +70,7 @@ fn changes_view_draws_over_real_data(cx: &mut TestAppContext) {
             github_pr_count: 0,
             github_issue_count: 0,
             azure_pull_count: 0,
+            github_web_url: None,
             azure_work_item_count: 0,
         }]);
         store.select_repo(&here.to_string_lossy(), cx);
@@ -126,6 +127,7 @@ fn history_and_drill_down_draw(cx: &mut TestAppContext) {
             github_pr_count: 0,
             github_issue_count: 0,
             azure_pull_count: 0,
+            github_web_url: None,
             azure_work_item_count: 0,
         }]);
         store.select_repo(&here.to_string_lossy(), cx);
@@ -245,6 +247,7 @@ fn git_verbs_and_commit_follow_the_repo_state(cx: &mut TestAppContext) {
             github_pr_count: 0,
             github_issue_count: 0,
             azure_pull_count: 0,
+            github_web_url: None,
             azure_work_item_count: 0,
         }]);
         store.select_repo("/probe/alpha", cx);
@@ -650,6 +653,7 @@ fn a_failed_generation_disarms_generate_and_commit(cx: &mut TestAppContext) {
             github_pr_count: 0,
             github_issue_count: 0,
             azure_pull_count: 0,
+            github_web_url: None,
             azure_work_item_count: 0,
         }]);
         store.select_repo("/probe/alpha", cx);
@@ -894,6 +898,7 @@ fn branch_delete_gates_on_kind_current_and_two_clicks(cx: &mut TestAppContext) {
             github_pr_count: 0,
             github_issue_count: 0,
             azure_pull_count: 0,
+            github_web_url: None,
             azure_work_item_count: 0,
         }]);
         store.select_repo("/probe/alpha", cx);
@@ -1051,6 +1056,7 @@ fn branch_new_branch_form_creates_and_closes(cx: &mut TestAppContext) {
             github_pr_count: 0,
             github_issue_count: 0,
             azure_pull_count: 0,
+            github_web_url: None,
             azure_work_item_count: 0,
         }]);
         store.select_repo("/probe/alpha", cx);
@@ -1162,6 +1168,7 @@ fn the_history_list_lays_out_only_its_visible_rows(cx: &mut TestAppContext) {
             github_pr_count: 0,
             github_issue_count: 0,
             azure_pull_count: 0,
+            github_web_url: None,
             azure_work_item_count: 0,
         }]);
         store.select_repo(&here.to_string_lossy(), cx);
@@ -1249,6 +1256,7 @@ fn a_queued_generation_offers_its_own_cancel(cx: &mut TestAppContext) {
             github_pr_count: 0,
             github_issue_count: 0,
             azure_pull_count: 0,
+            github_web_url: None,
             azure_work_item_count: 0,
         }
     }
