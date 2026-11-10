@@ -202,7 +202,8 @@ warp-agent's tool tiles. The rules:
   `@@` text.
 - **Split is two aligned columns.** Old file left, new file right; context
   appears on both, a deletion only left, an addition only right, and the side
-  without a row gets a blank filler so the columns never drift. A 1px
+  without a row gets a 45° slash-hatched filler across the whole column, so
+  the gap reads as deliberately empty and the columns never drift. A 1px
   `hairline` divider separates them. The columns split the pane evenly and
   each owns its horizontal viewport and a bar in the pinned footer under the
   body, so a long line on one side never pushes the other side off screen.

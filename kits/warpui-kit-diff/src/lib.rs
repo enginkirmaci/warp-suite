@@ -12,9 +12,10 @@
 //! [`render_diff_with`] chooses the layout. [`DiffMode::Unified`] is the
 //! one-column view above; [`DiffMode::Split`] draws the old file on the left
 //! and the new file on the right, paired row for row, with one shared gutter
-//! width and a blank filler where one side has no row. A multi-file patch
-//! stays unified. Hunk headers are parsed but never drawn: the `-U3` context
-//! is the only gap between hunks, and a selection never carries `@@` lines.
+//! width and a 45° slash-hatched filler where one side has no row. A
+//! multi-file patch stays unified. Hunk headers are parsed but never drawn:
+//! the `-U3` context is the only gap between hunks, and a selection never
+//! carries `@@` lines.
 //!
 //! By default rows never wrap: one row is one line, and the body scrolls
 //! horizontally so a long line keeps its shape. Split puts its two columns in
@@ -80,9 +81,10 @@ use std::sync::Arc;
 
 use gpui::prelude::*;
 use gpui::{
-    AbsoluteLength, AnyElement, App, BorderStyle, Bounds, Corners, Div, Edges, ElementId,
-    HighlightStyle, Hsla, ListAlignment, ListState, PaintQuad, Pixels, ScrollHandle, StyledText,
-    TextStyle, Window, canvas, div, list, point, px, size, transparent_black,
+    AbsoluteLength, AnyElement, App, Background, BorderStyle, Bounds, Corners, Div, Edges,
+    ElementId, HighlightStyle, Hsla, ListAlignment, ListState, PaintQuad, Pixels, ScrollHandle,
+    StyledText, TextStyle, Window, canvas, div, list, pattern_slash, point, px, size,
+    transparent_black,
 };
 
 use warpui_kit_core::fonts;
@@ -232,6 +234,17 @@ pub fn render_document(
         ..Default::default()
     };
     let line_height = line_height_px(&paint_style, window);
+    // The filler hatch's period is half a row, so a wrapped row (always a
+    // whole number of rows tall) lands on the same phase as its neighbour and
+    // consecutive blank rows read as one continuous pattern.
+    let scale = window.scale_factor();
+    let period = (f32::from(line_height) / 2.0).max(2.0);
+    let stripe = (period * 0.15).max(1.0);
+    let fill_hatch = pattern_slash(
+        palette::diff_fill_hatch(),
+        stripe * scale,
+        (period - stripe) * scale,
+    );
 
     let split_file = if options.mode == DiffMode::Split
         && doc.files.len() == 1
@@ -254,6 +267,7 @@ pub fn render_document(
                 number_style,
                 font_detail,
                 scroll,
+                fill_hatch,
             );
         }
         return render_split(
@@ -265,6 +279,7 @@ pub fn render_document(
             line_height,
             font_detail,
             scroll,
+            fill_hatch,
         );
     }
     if options.wrap {
@@ -323,6 +338,7 @@ fn render_unified(
         font_detail,
         &ColumnIds::UNIFIED,
         ColumnWidth::Full,
+        None,
     );
     let body = diff_scroller(
         column.into_any_element(),
@@ -353,6 +369,7 @@ fn render_split(
     line_height: Pixels,
     font_detail: f32,
     scroll: Option<&DiffScrollHandles>,
+    fill_hatch: Background,
 ) -> AnyElement {
     let gutter_width = split_gutter_width(&doc.files[0]);
     let paint = RowPaint {
@@ -371,6 +388,7 @@ fn render_split(
         font_detail,
         &ColumnIds::LEFT,
         ColumnWidth::Split,
+        Some(fill_hatch),
     );
     let right = render_column(
         right,
@@ -379,6 +397,7 @@ fn render_split(
         font_detail,
         &ColumnIds::RIGHT,
         ColumnWidth::Split,
+        Some(fill_hatch),
     );
     let body = div()
         .debug_selector(|| "diff-split".into())
@@ -528,6 +547,10 @@ fn render_unified_wrapped(
 /// The wrapped split body. A row's two cells are siblings of the same flex
 /// row, so the row is as tall as its taller wrapped side and the next row
 /// starts on the same line for both columns.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the render call carries the theme, paint, scroll and filler inputs"
+)]
 fn render_split_wrapped(
     file: &DiffFile,
     language: Option<&'static str>,
@@ -536,6 +559,7 @@ fn render_split_wrapped(
     number_style: HighlightStyle,
     font_detail: f32,
     scroll: Option<&DiffScrollHandles>,
+    fill_hatch: Background,
 ) -> AnyElement {
     let (left, right) = split_lines(file, language, hl_theme);
     if left.is_empty() {
@@ -547,7 +571,7 @@ fn render_split_wrapped(
         gutter_width: split_gutter_width(file),
     };
     if let Some(scroll) = scroll {
-        return render_split_wrapped_list(left, right, paint, font_detail, scroll);
+        return render_split_wrapped_list(left, right, paint, font_detail, scroll, fill_hatch);
     }
     let mut body = div()
         .debug_selector(|| "diff-wrap-body".into())
@@ -561,6 +585,7 @@ fn render_split_wrapped(
             &paint,
             font_detail,
             index,
+            fill_hatch,
         ));
     }
     wrapped_frame(body.into_any_element(), font_detail).into_any_element()
@@ -593,6 +618,7 @@ fn render_split_wrapped_list(
     paint: RowPaint,
     font_detail: f32,
     scroll: &DiffScrollHandles,
+    fill_hatch: Background,
 ) -> AnyElement {
     let key = wrapped_key(2, font_detail, &[&left, &right]);
     let state = wrap_list_state(scroll, key, left.len());
@@ -600,8 +626,15 @@ fn render_split_wrapped_list(
     let right = Rc::new(right);
     let item_paint = paint.clone();
     wrap_list_frame(state, font_detail, move |index, _, _| {
-        wrapped_split_row(&left[index], &right[index], &item_paint, font_detail, index)
-            .into_any_element()
+        wrapped_split_row(
+            &left[index],
+            &right[index],
+            &item_paint,
+            font_detail,
+            index,
+            fill_hatch,
+        )
+        .into_any_element()
     })
 }
 
@@ -681,7 +714,7 @@ fn wrapped_row(line: &Line, paint: &RowPaint, font_detail: f32, index: usize) ->
         .flex()
         .flex_row()
         .items_stretch()
-        .child(wrapped_cell(line, paint, font_detail, index, "u").w_full())
+        .child(wrapped_cell(line, paint, font_detail, index, "u", None).w_full())
 }
 
 fn wrapped_split_row(
@@ -690,6 +723,7 @@ fn wrapped_split_row(
     paint: &RowPaint,
     font_detail: f32,
     index: usize,
+    fill_hatch: Background,
 ) -> Div {
     div()
         .w_full()
@@ -697,13 +731,13 @@ fn wrapped_split_row(
         .flex_row()
         .items_stretch()
         .child(
-            wrapped_cell(left, paint, font_detail, index, "l")
+            wrapped_cell(left, paint, font_detail, index, "l", Some(fill_hatch))
                 .flex_1()
                 .min_w_0(),
         )
         .child(div().flex_shrink_0().w(px(1.)).bg(palette::hairline()))
         .child(
-            wrapped_cell(right, paint, font_detail, index, "r")
+            wrapped_cell(right, paint, font_detail, index, "r", Some(fill_hatch))
                 .flex_1()
                 .min_w_0(),
         )
@@ -719,6 +753,7 @@ fn wrapped_cell(
     font_detail: f32,
     row_index: usize,
     side: &'static str,
+    fill_hatch: Option<Background>,
 ) -> Div {
     let wash = line_wash(line.kind);
     let gutter_text = match line.kind {
@@ -795,12 +830,16 @@ fn wrapped_cell(
                 .pl_2()
                 .child(selectable),
         );
-    div()
+    let cell = div()
         .flex()
         .flex_row()
         .items_stretch()
         .child(gutter)
-        .child(code)
+        .child(code);
+    match (line.kind, fill_hatch) {
+        (LineKind::Fill, Some(hatch)) => cell.bg(hatch),
+        _ => cell,
+    }
 }
 
 /// One split column's viewport. The column body keeps at least the viewport's
@@ -828,7 +867,8 @@ fn column_viewport(
 }
 
 /// One column of a diff body: the gutter, the selectable code text, and the
-/// canvas that paints every row's wash. Unified has one; split has two.
+/// canvas that paints every row's wash. Unified has one; split has two. Split
+/// also passes the `hatch` it lays under an unpaired row's whole side.
 fn render_column(
     lines: Vec<Line>,
     paint: &RowPaint,
@@ -836,6 +876,7 @@ fn render_column(
     font_detail: f32,
     ids: &'static ColumnIds,
     width: ColumnWidth,
+    hatch: Option<Background>,
 ) -> Div {
     // One buffer for the whole column: selection and copy work across lines
     // only when the text is one laid-out run.
@@ -965,12 +1006,32 @@ fn render_column(
 
     let body = div()
         .debug_selector(move || ids.body.into())
+        .relative()
         .flex()
         .flex_row();
-    let body = match width {
+    let mut body = match width {
         ColumnWidth::Full => body.flex_shrink_0().min_w_full(),
         ColumnWidth::Split => body.flex_shrink_0().min_w_full(),
     };
+
+    // A row with no line on this side is filler, and the whole side reads as
+    // deliberately empty only when the hatch runs unbroken across the run.
+    // One element per run, behind the two text cells.
+    if let Some(hatch) = hatch {
+        let runs = fill_runs(&lines);
+        for (index, run) in runs.iter().enumerate() {
+            body = body.child(
+                div()
+                    .debug_selector(move || format!("{}-{index}", ids.fill))
+                    .absolute()
+                    .left_0()
+                    .right_0()
+                    .top(line_height * run.start as f32)
+                    .h(line_height * run.len() as f32)
+                    .bg(hatch),
+            );
+        }
+    }
 
     // The code column holds the one selectable text; the canvases sit behind
     // it and behind the gutter.
@@ -1059,6 +1120,7 @@ enum ColumnWidth {
 /// selection participants and two sets of probe selectors.
 struct ColumnIds {
     body: &'static str,
+    fill: &'static str,
     viewport: &'static str,
     gutter: &'static str,
     code: &'static str,
@@ -1069,6 +1131,7 @@ struct ColumnIds {
 impl ColumnIds {
     const UNIFIED: Self = Self {
         body: "diff-body",
+        fill: "diff-fill",
         viewport: "diff-viewport",
         gutter: "diff-gutter",
         code: "diff-code-column",
@@ -1077,6 +1140,7 @@ impl ColumnIds {
     };
     const LEFT: Self = Self {
         body: "diff-left-body",
+        fill: "diff-left-fill",
         viewport: "diff-left-viewport",
         gutter: "diff-left-gutter",
         code: "diff-left-code-column",
@@ -1085,6 +1149,7 @@ impl ColumnIds {
     };
     const RIGHT: Self = Self {
         body: "diff-right-body",
+        fill: "diff-right-fill",
         viewport: "diff-right-viewport",
         gutter: "diff-right-gutter",
         code: "diff-right-code-column",
@@ -1268,8 +1333,9 @@ impl Line {
         }
     }
 
-    /// The empty side of an unpaired split row. A non-breaking space keeps the
-    /// line height even when the filler is the last row.
+    /// The empty side of an unpaired split row. The column lays the hatch
+    /// behind it; a non-breaking space keeps the line height even when the
+    /// filler is the last row.
     fn fill() -> Self {
         Self {
             text: "\u{00a0}".to_string(),
@@ -1373,6 +1439,23 @@ fn line_wash(kind: LineKind) -> RowWash {
             content: None,
         },
     }
+}
+
+/// The runs of filler rows in one split column. Each run is one hatch
+/// element, so the 45° pattern runs unbroken from the first blank row to the
+/// last instead of restarting at every row.
+fn fill_runs(lines: &[Line]) -> Vec<Range<usize>> {
+    let mut runs: Vec<Range<usize>> = Vec::new();
+    for (index, line) in lines.iter().enumerate() {
+        if !matches!(line.kind, LineKind::Fill) {
+            continue;
+        }
+        match runs.last_mut() {
+            Some(run) if run.end == index => run.end = index + 1,
+            _ => runs.push(index..index + 1),
+        }
+    }
+    runs
 }
 
 fn paint_spot(window: &mut Window, bounds: Bounds<Pixels>, color: Hsla) {
@@ -1674,5 +1757,17 @@ mod tests {
         // prose with a stray tab stays untouched
         assert_eq!(strip_line_numbers(&["col1\tcol2", "col3\tcol4"]), None);
         assert_eq!(strip_line_numbers(&["just one line\t1"]), None);
+    }
+
+    #[test]
+    fn fill_runs_group_consecutive_fillers() {
+        let lines = [
+            Line::fill(),
+            Line::fill(),
+            Line::state("break"),
+            Line::fill(),
+        ];
+        assert_eq!(fill_runs(&lines), vec![0..2, 3..4]);
+        assert!(fill_runs(&[Line::state("all code")]).is_empty());
     }
 }

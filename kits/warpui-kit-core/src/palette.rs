@@ -613,6 +613,15 @@ pub fn hover_bg() -> Rgba {
 pub fn selected() -> Rgba {
     current_ramp().raised
 }
+/// The filler on the side of a split diff row with no line: the live muted
+/// ink at a low alpha, laid in a 45° slash pattern. It says "no line here"
+/// without reading as a change wash.
+pub fn diff_fill_hatch() -> Hsla {
+    Hsla {
+        a: 0.28,
+        ..text_faint().into()
+    }
+}
 
 #[cfg(test)]
 mod tests {

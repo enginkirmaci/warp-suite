@@ -168,6 +168,66 @@ fn an_unpaired_row_leaves_a_filler(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::gpui::test]
+fn an_unpaired_row_gets_a_hatch_filler(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+    cx.update(apply_theme);
+
+    with_host(cx, FILLER.to_string(), 1000., |vcx| {
+        let right_gutter = bounds(vcx, "diff-right-gutter");
+        let right_text = bounds(vcx, "diff-right-text");
+        let right_body = bounds(vcx, "diff-right-body");
+        let row_height = right_text.size.height / 4.;
+        let fill = bounds(vcx, "diff-right-fill-0");
+
+        assert_eq!(
+            fill.origin.x, right_gutter.origin.x,
+            "the hatch starts at the column's leading edge, gutter included"
+        );
+        assert_eq!(
+            fill.size.width, right_body.size.width,
+            "and spans the whole empty column"
+        );
+        assert_eq!(
+            fill.origin.y,
+            right_text.origin.y + row_height * 2.,
+            "it sits on the row whose line only exists on the left"
+        );
+        assert_eq!(
+            fill.size.height, row_height,
+            "one unpaired row is one hatch band"
+        );
+        assert!(
+            vcx.debug_bounds("diff-left-fill-0").is_none(),
+            "the side that has the line needs no filler"
+        );
+    });
+}
+
+#[gpui_kit::gpui::test]
+fn consecutive_fillers_are_one_hatch_run(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+    cx.update(apply_theme);
+
+    // one deletion against three additions: the left column has two blank
+    // rows in a row, and the hatch must not restart between them.
+    let patch = "--- a/x.rs\n+++ b/x.rs\n@@ -1,2 +1,4 @@\n a\n-b\n+c\n+d\n+e\n";
+    with_host(cx, patch.to_string(), 1000., |vcx| {
+        let left_text = bounds(vcx, "diff-left-text");
+        let row_height = left_text.size.height / 4.;
+        let fill = bounds(vcx, "diff-left-fill-0");
+        assert_eq!(
+            fill.size.height,
+            row_height * 2.,
+            "consecutive filler rows share one hatch band"
+        );
+        assert!(
+            vcx.debug_bounds("diff-left-fill-1").is_none(),
+            "the run is not split into a band per row"
+        );
+    });
+}
+
+#[gpui_kit::gpui::test]
 fn a_trailing_filler_keeps_its_row(cx: &mut TestAppContext) {
     cx.update(gpui_kit::init);
     cx.update(apply_theme);

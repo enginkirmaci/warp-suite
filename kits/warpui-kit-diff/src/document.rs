@@ -57,7 +57,8 @@ impl DiffRow {
 /// One row of the split view: indices into [`DiffHunk::rows`] for each side.
 /// A context row appears on both sides; a deletion only on the left and an
 /// addition only on the right. An unpaired change leaves one side `None`; the
-/// renderer draws a blank filler there so the two columns stay aligned.
+/// renderer draws a slash-hatched filler there so the two columns stay
+/// aligned and the gap reads as deliberate.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SplitRow {
     pub left: Option<usize>,
