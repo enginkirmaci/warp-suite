@@ -19,7 +19,7 @@ Rust bridge is a workspace member.
 | warp-agent | `warp-agent` | `apps/warp-agent/` | Chat client over `opencode serve` and `dsh web` (Rust/GPUI) |
 | warp-snapit | `warp-snapit` | `apps/warp-snapit/` | Windows-only zone snapper (Win32, no GPUI/kit) |
 | warp-notes | `warp-notes` | `apps/warp-notes/` | Per-repo markdown notes with a live editor (Rust/GPUI) |
-| warp-android-scribe | `warp-android-scribe-bridge` | `android-apps/warp-android-scribe/` | Android dictation IME with a full QWERTY keyboard over Superwhisper S1-Voice (Kotlin/Compose + Rust bridge) |
+| warp-android-scribe | `warp-android-scribe-bridge` | `android-apps/warp-android-scribe/` | Android dictation IME with a full QWERTY keyboard over Superwhisper or Hex (Kotlin/Compose + Rust bridge) |
 
 ## Before you edit
 
@@ -200,10 +200,16 @@ when one side changes, update the other side in the **same commit**.
 - **warp-android-scribe bridge** (`android-apps/warp-android-scribe`): LAN
   `http://<nas-lan>:8787` (UFW `<nas-subnet>`) and public
   `https://<nas-host>` through Cloudflare Tunnel -> Nginx Proxy
-  Manager -> 8787. `POST /transcribe?lang=tr|auto&tone=formal|casual|…` with
-  raw `audio/wav` and `Authorization: Bearer <token>` answers
+  Manager -> 8787. `POST /transcribe?engine=hex|superwhisper&lang=tr|auto&tone=…`
+  with raw `audio/wav` and `Authorization: Bearer <token>` answers
   `{"text","language","duration"}`; `GET /health` is the phone's token-checked
-  server test. `GET /settings` returns the Superwhisper profile (language
+  server test and `GET /engines` reports the two engines, their readiness and
+  the default. Superwhisper keeps its CLI flow (transcribe → poll `status` for
+  the same session id → text) and its profile endpoints; Hex is
+  `hex model transcribe --model whisper_large_v3_turbo --language …`, one call
+  per request with no profile, and the phone's tone is ignored for it. The
+  phone picks the engine per request, so both must keep working.
+  `GET /settings` returns the Superwhisper profile (language
   list, tone, vocabulary, processing modes and download progress),
   `PUT /settings/vocabulary` replaces the word/replacement lists, and
   `POST /settings/processing` selects Cloud/Offline/Offline Lite and downloads
@@ -272,12 +278,13 @@ when one side changes, update the other side in the **same commit**.
 - Warp Station's `changes_probe` and `git_parity` read this repository's own
   git history; CI checks that job out with `fetch-depth: 0`. Do not shallow-
   clone it locally.
-- The Android bridge has three integration probes: `api_probe` (auth, limits,
-  temp-file cleanup, gateway errors), `settings_probe` (a fake `superwhisper`
-  shell script for the profile, vocabulary diff and processing download) and
-  `superwhisper_cli_probe` (session polling, refusal, warming retry, timeout).
-  The Android Gradle project has no CI job; build it locally with
-  `assembleDebug`.
+- The Android bridge has four integration probes: `api_probe` (auth, limits,
+  temp-file cleanup, engine routing, gateway errors), `settings_probe` (a fake
+  `superwhisper` shell script for the profile, vocabulary diff and processing
+  download), `superwhisper_cli_probe` (session polling, refusal, warming retry,
+  timeout) and `hex_cli_probe` (the Hex argument line, language narrowing, exit
+  4, refusal, timeout). The Android Gradle project has no CI job; build it
+  locally with `assembleDebug`.
 
 ## Platform rules
 
