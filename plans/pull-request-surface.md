@@ -1,13 +1,15 @@
 # The pull-request surface
 
-Status: in progress. Phases 1–5 landed (core data, net/store, the workbench, the
+Status: built. Phases 1–5 landed (core data, net/store, the workbench, the
 pull request's own three tabs and its verbs, the embedded New pull request
-form), plus the Issues workbench and the Files rail stacking. Open: the Azure
-pull-request detail, blocked on the merged list another plan owns, and the
-Pipelines detail, which has no data to draw. The design source is the OpenDesign
-project `warp-suite-v3` — `DESIGN.md` §5 "Work lists", "Pull requests tab",
-"Pull request", "New pull request", "Issues tab" — and the prototype's
-`prList`, `prDetail`, `newPrView` and `issueDetail`.
+form), plus the Issues workbench, the Files rail stacking, the Azure
+pull-request detail and the Pipelines run detail. What the GitHub list still
+lacks is the GitHub+Azure union, which belongs to
+`plans/azure-github-activity-merge.md`; the Azure rows keep their own card in
+the Pipelines tab until that lands. The design source is the OpenDesign project
+`warp-suite-v3` — `DESIGN.md` §5 "Work lists", "Pull requests tab", "Pull
+request", "New pull request", "Issues tab" — and the prototype's `prList`,
+`prDetail`, `newPrView`, `issueDetail`, `runDetail` and `pipelines`.
 
 ## 1. What the design asks for, and what the app had
 
@@ -108,6 +110,53 @@ replaced the whole detail pane with the pull request and had no list beside it.
   The workbench's column is under that on any window narrower than ~1728 px
   (`window − rail − list − 320`), so this is the common case, not the edge.
 
+- **D16 — an Azure pull request opens from the Pipelines tab.** The union list
+  owns the Pull requests tab, so the Azure rows the app already has stay where
+  they are: under the runs, in the Pipelines tab's column. A press opens the
+  detail in that tab's detail column, over the run detail, and Back returns to
+  the runs. The pane is the same shape as D1–D9, with Azure's own data and
+  verbs behind it: state pill Active/Completed/Abandoned, review split
+  Approve/Decline (a vote), primary Complete / Set auto-complete /
+  Auto-complete set / Reopen, Abandon through the page's card.
+- **D17 — Azure hands out no patch with its change list.** A file's diff is a
+  second call per file (`items?path=…&includeContent=true` on both branches)
+  and a whole-file unified diff built in core: one hunk with three lines of
+  context, capped at 1200 lines a side, and an empty diff when the two texts
+  match. The Files rail says "Reading the file…" until that second call
+  answers, and "No textual changes" when the file is binary or empty — it never
+  pretends to a patch it does not have. Line counts are therefore absent from
+  the Azure subtitle and the rail, which is a deliberate difference from the
+  GitHub pane.
+- **D18 — a verb never guesses what the server did.** A vote, complete, abandon
+  or auto-complete sends one REST request, and its answer reloads the record
+  rather than patching the local copy: the head's buttons stay dead while
+  `acting`, and the pane re-reads the pull request on success. A failure shows
+  Azure's own message (the JSON envelope's `message`), not a generic toast.
+- **D19 — completing arms on the first press.** D8's idiom, for the same
+  reason: a completion cannot be taken back from the app. Abandon keeps the
+  page's confirmation card, its own state (`confirm_azure_abandon`), and
+  Azure's word for the outcome ("It moves to Abandoned. You can reopen it
+  later.").
+- **D20 — the Pipelines tab is the design's workbench too.** A 320 run list
+  (state glyph, pipeline and run number, branch, state word, age, `Azure` tag),
+  a hairline, then the selected run: head with the state pill and one `Open
+  run` primary, subtitle with branch, short commit and tag, a 44 strip with
+  state, start, duration and trigger, one card per stage with job rows, and the
+  log's tail in a card. The first run is selected above 900 px of pane; below
+  it the list and the run take turns with Back/Escape, exactly like D1–D3 and
+  D13.
+- **D21 — the run's stage and log data is two calls, asked once.** `builds/{id}/timeline`
+  carries the stage and job records; `builds/{id}/logs` lists the entries and
+  the last one's text is the excerpt (capped at 8 kB, cut on a line boundary).
+  A timeline groups jobs under their stage by walking up the parent chain, so a
+  multi-config phase in between still files the job under its stage; tasks are
+  not job rows. The detail asks once per run and keeps the answer.
+- **D22 — the Azure items keep a home.** A repository with no runs still gets
+  the tab, the run column's "Nothing has run yet", and the project's pull
+  requests and work items under it in the same column. They are the only entry
+  to an Azure item until the union list lands, so they are not hidden behind an
+  empty state.
+
 ## 3. What landed
 
 - `warp-station-core/src/github.rs`: `GitHubFilePatch`, `GitHubCommit`,
@@ -152,54 +201,46 @@ replaced the whole detail pane with the pull request and had no list beside it.
 - `tests/split_probe.rs`: three probes — the Issues workbench and its lazy ask,
   the narrow issue pane's Back, and the rail stacking at 1920 px and 1500 px.
 
+- `warp-station-core/src/azure.rs`: `PipelineRun`'s `source_version`, `reason`,
+  `start`, `finish` with `state_word`, `trigger_word` and `short_source`;
+  `RunJob`, `RunStage`, `RunDetail`, `run_detail`, `parse_timeline`,
+  `duration_between`; `AzurePull`, `AzureReviewer`, `AzurePolicy`,
+  `AzureThread`, `AzureCommit`, `AzureFile`, `AzurePullDetail`,
+  `AzurePullAction`, `pull_detail`, `pull_files`, `pull_commits`,
+  `pull_file_diff`, `pull_action`, the parsers and `unified_diff` (the
+  whole-file diff). Nineteen unit tests.
+- `net.rs`: `AzureRunDetail` and the four `AzurePull*` commands with their
+  events, all on the read intake so a detail never queues behind a pass.
+- `store/mod.rs`: `OpenRun`, `open_run` / `close_run` / `load_run_detail`;
+  `OpenAzurePull`, `open_azure_pull` / `close_azure_pull`, the lazy
+  `load_azure_pull` / `load_azure_pull_files` / `load_azure_pull_commits` /
+  `load_azure_pull_diff`, `act_on_azure_pull`, and the
+  `ask_abandon_azure` / `cancel_abandon_azure` / `confirm_abandon_azure` set.
+- `ui/azure_tab.rs`: the Pipelines workbench — the run list, its rows, the run
+  detail with its stage cards and log card, and the project's item groups.
+- `ui/azure_pull.rs`: `AzurePullView` — head, strip, Overview (policies,
+  description, comments, reviewers), Files (rail + diff, stacked under 900 px),
+  Commits, and the two menus.
+- `ui/dialogs.rs`, `ui/repos.rs`, `ui/detail.rs`: the Azure abandon card, its
+  Escape order, the tab's dismiss and the view's construction.
+- `tests/azure_probe.rs`: seven probes — the run workbench and its lazy ask,
+  a repository without runs, the Azure head/Overview, the Files tab's two asks,
+  every verb, completing in two presses, and the narrow pane's Back.
+
 ## 4. Open work
 
-1. **Azure pull requests — reported, not built.** The design wants an Azure
-   pull request in the same pane, and the app cannot reach one: the Pull
-   requests list carries GitHub rows only, so nothing selects an Azure PR. The
-   union list (the `!214` reference and the `Source` tag) belongs to
-   `plans/azure-github-activity-merge.md`, which is another session's untracked
-   work; this plan does not own it and does not implement it.
-
-   What the client needs once the list exists, per pull request:
-   - **The record:** `GET {base}/{project}/_apis/git/repositories/{repo}/pullrequests/{id}?api-version=7.1`
-     for state (`active`/`completed`/`abandoned`), title, `sourceRefName` →
-     `targetRefName`, `isDraft`, `mergeStatus`, `createdBy`, `creationDate`,
-     `closedDate`, `lastMergeSourceCommit`.
-   - **Policies:** `.../pullrequests/{id}/evaluations?api-version=7.1` for the
-     checklist — required reviewers, build validation, merge conflicts — which
-     is the Azure spelling of the policy card's rows.
-   - **Reviewers:** `.../pullrequests/{id}/reviewers` for the vote
-     (`10` approved, `5` approved with suggestions, `0` no vote, `-5` waiting,
-     `-10` rejected) and the required/optional flag.
-   - **Files and commits:** `.../pullrequests/{id}/iterations` then
-     `.../iterations/{n}/changes` for the changed files, and
-     `.../pullrequests/{id}/commits` for the commit list; Azure returns no patch
-     text with the change list, so a file's diff is a second call per file
-     (`.../items?path=…&includeContent=true` on both sides) or a `git diff`
-     against the fetched refs.
-   - **Threads:** `.../pullrequests/{id}/threads` for comments, each with its
-     `status` (`active`, `fixed`, `wontFix`, `closed`) — the "comments must be
-     resolved" policy row reads from here.
-   - **Verbs:** reviewer vote `PUT .../reviewers/{reviewerId}`;
-     `PATCH .../pullrequests/{id}` with `status: "completed"` +
-     `lastMergeSourceCommit` + `completionOptions` to complete,
-     `status: "abandoned"` to abandon, `status: "active"` to reopen; and
-     `PUT .../pullrequests/{id}/autocomplete` to arm auto-complete. Approve and
-     decline are votes, not `gh pr review`.
-   - **The pane:** the design's Azure primary is `Set auto-complete` /
-     `Complete` / `Auto-complete set`, the state pill reads Active/Completed/
-     Abandoned, and the review menu is Approve/Decline rather than
-     Approve/Request changes. Everything else — the workbench, the strip, the
-     cards — is the GitHub view's shape with a second data source behind it.
-
-2. **Pipelines — reported, not built.** Its design detail (stages with job rows,
-   a log excerpt, the run's trigger and duration, one `Open run` primary) needs
-   data neither snapshot carries: the Azure snapshot has runs but no stages,
-   jobs or logs, and the GitHub snapshot has no Actions runs at all — `gh run
-   list` is a different plan's work (`plans/azure-github-activity-merge.md`,
-   D2). Until that lands, the tab keeps the shape it has rather than a detail
-   that would be empty.
-
-3. Delete this plan when 1–2 land, or fold the durable parts into
-   `apps/warp-station/AGENTS.md`.
+1. **The GitHub+Azure union list.** The Azure rows have a detail now, but the
+   Pull requests tab still lists GitHub rows only; the `!214` reference and the
+   `Source` tag in one merged list belong to
+   `plans/azure-github-activity-merge.md`, another session's plan. This plan
+   does not own it. When it lands, the Azure row's click points at
+   `Store::open_azure_pull` and the Pipelines card can shrink to a count.
+2. **GitHub Actions runs.** The Pipelines detail draws Azure's runs; a GitHub
+   repository has no run list yet (`gh run list` is that other plan's D2). The
+   tab's empty state for a GitHub repo is the honest shape until then.
+3. **Azure's `+adds −dels`.** Azure serves no line counts with its change list;
+   the counts the GitHub subtitle carries are absent on Azure (D17). Filling
+   them means diffing every file on open, which is the one thing the pane
+   deliberately does not do up front.
+4. Fold what is durable into `apps/warp-station/AGENTS.md` or delete this plan
+   once 1–3 are decided.

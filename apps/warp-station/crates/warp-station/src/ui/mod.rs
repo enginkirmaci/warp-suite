@@ -1,5 +1,6 @@
 //! ui module: shared helpers + the main window.
 
+pub mod azure_pull;
 pub mod azure_tab;
 pub mod changes;
 pub mod clipboard_password;

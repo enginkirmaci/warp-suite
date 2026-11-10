@@ -4,6 +4,7 @@
 
 use crate::store::{Store, WorkspaceTab};
 use crate::theme;
+use crate::ui::azure_pull::AzurePullView;
 use crate::ui::azure_tab::AzureView;
 use crate::ui::changes::ChangesView;
 use crate::ui::issue_detail::IssueDetailView;
@@ -34,6 +35,7 @@ impl DetailViews {
     pub fn new(store: &Entity<Store>, window: &mut Window, cx: &mut Context<ReposPage>) -> Self {
         let pull = cx.new(|cx| PullRequestView::new(store.clone(), window, cx));
         let new_pull = cx.new(|cx| NewPullView::new(store.clone(), window, cx));
+        let azure_pull = cx.new(|cx| AzurePullView::new(store.clone(), cx));
         let issue_detail = cx.new(|cx| IssueDetailView::new(store.clone(), cx));
         Self {
             changes: cx.new(|cx| ChangesView::new(store.clone(), window, cx)),
@@ -59,9 +61,7 @@ impl DetailViews {
                     cx,
                 )
             }),
-            pipelines: cx.new(|_| AzureView {
-                store: store.clone(),
-            }),
+            pipelines: cx.new(|cx| AzureView::new(store.clone(), azure_pull, cx)),
             readme: cx.new(|cx| ReadmeView::new(store.clone(), cx)),
         }
     }
@@ -69,12 +69,12 @@ impl DetailViews {
     /// Escape, for whichever list tab is showing: its pull request, then its
     /// menu, then its filter.
     pub fn dismiss_list(&self, tab: WorkspaceTab, cx: &mut App) -> bool {
-        let view = match tab {
-            WorkspaceTab::PullRequests => &self.pulls,
-            WorkspaceTab::Issues => &self.issues,
-            _ => return false,
-        };
-        view.update(cx, |view, cx| view.dismiss(cx))
+        match tab {
+            WorkspaceTab::PullRequests => self.pulls.update(cx, |view, cx| view.dismiss(cx)),
+            WorkspaceTab::Issues => self.issues.update(cx, |view, cx| view.dismiss(cx)),
+            WorkspaceTab::Pipelines => self.pipelines.update(cx, |view, cx| view.dismiss(cx)),
+            _ => false,
+        }
     }
 
     fn panel(&self, tab: WorkspaceTab) -> Option<AnyElement> {

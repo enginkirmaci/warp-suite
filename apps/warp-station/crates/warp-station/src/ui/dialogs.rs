@@ -921,6 +921,69 @@ pub fn abandon_pull(
     overlay_shell("abandon-dialog", cx, card)
 }
 
+/// The Azure pull request's Abandon: the same card, its own confirm state, and
+/// Azure's own word for where the pull request goes.
+pub fn abandon_azure_pull(
+    store: &Entity<Store>,
+    number: u64,
+    title: &str,
+    cx: &mut Context<ReposPage>,
+) -> gpui::AnyElement {
+    let cancel = {
+        let store = store.clone();
+        move |_: &gpui::ClickEvent, _: &mut Window, cx: &mut gpui::App| {
+            store.update(cx, |store, cx| store.cancel_abandon_azure(cx));
+        }
+    };
+    let close = {
+        let store = store.clone();
+        move |_: &gpui::ClickEvent, _: &mut Window, cx: &mut gpui::App| {
+            store.update(cx, |store, cx| store.cancel_abandon_azure(cx));
+        }
+    };
+    let confirm = {
+        let store = store.clone();
+        move |_: &gpui::ClickEvent, _: &mut Window, cx: &mut gpui::App| {
+            store.update(cx, |store, cx| store.confirm_abandon_azure(cx));
+        }
+    };
+    let card = dialog_card(
+        "Abandon pull request?",
+        "icons/icon-git-pull-request.svg",
+        "abandon-azure-close",
+        close,
+    )
+    .child(
+        dialog_body()
+            .child(
+                div()
+                    .text_size(px(theme::font_body()))
+                    .text_color(theme::text())
+                    .child(format!("!{number} {title}")),
+            )
+            .child(
+                div()
+                    .text_size(px(theme::font_meta()))
+                    .text_color(theme::text_dim())
+                    .child("It moves to Abandoned. You can reopen it later."),
+            )
+            .child(
+                div()
+                    .text_size(px(theme::font_meta()))
+                    .text_color(theme::text_muted())
+                    .child(
+                        "Abandoning stops review and completion. The branch and commits are not deleted.",
+                    ),
+            ),
+    )
+    .child(
+        dialog_footer()
+            .child(ghost_button("Cancel", true, cancel))
+            .child(danger_button("Abandon pull request", confirm)),
+    );
+    overlay_shell("abandon-azure-dialog", cx, card)
+}
+
 /// The destructive action: `danger` fill with `on-danger` text, so it never
 /// reads as the card's ordinary primary.
 fn danger_button(

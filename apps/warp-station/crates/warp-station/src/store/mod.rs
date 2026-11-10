@@ -168,6 +168,18 @@ pub struct Store {
     /// E2E hook: WARP_STATION_NEW_PULL=1 opens the New pull request form the
     /// first time the Pull requests tab draws; the workbench drains it.
     pub new_pull_requested: bool,
+    /// The run open in the Pipelines tab: its lazy detail answers when the
+    /// timeline and log array come back.
+    pub open_run: Option<OpenRun>,
+    /// Runs whose detail was already asked for, so drawing cannot re-ask.
+    run_detail_requested: std::collections::HashSet<(String, u64)>,
+    /// The Azure pull request open in the Pipelines tab, when one is.
+    pub open_azure_pull: Option<OpenAzurePull>,
+    /// Keys already asked for ("detail", "files", "commits", "diff:<path>"),
+    /// so drawing cannot re-ask.
+    azure_pull_requested: std::collections::HashSet<(String, u64, String)>,
+    /// The armed Abandon confirmation for an Azure pull request.
+    pub confirm_azure_abandon: Option<(u64, String)>,
     /// The closed list is already asked for (in flight or cached). One ask per
     /// (folder, pull_requests); cleared by Refresh, a merge, or Retry.
     closed_requested: std::collections::HashSet<(String, bool)>,
@@ -396,6 +408,11 @@ impl Store {
             compare: None,
             compare_requested: std::collections::HashSet::new(),
             pull_created: false,
+            open_run: None,
+            run_detail_requested: std::collections::HashSet::new(),
+            open_azure_pull: None,
+            azure_pull_requested: std::collections::HashSet::new(),
+            confirm_azure_abandon: None,
             new_pull_requested: std::env::var("WARP_STATION_NEW_PULL").as_deref() == Ok("1"),
             closed_requested: std::collections::HashSet::new(),
             closed_failed: std::collections::HashSet::new(),
@@ -1058,6 +1075,114 @@ impl Store {
                     }
                     Err(err) if err.is_empty() => {
                         self.notify_error("GitHub did not answer the pull request".to_string());
+                    }
+                    Err(err) => self.notify_error(err),
+                }
+                cx.notify();
+            }
+            UiEvent::AzureRunDetailLoaded {
+                folder,
+                build_id,
+                detail,
+            } => {
+                if let Some(open) = self
+                    .open_run
+                    .as_mut()
+                    .filter(|open| open.folder == folder && open.run.id == build_id)
+                {
+                    open.failed = detail.is_none();
+                    open.detail = detail;
+                }
+                cx.notify();
+            }
+            UiEvent::AzurePullLoaded {
+                folder,
+                number,
+                detail,
+            } => {
+                if let Some(open) = self
+                    .open_azure_pull
+                    .as_mut()
+                    .filter(|open| open.folder == folder && open.item.number == number)
+                {
+                    open.failed = detail.is_none();
+                    if let Some(detail) = detail {
+                        // the row's title and state ride the record once it is in
+                        open.item.title = detail.pull.title.clone();
+                        open.item.is_draft = detail.pull.is_draft;
+                        open.detail = Some(*detail);
+                    }
+                }
+                cx.notify();
+            }
+            UiEvent::AzurePullFilesLoaded {
+                folder,
+                number,
+                files,
+            } => {
+                if let Some(open) = self
+                    .open_azure_pull
+                    .as_mut()
+                    .filter(|open| open.folder == folder && open.item.number == number)
+                {
+                    open.files = Some(files.unwrap_or_default());
+                }
+                cx.notify();
+            }
+            UiEvent::AzurePullCommitsLoaded {
+                folder,
+                number,
+                commits,
+            } => {
+                if let Some(open) = self
+                    .open_azure_pull
+                    .as_mut()
+                    .filter(|open| open.folder == folder && open.item.number == number)
+                {
+                    open.commits = Some(commits.unwrap_or_default());
+                }
+                cx.notify();
+            }
+            UiEvent::AzurePullFileDiffLoaded {
+                folder,
+                number,
+                path,
+                patch,
+            } => {
+                if let Some(open) = self
+                    .open_azure_pull
+                    .as_mut()
+                    .filter(|open| open.folder == folder && open.item.number == number)
+                {
+                    open.diff = Some((path, patch));
+                }
+                cx.notify();
+            }
+            UiEvent::AzurePullActed {
+                folder,
+                number,
+                action,
+                result,
+            } => {
+                if let Some(open) = self.open_azure_pull.as_mut() {
+                    open.acting = false;
+                }
+                match result {
+                    Ok(()) => {
+                        self.notify_success(action.done_word(number));
+                        // the record changed: read it again rather than guess
+                        let key = (folder.clone(), number, "detail".to_string());
+                        self.azure_pull_requested.remove(&key);
+                        if let Some(open) = self.open_azure_pull.as_mut() {
+                            open.detail = None;
+                            open.failed = false;
+                        }
+                        self.load_azure_pull(cx);
+                        // the project's cards and the rail read the pass
+                        self.kick_azure_pass(&[std::path::PathBuf::from(&folder)]);
+                    }
+                    Err(err) if err.trim().is_empty() => {
+                        self.notify_error("Azure DevOps did not answer".to_string());
                     }
                     Err(err) => self.notify_error(err),
                 }
@@ -2469,6 +2594,11 @@ impl Store {
         self.compare_requested.clear();
         self.pull_created = false;
         self.new_pull_requested = false;
+        self.open_run = None;
+        self.run_detail_requested.clear();
+        self.open_azure_pull = None;
+        self.azure_pull_requested.clear();
+        self.confirm_azure_abandon = None;
         self.open_pull = Some(OpenPull {
             folder,
             item,
@@ -2608,6 +2738,286 @@ impl Store {
             number: open.item.number,
             action,
         });
+        cx.notify();
+    }
+
+    // ---- the Pipelines tab's run --------------------------------------------
+
+    /// The Azure credentials the per-thing calls need: the PAT and the custom
+    /// server URL, when the column is on and a token is configured.
+    fn azure_auth(&self) -> Option<(String, String)> {
+        let settings = self.settings();
+        if !settings.repos.enable_azure_devops {
+            return None;
+        }
+        let pat = warp_station_core::azure::resolve_pat(&settings.repos.azure_devops_pat)?;
+        Some((pat, settings.repos.azure_devops_url.clone()))
+    }
+
+    /// Selects a run in the Pipelines tab and asks for its stages and log.
+    pub fn open_run(&mut self, run: warp_station_core::azure::PipelineRun, cx: &mut Context<Self>) {
+        let Some(folder) = self.selected_repo.clone() else {
+            return;
+        };
+        self.open_run = Some(OpenRun {
+            folder,
+            run,
+            detail: None,
+            failed: false,
+        });
+        self.load_run_detail(cx);
+        cx.notify();
+    }
+
+    /// Back, and the narrow pane's Escape. Returns whether a run was open.
+    pub fn close_run(&mut self, cx: &mut Context<Self>) -> bool {
+        let open = self.open_run.take().is_some();
+        if open {
+            cx.notify();
+        }
+        open
+    }
+
+    /// The selected run's detail, asked for once per run.
+    pub fn load_run_detail(&mut self, cx: &mut Context<Self>) {
+        let Some(open) = self.open_run.as_ref() else {
+            return;
+        };
+        let key = (open.folder.clone(), open.run.id);
+        if open.detail.is_some() || open.failed || self.run_detail_requested.contains(&key) {
+            return;
+        }
+        let Some((pat, custom_base)) = self.azure_auth() else {
+            if let Some(open) = self.open_run.as_mut() {
+                open.failed = true;
+            }
+            cx.notify();
+            return;
+        };
+        self.run_detail_requested.insert(key);
+        let _ = self.net.send_blocking(NetCommand::AzureRunDetail {
+            folder: std::path::PathBuf::from(&open.folder),
+            pat,
+            custom_base,
+            build_id: open.run.id,
+        });
+    }
+
+    // ---- the Pipelines tab's Azure pull request ------------------------------
+
+    /// Selects an Azure pull request and asks for its record. The run detail it
+    /// was sharing the column with gives way.
+    pub fn open_azure_pull(
+        &mut self,
+        item: warp_station_core::azure::AzureItem,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(folder) = self.selected_repo.clone() else {
+            return;
+        };
+        self.open_run = None;
+        self.open_azure_pull = Some(OpenAzurePull {
+            folder,
+            item,
+            ..Default::default()
+        });
+        self.load_azure_pull(cx);
+        cx.notify();
+    }
+
+    /// Back, and the narrow pane's Escape.
+    pub fn close_azure_pull(&mut self, cx: &mut Context<Self>) -> bool {
+        let open = self.open_azure_pull.take().is_some();
+        if open {
+            cx.notify();
+        }
+        open
+    }
+
+    /// The record, its policies and its threads: the Overview's one ask.
+    pub fn load_azure_pull(&mut self, cx: &mut Context<Self>) {
+        let Some(open) = self.open_azure_pull.as_ref() else {
+            return;
+        };
+        let key = (open.folder.clone(), open.item.number, "detail".to_string());
+        if open.detail.is_some() || open.failed {
+            return;
+        }
+        if self.azure_pull_requested.contains(&key) {
+            return;
+        }
+        let Some((pat, custom_base)) = self.azure_auth() else {
+            if let Some(open) = self.open_azure_pull.as_mut() {
+                open.failed = true;
+            }
+            cx.notify();
+            return;
+        };
+        self.azure_pull_requested.insert(key);
+        let _ = self.net.send_blocking(NetCommand::AzurePullDetail {
+            folder: std::path::PathBuf::from(&open.folder),
+            pat,
+            custom_base,
+            number: open.item.number,
+        });
+    }
+
+    /// The Files tab: the newest iteration's changed files, once.
+    pub fn load_azure_pull_files(&mut self, cx: &mut Context<Self>) {
+        let Some(open) = self.open_azure_pull.as_ref() else {
+            return;
+        };
+        let key = (open.folder.clone(), open.item.number, "files".to_string());
+        if open.files.is_some() || self.azure_pull_requested.contains(&key) {
+            return;
+        }
+        let Some((pat, custom_base, folder, number)) = self.azure_call_parts() else {
+            return;
+        };
+        self.azure_pull_requested.insert(key);
+        let _ = self.net.send_blocking(NetCommand::AzurePullFiles {
+            folder,
+            pat,
+            custom_base,
+            number,
+        });
+        let _ = cx;
+    }
+
+    /// The Commits tab: the pull request's commits, once.
+    pub fn load_azure_pull_commits(&mut self, cx: &mut Context<Self>) {
+        let Some(open) = self.open_azure_pull.as_ref() else {
+            return;
+        };
+        let key = (open.folder.clone(), open.item.number, "commits".to_string());
+        if open.commits.is_some() || self.azure_pull_requested.contains(&key) {
+            return;
+        }
+        let Some((pat, custom_base, folder, number)) = self.azure_call_parts() else {
+            return;
+        };
+        self.azure_pull_requested.insert(key);
+        let _ = self.net.send_blocking(NetCommand::AzurePullCommits {
+            folder,
+            pat,
+            custom_base,
+            number,
+        });
+        let _ = cx;
+    }
+
+    /// One file's diff, once per path.
+    pub fn load_azure_pull_diff(&mut self, path: &str, cx: &mut Context<Self>) {
+        let Some(open) = self.open_azure_pull.as_ref() else {
+            return;
+        };
+        let key = (
+            open.folder.clone(),
+            open.item.number,
+            format!("diff:{path}"),
+        );
+        if self.azure_pull_requested.contains(&key)
+            || open.diff.as_ref().is_some_and(|(loaded, _)| loaded == path)
+        {
+            return;
+        }
+        let Some((pat, custom_base, folder, number)) = self.azure_call_parts() else {
+            return;
+        };
+        self.azure_pull_requested.insert(key);
+        let _ = self.net.send_blocking(NetCommand::AzurePullFileDiff {
+            folder,
+            pat,
+            custom_base,
+            number,
+            path: path.to_string(),
+        });
+        let _ = cx;
+    }
+
+    /// The credentials and coordinates a per-thing Azure call needs.
+    fn azure_call_parts(&self) -> Option<(String, String, std::path::PathBuf, u64)> {
+        let open = self.open_azure_pull.as_ref()?;
+        let (pat, custom_base) = self.azure_auth()?;
+        Some((
+            pat,
+            custom_base,
+            std::path::PathBuf::from(&open.folder),
+            open.item.number,
+        ))
+    }
+
+    /// One verb on the Azure pull request. Completing arms on the first press;
+    /// abandoning asks through the page's card.
+    pub fn act_on_azure_pull(
+        &mut self,
+        action: warp_station_core::azure::AzurePullAction,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(open) = self.open_azure_pull.as_ref() else {
+            return;
+        };
+        if open.acting {
+            return;
+        }
+        let Some(detail) = open.detail.as_ref() else {
+            return;
+        };
+        // complete is the one verb that can't be taken back from the app
+        if matches!(action, warp_station_core::azure::AzurePullAction::Complete)
+            && !open.armed_complete
+        {
+            if let Some(open) = self.open_azure_pull.as_mut() {
+                open.armed_complete = true;
+            }
+            cx.notify();
+            return;
+        }
+        let Some((pat, custom_base)) = self.azure_auth() else {
+            return;
+        };
+        let pull = detail.pull.clone();
+        let folder = std::path::PathBuf::from(&open.folder);
+        let number = open.item.number;
+        if let Some(open) = self.open_azure_pull.as_mut() {
+            open.acting = true;
+            open.armed_complete = false;
+        }
+        let _ = self.net.send_blocking(NetCommand::AzurePullAction {
+            folder,
+            pat,
+            custom_base,
+            number,
+            action,
+            pull: Box::new(pull),
+        });
+        cx.notify();
+    }
+
+    /// Abandon asks first, through the page's confirmation card.
+    pub fn ask_abandon_azure(&mut self, cx: &mut Context<Self>) {
+        let Some(open) = self.open_azure_pull.as_ref() else {
+            return;
+        };
+        let title = open
+            .detail
+            .as_ref()
+            .map_or_else(|| open.item.title.clone(), |d| d.pull.title.clone());
+        self.confirm_azure_abandon = Some((open.item.number, title));
+        cx.notify();
+    }
+
+    pub fn cancel_abandon_azure(&mut self, cx: &mut Context<Self>) {
+        if self.confirm_azure_abandon.take().is_some() {
+            cx.notify();
+        }
+    }
+
+    pub fn confirm_abandon_azure(&mut self, cx: &mut Context<Self>) {
+        if self.confirm_azure_abandon.take().is_none() {
+            return;
+        }
+        self.act_on_azure_pull(warp_station_core::azure::AzurePullAction::Abandon, cx);
         cx.notify();
     }
 
@@ -3756,6 +4166,35 @@ pub struct NewPullForm {
     /// Why the form refuses to send, or what `gh` answered.
     pub error: Option<String>,
     pub creating: bool,
+}
+
+/// One Azure pull request open in the Pipelines tab: its row until the record
+/// answers, then what the detail's tabs draw.
+#[derive(Clone, Debug, Default)]
+pub struct OpenAzurePull {
+    pub folder: String,
+    pub item: warp_station_core::azure::AzureItem,
+    pub detail: Option<warp_station_core::azure::AzurePullDetail>,
+    pub failed: bool,
+    pub files: Option<Vec<warp_station_core::azure::AzureFile>>,
+    pub commits: Option<Vec<warp_station_core::azure::AzureCommit>>,
+    /// The file whose diff is loaded: (path, patch). `None` inside is a file
+    /// with no textual change.
+    pub diff: Option<(String, Option<String>)>,
+    /// A verb is running: the head's buttons stay dead until it answers.
+    pub acting: bool,
+    /// Complete arms on the first press, like Merge on GitHub.
+    pub armed_complete: bool,
+}
+
+/// One run open in the Pipelines tab: its row until the timeline answers.
+#[derive(Clone, Debug)]
+pub struct OpenRun {
+    pub folder: String,
+    pub run: warp_station_core::azure::PipelineRun,
+    pub detail: Option<warp_station_core::azure::RunDetail>,
+    /// The detail call failed: the pane says so instead of spinning.
+    pub failed: bool,
 }
 
 /// A repository opened in a tab of its own, and the detail tab it was left on.

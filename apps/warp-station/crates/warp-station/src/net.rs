@@ -143,6 +143,51 @@ pub enum NetCommand {
         pat: String,
         custom_base: String,
     },
+    /// One run's stages and the tail of its log, for the Pipelines detail.
+    AzureRunDetail {
+        folder: PathBuf,
+        pat: String,
+        custom_base: String,
+        build_id: u64,
+    },
+    /// One Azure pull request's record, policies and threads.
+    AzurePullDetail {
+        folder: PathBuf,
+        pat: String,
+        custom_base: String,
+        number: u64,
+    },
+    /// Its changed files (the newest iteration's changes).
+    AzurePullFiles {
+        folder: PathBuf,
+        pat: String,
+        custom_base: String,
+        number: u64,
+    },
+    /// Its commit list.
+    AzurePullCommits {
+        folder: PathBuf,
+        pat: String,
+        custom_base: String,
+        number: u64,
+    },
+    /// One changed file's diff, built from the two versions Azure serves.
+    AzurePullFileDiff {
+        folder: PathBuf,
+        pat: String,
+        custom_base: String,
+        number: u64,
+        path: String,
+    },
+    /// One verb on the pull request (a vote, complete, abandon, auto-complete).
+    AzurePullAction {
+        folder: PathBuf,
+        pat: String,
+        custom_base: String,
+        number: u64,
+        action: warp_station_core::azure::AzurePullAction,
+        pull: Box<warp_station_core::azure::AzurePull>,
+    },
     /// One AI wand run: the prompt is built here, the turn runs in
     /// warp-agent over its door (launching it when merely closed).
     Wand {
@@ -492,6 +537,38 @@ pub enum UiEvent {
     },
     AzureSettled {
         items: Vec<(String, warp_station_core::azure::AzureSnapshot)>,
+    },
+    AzureRunDetailLoaded {
+        folder: String,
+        build_id: u64,
+        detail: Option<warp_station_core::azure::RunDetail>,
+    },
+    AzurePullLoaded {
+        folder: String,
+        number: u64,
+        detail: Option<Box<warp_station_core::azure::AzurePullDetail>>,
+    },
+    AzurePullFilesLoaded {
+        folder: String,
+        number: u64,
+        files: Option<Vec<warp_station_core::azure::AzureFile>>,
+    },
+    AzurePullCommitsLoaded {
+        folder: String,
+        number: u64,
+        commits: Option<Vec<warp_station_core::azure::AzureCommit>>,
+    },
+    AzurePullFileDiffLoaded {
+        folder: String,
+        number: u64,
+        path: String,
+        patch: Option<String>,
+    },
+    AzurePullActed {
+        folder: String,
+        number: u64,
+        action: warp_station_core::azure::AzurePullAction,
+        result: Result<(), String>,
     },
     WandLog {
         wand_id: String,
@@ -898,6 +975,146 @@ fn spawn_read_intake(
                             folder: folder.to_string_lossy().to_string(),
                             request: Box::new(request),
                             result,
+                        });
+                    });
+                }
+                NetCommand::AzurePullDetail {
+                    folder,
+                    pat,
+                    custom_base,
+                    number,
+                } => {
+                    let evt_tx = evt_tx.clone();
+                    tokio::spawn(async move {
+                        let detail = warp_station_core::azure::pull_detail(
+                            &folder,
+                            &pat,
+                            &custom_base,
+                            number,
+                        )
+                        .await;
+                        let _ = evt_tx.send_blocking(UiEvent::AzurePullLoaded {
+                            folder: folder.to_string_lossy().to_string(),
+                            number,
+                            detail: detail.map(Box::new),
+                        });
+                    });
+                }
+                NetCommand::AzurePullFiles {
+                    folder,
+                    pat,
+                    custom_base,
+                    number,
+                } => {
+                    let evt_tx = evt_tx.clone();
+                    tokio::spawn(async move {
+                        let files = warp_station_core::azure::pull_files(
+                            &folder,
+                            &pat,
+                            &custom_base,
+                            number,
+                        )
+                        .await;
+                        let _ = evt_tx.send_blocking(UiEvent::AzurePullFilesLoaded {
+                            folder: folder.to_string_lossy().to_string(),
+                            number,
+                            files,
+                        });
+                    });
+                }
+                NetCommand::AzurePullCommits {
+                    folder,
+                    pat,
+                    custom_base,
+                    number,
+                } => {
+                    let evt_tx = evt_tx.clone();
+                    tokio::spawn(async move {
+                        let commits = warp_station_core::azure::pull_commits(
+                            &folder,
+                            &pat,
+                            &custom_base,
+                            number,
+                        )
+                        .await;
+                        let _ = evt_tx.send_blocking(UiEvent::AzurePullCommitsLoaded {
+                            folder: folder.to_string_lossy().to_string(),
+                            number,
+                            commits,
+                        });
+                    });
+                }
+                NetCommand::AzurePullFileDiff {
+                    folder,
+                    pat,
+                    custom_base,
+                    number,
+                    path,
+                } => {
+                    let evt_tx = evt_tx.clone();
+                    tokio::spawn(async move {
+                        let patch = warp_station_core::azure::pull_file_diff(
+                            &folder,
+                            &pat,
+                            &custom_base,
+                            number,
+                            &path,
+                        )
+                        .await;
+                        let _ = evt_tx.send_blocking(UiEvent::AzurePullFileDiffLoaded {
+                            folder: folder.to_string_lossy().to_string(),
+                            number,
+                            path,
+                            patch,
+                        });
+                    });
+                }
+                NetCommand::AzurePullAction {
+                    folder,
+                    pat,
+                    custom_base,
+                    number,
+                    action,
+                    pull,
+                } => {
+                    let evt_tx = evt_tx.clone();
+                    tokio::spawn(async move {
+                        let result = warp_station_core::azure::pull_action(
+                            &folder,
+                            &pat,
+                            &custom_base,
+                            number,
+                            action.clone(),
+                            &pull,
+                        )
+                        .await;
+                        let _ = evt_tx.send_blocking(UiEvent::AzurePullActed {
+                            folder: folder.to_string_lossy().to_string(),
+                            number,
+                            action,
+                            result,
+                        });
+                    });
+                }
+                NetCommand::AzureRunDetail {
+                    folder,
+                    pat,
+                    custom_base,
+                    build_id,
+                } => {
+                    let evt_tx = evt_tx.clone();
+                    tokio::spawn(async move {
+                        let detail = warp_station_core::azure::run_detail(
+                            &folder,
+                            &pat,
+                            &custom_base,
+                            build_id,
+                        )
+                        .await;
+                        let _ = evt_tx.send_blocking(UiEvent::AzureRunDetailLoaded {
+                            folder: folder.to_string_lossy().to_string(),
+                            build_id,
+                            detail,
                         });
                     });
                 }
@@ -1468,6 +1685,12 @@ async fn net_main(cmd_rx: Receiver<NetCommand>, evt_tx: Sender<UiEvent>) {
             | NetCommand::GitHubPullAction { .. }
             | NetCommand::CompareBranches { .. }
             | NetCommand::GitHubPullCreate { .. }
+            | NetCommand::AzureRunDetail { .. }
+            | NetCommand::AzurePullDetail { .. }
+            | NetCommand::AzurePullFiles { .. }
+            | NetCommand::AzurePullCommits { .. }
+            | NetCommand::AzurePullFileDiff { .. }
+            | NetCommand::AzurePullAction { .. }
             | NetCommand::LoadChanges { .. } => {}
             NetCommand::LoadHistory { folder } => {
                 let (commits, unpushed) = tokio::task::spawn_blocking({

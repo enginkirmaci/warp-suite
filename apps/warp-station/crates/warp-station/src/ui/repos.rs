@@ -252,6 +252,13 @@ impl ReposPage {
         }) {
             return true;
         }
+        if self.store.update(cx, |store, cx| {
+            let open = store.confirm_azure_abandon.is_some();
+            store.cancel_abandon_azure(cx);
+            open
+        }) {
+            return true;
+        }
         // the inline editor closes on Escape before anything else
         if self.tag_editing || self.tag_draft.is_some() {
             self.tag_editing = false;
@@ -504,6 +511,14 @@ impl Render for ReposPage {
         // it and the card that answers it never disagree
         if let Some((number, title)) = self.store.read(cx).confirm_abandon.clone() {
             stage = stage.child(crate::ui::dialogs::abandon_pull(
+                &self.store,
+                number,
+                &title,
+                cx,
+            ));
+        }
+        if let Some((number, title)) = self.store.read(cx).confirm_azure_abandon.clone() {
+            stage = stage.child(crate::ui::dialogs::abandon_azure_pull(
                 &self.store,
                 number,
                 &title,
