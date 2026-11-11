@@ -19,9 +19,25 @@ use gpui::{AnyElement, Context, Entity, FontWeight, SharedString, Window, div, p
 use gpui_kit::component::input::{InputState, TextareaState};
 use warp_station_core::model::ComparePreview;
 use warpui_kit_core::{field, motion, shell};
+use warpui_kit_picker::{
+    FilteredPicker, OverlayAnchor, PanelChrome, PickerBody, PickerData, PickerIcons, PickerItem,
+    PickerRow, PickerSpec, PickerTarget, Selection, TriggerScale,
+};
 
 /// The form body's measure: one comfortable column of fields.
 const FORM_WIDTH: f32 = 760.;
+
+/// One branch pill's width: wide enough for a feature branch, narrow enough
+/// that the pair and the swap fit one row.
+const BRANCH_PILL_W: f32 = 220.;
+
+/// The app's icon paths for the shared picker shell.
+const PICKER_ICONS: PickerIcons = PickerIcons {
+    check: "icons/icon-check.svg",
+    chevron_down: "icons/icon-chevron-down.svg",
+    trash: "icons/icon-trash.svg",
+    refresh: "icons/icon-refresh.svg",
+};
 
 /// The form's own tabs. They are the pull request's three, before it exists.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -58,20 +74,19 @@ pub struct NewPullView {
     title: Entity<InputState>,
     description: Entity<TextareaState>,
     reviewer: Entity<InputState>,
-    /// Which pill's branch menu is open.
-    branch_menu: Option<BranchMenu>,
-    /// The menu that was open when a pill was pressed, so its own click
-    /// toggles instead of the outside-press dismissal reopening it.
-    branch_menu_at_press: Option<BranchMenu>,
+    /// The Source and Base branch pickers: the same branch dropdown the git
+    /// toolbar uses, seated in the form's own slot.
+    source_picker: Entity<FilteredPicker>,
+    base_picker: Entity<FilteredPicker>,
     /// The Create split's menu.
     primary_menu: bool,
     /// The form is the whole detail pane: the workbench's list is not beside it.
     pub stacked: bool,
 }
 
-/// The two pills in the branch row, each with its own menu.
+/// Which side of the branch row a picker belongs to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum BranchMenu {
+enum BranchSide {
     Source,
     Base,
 }
@@ -84,41 +99,25 @@ impl NewPullView {
             cx.new(|cx| TextareaState::new(window, cx).placeholder("Describe the change…"));
         let reviewer =
             cx.new(|cx| InputState::new(window, cx).placeholder("Search people or teams"));
+        let source_picker = build_branch_picker(&store, BranchSide::Source, window, cx);
+        let base_picker = build_branch_picker(&store, BranchSide::Base, window, cx);
         Self {
             store,
             tab: NewPullTab::Overview,
             title,
             description,
             reviewer,
-            branch_menu: None,
-            branch_menu_at_press: None,
+            source_picker,
+            base_picker,
             primary_menu: false,
             stacked: false,
         }
-    }
-
-    /// A pick in a pill's menu lands in the form, which owns the pair.
-    fn pick_branch(&mut self, menu: BranchMenu, branch: String, cx: &mut Context<Self>) {
-        let Some(form) = self.store.read(cx).new_pull.clone() else {
-            self.branch_menu = None;
-            cx.notify();
-            return;
-        };
-        let (head, base) = match menu {
-            BranchMenu::Source => (branch, form.base),
-            BranchMenu::Base => (form.head, branch),
-        };
-        self.branch_menu = None;
-        self.store
-            .update(cx, |store, cx| store.set_new_pull_branches(head, base, cx));
-        cx.notify();
     }
 
     fn swap(&mut self, cx: &mut Context<Self>) {
         let Some(form) = self.store.read(cx).new_pull.clone() else {
             return;
         };
-        self.branch_menu = None;
         self.store.update(cx, |store, cx| {
             store.set_new_pull_branches(form.base, form.head, cx)
         });
@@ -140,7 +139,10 @@ impl NewPullView {
     }
 
     pub fn dismiss(&mut self, cx: &mut Context<Self>) -> bool {
-        if self.branch_menu.take().is_some() {
+        let mut dismissed = false;
+        dismissed |= self.source_picker.update(cx, FilteredPicker::dismiss);
+        dismissed |= self.base_picker.update(cx, FilteredPicker::dismiss);
+        if dismissed {
             cx.notify();
             return true;
         }
@@ -299,15 +301,6 @@ impl NewPullView {
     fn branch_row(&self, cx: &mut Context<Self>) -> AnyElement {
         let this = cx.entity();
         let swap = this.clone();
-        let (head, base) = self
-            .store
-            .read(cx)
-            .new_pull
-            .as_ref()
-            .map_or((String::new(), String::new()), |form| {
-                (form.head.clone(), form.base.clone())
-            });
-        let branches = self.store.read(cx).branches.clone();
         div()
             .debug_selector(|| "new-pull-branches".into())
             .flex_shrink_0()
@@ -317,14 +310,7 @@ impl NewPullView {
             .flex_row()
             .items_center()
             .gap_2()
-            .child(self.branch_pill(
-                "new-pull-source",
-                "Source",
-                &head,
-                BranchMenu::Source,
-                &branches,
-                cx,
-            ))
+            .child(div().w(px(BRANCH_PILL_W)).child(self.source_picker.clone()))
             .child(
                 div()
                     .flex_shrink_0()
@@ -332,14 +318,7 @@ impl NewPullView {
                     .text_color(theme::text_muted())
                     .child("into"),
             )
-            .child(self.branch_pill(
-                "new-pull-base",
-                "Base",
-                &base,
-                BranchMenu::Base,
-                &branches,
-                cx,
-            ))
+            .child(div().w(px(BRANCH_PILL_W)).child(self.base_picker.clone()))
             .child(div().flex_1())
             .child(
                 div()
@@ -364,172 +343,6 @@ impl NewPullView {
                     )),
             )
             .into_any_element()
-    }
-
-    /// One branch pill and, when it is the open menu, its card hanging under it.
-    fn branch_pill(
-        &self,
-        selector: &'static str,
-        role: &'static str,
-        branch: &str,
-        menu: BranchMenu,
-        branches: &[warp_station_core::model::GitBranchRef],
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let open = self.branch_menu == Some(menu);
-        let empty = branch.trim().is_empty();
-        let name: SharedString = if empty {
-            "Select a branch".into()
-        } else {
-            branch.to_string().into()
-        };
-        let pill = div()
-            .id(selector)
-            .debug_selector(move || selector.into())
-            .a11y_button(format!("{role} branch: {branch}"))
-            .cursor_pointer()
-            .flex_shrink_0()
-            .h(px(shell::CONTROL_HEIGHT))
-            .px_2()
-            .rounded(px(6.))
-            .border_1()
-            .border_color(theme::line_strong())
-            .bg(theme::panel())
-            .flex()
-            .items_center()
-            .gap_2()
-            .text_size(px(theme::font_control()))
-            .font_weight(FontWeight::MEDIUM)
-            .text_color(if empty {
-                theme::text_muted()
-            } else {
-                theme::text()
-            })
-            .hover(|s| s.bg(theme::raised()))
-            // the pill must toggle its menu, not close and reopen it: the
-            // menu's capture-phase outside press closes it before the click,
-            // so remember what was open before that runs
-            .capture_any_mouse_down(cx.listener(move |view, _, _, _| {
-                view.branch_menu_at_press = view.branch_menu;
-            }))
-            .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
-            .on_click(cx.listener(move |view, _, _, cx| {
-                view.branch_menu = if view.branch_menu_at_press == Some(menu) {
-                    None
-                } else {
-                    Some(menu)
-                };
-                view.branch_menu_at_press = None;
-                view.primary_menu = false;
-                cx.notify();
-            }))
-            .child(icon(
-                "icons/icon-source-branch.svg",
-                px(theme::icon_tiny()),
-                theme::text_muted(),
-            ))
-            .child(
-                div()
-                    .min_w(px(0.))
-                    .overflow_hidden()
-                    .whitespace_nowrap()
-                    .text_ellipsis()
-                    .child(name),
-            )
-            .child(icon(
-                "icons/icon-chevron-down.svg",
-                px(theme::active_tokens().icon_nano),
-                theme::text_muted(),
-            ));
-        div()
-            .relative()
-            .flex_shrink_0()
-            .child(pill)
-            .children(open.then(|| self.branch_menu_card(menu, branch, branches, cx)))
-            .into_any_element()
-    }
-
-    /// The branch list under a pill: the probed branches, the current one
-    /// checked, and a quiet row while the probe has not answered.
-    fn branch_menu_card(
-        &self,
-        menu: BranchMenu,
-        current: &str,
-        branches: &[warp_station_core::model::GitBranchRef],
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let mut card = div()
-            .id("new-pull-branch-menu")
-            .debug_selector(|| "new-pull-branch-menu".into())
-            .absolute()
-            .top(px(shell::CONTROL_HEIGHT + 4.))
-            .left(px(0.))
-            .w(px(240.))
-            .max_h(px(320.))
-            .overflow_y_scroll()
-            .p(px(4.))
-            .rounded(px(8.))
-            .border_1()
-            .border_color(theme::line_strong())
-            .bg(theme::popup())
-            .shadow_lg()
-            .occlude()
-            .on_mouse_down_out(cx.listener(|view, _, _, cx| {
-                view.branch_menu = None;
-                cx.notify();
-            }))
-            .flex()
-            .flex_col()
-            .gap(px(2.));
-        if branches.is_empty() {
-            card = card.child(
-                div()
-                    .debug_selector(|| "new-pull-branch-empty".into())
-                    .h(px(32.))
-                    .px_2()
-                    .flex()
-                    .items_center()
-                    .text_size(px(theme::font_control()))
-                    .text_color(theme::text_muted())
-                    .child("No branches yet"),
-            );
-        } else {
-            for branch in branches {
-                let name = branch.name.clone();
-                let selected = branch.name == current;
-                let selector = format!("new-pull-branch-{}", branch.name);
-                let pick = name.clone();
-                card = card.child(
-                    div()
-                        .id(SharedString::from(selector.clone()))
-                        .debug_selector(move || selector.clone())
-                        .a11y_toggle(name.clone(), selected)
-                        .cursor_pointer()
-                        .flex_shrink_0()
-                        .rounded(px(6.))
-                        .h(px(32.))
-                        .px_2()
-                        .flex()
-                        .items_center()
-                        .justify_between()
-                        .text_size(px(theme::font_control()))
-                        .text_color(theme::text())
-                        .hover(|row| row.bg(theme::line_strong()))
-                        .on_click(cx.listener(move |view, _, _, cx| {
-                            view.pick_branch(menu, pick.clone(), cx);
-                        }))
-                        .child(name)
-                        .when(selected, |row| {
-                            row.child(icon(
-                                "icons/icon-check.svg",
-                                px(theme::icon_small()),
-                                theme::accent_ink(),
-                            ))
-                        }),
-                );
-            }
-        }
-        gpui::deferred(card).into_any_element()
     }
 
     // ---- tabs -------------------------------------------------------------
@@ -1036,5 +849,145 @@ fn split_path(path: &str) -> (String, String) {
     match path.rsplit_once('/') {
         Some((dir, name)) => (format!("{dir}/"), name.to_string()),
         None => (String::new(), path.to_string()),
+    }
+}
+
+/// The shared branch dropdown, seated in the form: the trigger is the pill and
+/// the panel floats under it.
+fn build_branch_picker(
+    store: &Entity<Store>,
+    side: BranchSide,
+    window: &mut Window,
+    cx: &mut Context<NewPullView>,
+) -> Entity<FilteredPicker> {
+    let (trigger_label, trigger_id, panel_id) = match side {
+        BranchSide::Source => ("Source branch", "new-pull-source", "new-pull-branch-menu"),
+        BranchSide::Base => ("Base branch", "new-pull-base", "new-pull-branch-menu-base"),
+    };
+    let spec = PickerSpec {
+        key: trigger_label,
+        trigger_label,
+        filter_placeholder: "Filter branches",
+        icons: PICKER_ICONS,
+        trigger_icon: Some("icons/icon-source-branch.svg"),
+        provider_badge: false,
+        refresh: false,
+        refresh_label: "",
+        stop_trigger_mousedown: true,
+        visible_rows: 8,
+        selected_accent: true,
+        overlay: true,
+        anchor: OverlayAnchor::Field,
+        trigger_scale: TriggerScale::Compact,
+        trigger_rounded_lg: false,
+        trigger_min_h: Some(shell::CONTROL_HEIGHT),
+        panel_chrome: PanelChrome::Menus,
+        trigger_id: Some(trigger_id),
+        panel_id: Some(panel_id),
+        filter_selector: Some("new-pull-branch-filter"),
+        list_id: Some("new-pull-branch-list"),
+    };
+    let pick_store = store.clone();
+    let picker = cx.new(|cx| {
+        FilteredPicker::new(
+            spec,
+            PickerTarget::Callback(Box::new(move |value, _window, cx| {
+                let Some(form) = pick_store.read(cx).new_pull.clone() else {
+                    return;
+                };
+                let (head, base) = match side {
+                    BranchSide::Source => (value.to_string(), form.base),
+                    BranchSide::Base => (form.head, value.to_string()),
+                };
+                pick_store.update(cx, |store, cx| store.set_new_pull_branches(head, base, cx));
+            })),
+            Box::new(|_, _, _| unreachable!("the real source lands right after construction")),
+            window,
+            cx,
+        )
+    });
+    let data_store = store.clone();
+    picker.update(cx, |picker, cx| {
+        picker.set_data_source(Box::new(
+            move |filter: &str, window: &Window, cx: &gpui::App| {
+                branch_picker_data(&data_store, side, filter, window, cx)
+            },
+        ));
+        picker.observe_entity(store, cx);
+    });
+    picker
+}
+
+/// One render's worth of the branch list: locals first, the inert "Remote"
+/// group label before the first remote, and the current side's branch ticked.
+fn branch_picker_data(
+    store: &Entity<Store>,
+    side: BranchSide,
+    filter: &str,
+    window: &Window,
+    cx: &gpui::App,
+) -> PickerData {
+    let store_read = store.read(cx);
+    let form = store_read.new_pull.clone();
+    let current = form
+        .as_ref()
+        .map(|form| match side {
+            BranchSide::Source => form.head.clone(),
+            BranchSide::Base => form.base.clone(),
+        })
+        .unwrap_or_default();
+    let filter = filter.to_lowercase();
+    let mut rows = Vec::new();
+    let mut remotes_labeled = false;
+    for branch in &store_read.branches {
+        if !filter.is_empty() && !branch.name.to_lowercase().contains(&filter) {
+            continue;
+        }
+        let is_remote = branch.kind == warp_station_core::model::GitBranchKind::Remote;
+        if is_remote && !remotes_labeled {
+            remotes_labeled = true;
+            rows.push(PickerRow::Group {
+                id: "new-pull-branch-group-remote".into(),
+                label: "Remote".into(),
+                selector: Some("new-pull-branch-group-remote".into()),
+            });
+        }
+        rows.push(PickerRow::Item(PickerItem {
+            id: format!("new-pull-branch-{}", branch.name),
+            selector: format!("new-pull-branch-{}", branch.name),
+            value: branch.name.clone(),
+            label: crate::ui::branch_label(&branch.name, window),
+            selected: branch.name == current,
+            muted: is_remote,
+            trailing_delete: None,
+        }));
+    }
+    if rows.is_empty() {
+        rows.push(PickerRow::Item(PickerItem {
+            id: "new-pull-branch-empty".into(),
+            selector: "new-pull-branch-empty".into(),
+            value: String::new(),
+            label: "No branches yet".into(),
+            selected: false,
+            muted: true,
+            trailing_delete: None,
+        }));
+    }
+    PickerData {
+        body: PickerBody::Rows(rows),
+        selected: Selection {
+            value: current.clone(),
+            label: if current.is_empty() {
+                "Select a branch".to_string()
+            } else {
+                crate::ui::branch_label(&current, window)
+            },
+            badge: None,
+        },
+        footer: None,
+        fonts: theme::active_tokens(),
+        accent: theme::blue_bright(),
+        show_tooltips: store_read.settings().general.show_tooltips,
+        refreshing: false,
     }
 }
