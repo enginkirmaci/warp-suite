@@ -101,6 +101,8 @@ const COMMIT_RAIL_W: f32 = 240.;
 const COMMIT_RAIL_ROW_H: f32 = 34.;
 /// The git toolbar's height.
 const TOOLBAR_H: f32 = 52.;
+/// The file and commit lists' head height: the same band the work list uses.
+const LIST_HEAD_H: f32 = 40.;
 /// The branch selector's width.
 const BRANCH_W: f32 = 260.;
 /// The commit box's height: the message over its button.
@@ -539,6 +541,10 @@ impl Render for ChangesView {
             clean_state(&self.store, cx)
         } else {
             let file_list = self.render_file_list(&file_groups, cx);
+            // The list owns the row keys only while its handle holds the
+            // focus; its head says so with the label's ink and its rule.
+            let file_focused = self.file_focus.is_focused(window);
+            let file_count = groups.0.len() + groups.1.len();
             let mut files = div()
                 .w(px(warpui_kit_core::shell::scaled(FILE_COLUMN_W)))
                 .flex_shrink_0()
@@ -572,6 +578,13 @@ impl Render for ChangesView {
                                 }
                             }),
                         )
+                        .child(Self::list_head(
+                            "Files",
+                            file_count,
+                            file_focused,
+                            "files-head-focused",
+                            "files-head-idle",
+                        ))
                         .child(file_list),
                 );
             files = if groups.0.is_empty() && !committing {
@@ -888,6 +901,52 @@ impl ChangesView {
             .scroll_to_item(next, ScrollStrategy::Nearest);
     }
 
+    /// A list column's head: its name and row count, dim until the list owns
+    /// the keys. The bottom rule is one pixel in both states and only changes
+    /// color, so focusing the list never shifts a row.
+    fn list_head(
+        label: &'static str,
+        count: usize,
+        focused: bool,
+        focused_selector: &'static str,
+        idle_selector: &'static str,
+    ) -> impl IntoElement {
+        div()
+            .flex_shrink_0()
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap_2()
+            .h(px(LIST_HEAD_H))
+            .px_4()
+            .border_b_1()
+            .border_color(if focused {
+                theme::accent()
+            } else {
+                theme::hairline()
+            })
+            .text_size(px(theme::font_meta()))
+            .text_color(if focused {
+                theme::text()
+            } else {
+                theme::text_dim()
+            })
+            .debug_selector(move || {
+                if focused {
+                    focused_selector.to_string()
+                } else {
+                    idle_selector.to_string()
+                }
+            })
+            .child(label)
+            .child(
+                div()
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(theme::text_muted())
+                    .child(count.to_string()),
+            )
+    }
+
     fn render_file_list(
         &mut self,
         files: &Rc<FileGroups>,
@@ -915,12 +974,20 @@ impl ChangesView {
                         .gap_2()
                         .text_size(px(theme::font_body()))
                         .text_color(theme::text_dim())
-                        .child(motion::spinner(
-                            "changes-loading",
-                            "icons/icon-spinner.svg",
-                            px(theme::icon_tiny()),
-                            theme::text_dim(),
-                        ))
+                        .child(
+                            div()
+                                .id("changes-loading-status")
+                                .role(gpui::Role::Status)
+                                .aria_label("Loading changes")
+                                .flex()
+                                .items_center()
+                                .child(motion::spinner(
+                                    "changes-loading",
+                                    "icons/icon-spinner.svg",
+                                    px(theme::icon_tiny()),
+                                    theme::text_dim(),
+                                )),
+                        )
                         .child("Loading…")
                         .into_any_element()
                 })
@@ -1173,6 +1240,9 @@ impl ChangesView {
     /// right. The newest stands in until the user picks another.
     fn render_history(&mut self, window: &mut Window, cx: &mut Context<Self>) -> gpui::AnyElement {
         let list = self.render_history_list(cx);
+        // The commits own the row keys only while their handle holds the
+        // focus; the column head says so with its ink and rule.
+        let history_focused = self.history_focus.is_focused(window);
         if self.drilled_commit.is_none()
             && let Some(first) = self.history_rows.first().map(|row| row.hash.clone())
         {
@@ -1215,6 +1285,13 @@ impl ChangesView {
                             }
                         }),
                     )
+                    .child(Self::list_head(
+                        "Commits",
+                        self.history_rows.len(),
+                        history_focused,
+                        "history-head-focused",
+                        "history-head-idle",
+                    ))
                     .child(list),
             )
             .child(
@@ -1286,12 +1363,20 @@ impl ChangesView {
                     .gap_2()
                     .text_size(px(theme::font_body()))
                     .text_color(theme::text_dim())
-                    .child(motion::spinner(
-                        "history-loading",
-                        "icons/icon-spinner.svg",
-                        px(theme::icon_tiny()),
-                        theme::text_dim(),
-                    ))
+                    .child(
+                        div()
+                            .id("history-loading-status")
+                            .role(gpui::Role::Status)
+                            .aria_label("Loading history")
+                            .flex()
+                            .items_center()
+                            .child(motion::spinner(
+                                "history-loading",
+                                "icons/icon-spinner.svg",
+                                px(theme::icon_tiny()),
+                                theme::text_dim(),
+                            )),
+                    )
                     .child("Loading history…")
                     .into_any_element();
             }

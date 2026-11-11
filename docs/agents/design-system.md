@@ -465,6 +465,21 @@ Two kinds of text. The line is what the surface *is*, not how long it is.
   where one editor per item is the wrong cost — a volatile list of small
   comments, a streaming tool payload — may use `TextView` instead, and then
   keeps `text_menu`. Selection, links and highlighted code stay either way.
+- **The named `TextView` exceptions.** warp-agent's transcript is the current
+  set. **Tool details** (plain payloads; a payload that parses as JSON goes to
+  the diff kit's code renderer) is sanctioned by the wrong-cost rule above:
+  up to three volatile, possibly streaming payloads per tool, where one
+  editor each is the wrong cost. The other three are content that should move
+  and has not, each blocked on an interaction the `LiveEditor` cannot keep
+  yet, recorded beside `text_view` in
+  [`ui/markdown.rs`](../../apps/warp-agent/src/ui/markdown.rs):
+  the **user message** (its right-click is the item menu, and the read-only
+  editor installs its own Copy/Select-all menu with no host hook), **reasoning**
+  (it streams, and `set_value` resets selection and scroll per chunk), and the
+  **question** (its card owns the custom-answer input, so menu/focus ownership
+  needs a decision). The **system note** is a status by role (Labels) that keeps
+  the content path so its text, notably error text, stays copyable; that is an
+  open design choice, not a precedent.
 - **Labels** are fixed UI vocabulary: buttons, menu rows, tabs, list-row
   titles, field labels, section heads, tool names, statuses, counts. They are
   plain `div`/`SharedString` text, never markdown, never an editor, never a
@@ -473,6 +488,11 @@ Two kinds of text. The line is what the surface *is*, not how long it is.
 
 Rules that follow:
 
+- **An exception names its constraint and has a probe.** A content surface
+  that stays on `TextView` states the exact interaction an editor would lose,
+  and a real-view probe covers that interaction today (warp-agent's
+  `tests/text_surfaces_probe.rs` for the guard's selection/Copy menu and the
+  user message's item menu). "It was easier" is not a reason.
 - **The context menu belongs to the surface.** A `LiveEditor` owns its menu
   (Cut/Copy/Paste/Select all while editing, Copy/Select all read-only); do not
   wrap it in `text_menu`. A `TextView` or diff body takes
@@ -486,7 +506,9 @@ Rules that follow:
   stays plain text.
 - **No parser may take the window down.** A text the markdown parser cannot
   handle falls back to plain prose (warp-agent's `text_view` guard), never to a
-  panic and never to a label.
+  panic and never to a label. In warp-agent the guard is mandatory for every
+  surface that stays on `TextView`; it is not a reason to keep one there,
+  because the kit viewer's line-based parser does not have that failure mode.
 
 ## Keyboard navigation
 

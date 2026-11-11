@@ -248,7 +248,9 @@ when one side changes, update the other side in the **same commit**.
 - Content text renders as markdown through `warpui-kit-markdown` (read-only
   viewer or the live editor) and keeps its context menu; labels — buttons,
   rows, tabs, field and section labels, tool names, statuses — stay plain
-  text with no markdown and no selection menu. See
+  text with no markdown and no selection menu. The named `TextView`
+  exceptions and the interaction each waits on are recorded in that section;
+  a new exception must name its constraint and ship a probe. See
   `docs/agents/design-system.md#text-surfaces`.
 - Keyboard list navigation belongs to the focused pane: each list owns a
   `FocusHandle` and its own `.on_key_down`; never add a window-level arrow

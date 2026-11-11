@@ -560,7 +560,7 @@ impl Render for ItemListView {
         let body = if writing {
             // the form is the detail column even when no row sits beside it:
             // a repository's first pull request starts here
-            self.render_workbench(&items, cx)
+            self.render_workbench(&items, window, cx)
         } else if self.closed && closed_failed && total == 0 {
             let message = format!("Could not load closed {title}.");
             div()
@@ -616,7 +616,7 @@ impl Render for ItemListView {
             let query = self.filter.read(cx).value().trim().to_string();
             no_match(&query, cx)
         } else {
-            let workbench = self.render_workbench(&items, cx);
+            let workbench = self.render_workbench(&items, window, cx);
             if closed_failed {
                 // one source failed while the other answered: its rows stay,
                 // with the way to ask again above them
@@ -665,10 +665,19 @@ impl ItemListView {
     fn render_workbench(
         &mut self,
         items: &[ActivityItem],
+        window: &Window,
         cx: &mut Context<Self>,
     ) -> gpui::AnyElement {
         // the cursor steps the same rows this frame draws
         self.visible = items.to_vec();
+        // The list owns the row keys only while its handle holds the focus;
+        // the head says so with the label's ink and its bottom rule.
+        let focused = self.list_focus.is_focused(window);
+        let (head_focused, head_idle) = if self.pull_requests {
+            ("pr-head-focused", "pr-head-idle")
+        } else {
+            ("issues-head-focused", "issues-head-idle")
+        };
         let pane_width = self.store.read(cx).pane_width;
         let stacked = pane_width < STACKED_PANE;
         // the detail column's own width: the rail-stacking rules read it
@@ -764,10 +773,25 @@ impl ItemListView {
                     .gap_2()
                     .h(px(40.))
                     .px_4()
+                    .debug_selector(move || {
+                        if focused {
+                            head_focused.to_string()
+                        } else {
+                            head_idle.to_string()
+                        }
+                    })
                     .border_b_1()
-                    .border_color(theme::hairline())
+                    .border_color(if focused {
+                        theme::accent()
+                    } else {
+                        theme::hairline()
+                    })
                     .text_size(px(theme::font_meta()))
-                    .text_color(theme::text_dim())
+                    .text_color(if focused {
+                        theme::text()
+                    } else {
+                        theme::text_dim()
+                    })
                     .child(format!("{label} {}", items.len()))
                     .child(div().flex_1())
                     // a list one platform answered says so once, in its head;

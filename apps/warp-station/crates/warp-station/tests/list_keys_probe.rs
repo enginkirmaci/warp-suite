@@ -90,6 +90,25 @@ fn pull(number: u64) -> GitHubItem {
     }
 }
 
+fn issue(number: u64) -> GitHubItem {
+    GitHubItem {
+        number,
+        title: format!("Issue {number}"),
+        url: format!("https://example.test/pull/{number}"),
+        author: Some("Probe Author".into()),
+        labels: Vec::new(),
+        is_draft: false,
+        review_decision: None,
+        updated_at: None,
+        created_at: None,
+        comments: 0,
+        head_ref_name: Some("feature".into()),
+        base_ref_name: Some("main".into()),
+        state: Some("OPEN".into()),
+        is_pull_request: false,
+    }
+}
+
 fn click(cx: &mut gpui::VisualTestContext, selector: &'static str) {
     let bounds = cx
         .debug_bounds(selector)
@@ -373,5 +392,54 @@ fn pull_request_keys_follow_the_focused_list(cx: &mut TestAppContext) {
         selection(cx, &store).as_deref(),
         Some("/probe/alpha"),
         "the focused pull request list does not move the repo list"
+    );
+}
+
+#[gpui::test]
+fn issue_keys_follow_the_focused_list(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+    cx.update(warp_station::theme::apply_kit_theme);
+
+    let (net_tx, _net_rx) = async_channel::unbounded();
+    let store = cx.new(|cx| {
+        let mut store = Store::with_settings(
+            net_tx,
+            scratch_service("issue_keys_follow_the_focused_list"),
+        );
+        store.group_by_root = false;
+        store.pane_width = 1400.;
+        store.replace_repos(vec![
+            entry("alpha", "/probe/alpha"),
+            entry("beta", "/probe/beta"),
+        ]);
+        store.github_by_folder.insert(
+            "/probe/alpha".into(),
+            std::sync::Arc::new(GitHubSnapshot {
+                url: Some("https://github.com/probe/alpha".into()),
+                pulls: Vec::new(),
+                issues: vec![issue(1), issue(2), issue(3)],
+                runs: Vec::new(),
+                available: true,
+            }),
+        );
+        store.select_repo("/probe/alpha", cx);
+        store.open_detail_tab(warp_station::store::WorkspaceTab::Issues, cx);
+        store
+    });
+    let handle = store.clone();
+    let (_window, cx) = cx.add_window_view(|window, cx| MainWindow::new(handle, window, cx));
+    draw(cx);
+
+    click(cx, "Issue-gh-1");
+    cx.simulate_keystrokes("down");
+    cx.run_until_parked();
+    let open = cx.read_entity(&store, |store, _| {
+        store.open_activity(false).map(|open| open.number)
+    });
+    assert_eq!(open, Some(2), "↓ opens the next issue");
+    assert_eq!(
+        selection(cx, &store).as_deref(),
+        Some("/probe/alpha"),
+        "the focused issue list does not move the repo list"
     );
 }

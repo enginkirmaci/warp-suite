@@ -832,12 +832,18 @@ impl FilteredPicker {
                 }
             }))
             .child(if refreshing {
-                warpui_kit_core::motion::spinner(
-                    SharedString::from(format!("picker-refresh-spin-{}", self.spec.key)),
-                    self.spec.icons.refresh,
-                    px(fonts.icon_small),
-                    palette::text_muted(),
-                )
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_1()
+                    .child(warpui_kit_core::motion::spinner(
+                        SharedString::from(format!("picker-refresh-spin-{}", self.spec.key)),
+                        self.spec.icons.refresh,
+                        px(fonts.icon_small),
+                        palette::text_muted(),
+                    ))
+                    .child(label)
+                    .into_any_element()
             } else {
                 warpui_kit_core::icon(
                     self.spec.icons.refresh,

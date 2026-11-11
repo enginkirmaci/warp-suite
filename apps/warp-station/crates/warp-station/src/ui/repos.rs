@@ -579,7 +579,7 @@ impl Render for ReposPage {
             crate::ui::repos_list::render(store, &self.store, &self.repo_scroll)
         };
         let list = list_visible.then(|| {
-            let head = self.render_list_head(cx);
+            let head = self.render_list_head(window, cx);
             let sort_menu = self.render_sort_menu(cx);
             let tag_menu = self.render_tag_menu(cx);
             shell::list_pane(list_width)
@@ -810,7 +810,10 @@ impl ReposPage {
 
     /// The list pane's head: totals and the list's actions, the scope, then
     /// tags and sort. The tab strip already names the list, so it has no title.
-    fn render_list_head(&mut self, cx: &mut Context<Self>) -> gpui::AnyElement {
+    fn render_list_head(&mut self, window: &Window, cx: &mut Context<Self>) -> gpui::AnyElement {
+        // The list owns the row keys only while its handle holds the focus;
+        // the head says so with the label's ink and its bottom rule.
+        let focused = self.repo_focus.is_focused(window);
         let (tags, active_tags, scanning) = {
             let store = self.store.read(cx);
             (store.all_tags(), store.tag_filters.clone(), store.scanning)
@@ -919,6 +922,7 @@ impl ReposPage {
             .child(icon_action(
                 "refresh-button",
                 if scanning { "Refreshing" } else { "Refresh" },
+                "Refreshing",
                 "icons/icon-refresh.svg",
                 scanning,
                 move |_, _, cx| {
@@ -927,6 +931,7 @@ impl ReposPage {
             ))
             .child(icon_action(
                 "add-repo-button",
+                "Add repo",
                 "Add repo",
                 "icons/icon-plus.svg",
                 false,
@@ -939,6 +944,7 @@ impl ReposPage {
             .child(icon_action(
                 "clone-button",
                 "Clone",
+                "Cloning",
                 "icons/icon-cloud-download.svg",
                 !self.store.read(cx).cloning.is_empty(),
                 cx.listener(|this, _, window, cx| {
@@ -972,7 +978,11 @@ impl ReposPage {
             .overflow_hidden()
             .whitespace_nowrap()
             .text_size(px(theme::font_sub()))
-            .text_color(theme::text_dim())
+            .text_color(if focused {
+                theme::text()
+            } else {
+                theme::text_dim()
+            })
             .child(attention_label)
             .child(format!(
                 "· {} changes · {} issues",
@@ -1126,6 +1136,13 @@ impl ReposPage {
 
         div()
             .relative()
+            .debug_selector(move || {
+                if focused {
+                    "repos-head-focused".to_string()
+                } else {
+                    "repos-head-idle".to_string()
+                }
+            })
             .flex_shrink_0()
             .flex()
             .flex_col()
@@ -1134,7 +1151,11 @@ impl ReposPage {
             .pt_3p5()
             .pb_2()
             .border_b_1()
-            .border_color(theme::hairline())
+            .border_color(if focused {
+                theme::accent()
+            } else {
+                theme::hairline()
+            })
             .when(scanning, |head| {
                 head.child(motion::progress_line("list-progress", theme::accent()))
             })
@@ -1328,21 +1349,23 @@ fn sort_arrow(ascending: bool) -> &'static str {
 }
 
 /// A list action: a quiet square with its name in the accessibility tree. Busy,
-/// its icon turns.
+/// its icon turns and its word joins it.
 fn icon_action(
     id: &'static str,
     label: &'static str,
+    busy_label: &'static str,
     icon_path: &'static str,
     busy: bool,
     on_click: impl Fn(&gpui::ClickEvent, &mut Window, &mut App) + 'static,
 ) -> gpui::AnyElement {
     div()
         .id(id)
-        .a11y_button(label)
+        .a11y_button(if busy { busy_label } else { label })
         .debug_selector(move || id.into())
         .cursor_pointer()
         .flex_shrink_0()
-        .size(px(30.))
+        .when(!busy, |d| d.size(px(30.)))
+        .when(busy, |d| d.h(px(30.)).w_auto().px_2())
         .rounded(px(6.))
         .flex()
         .items_center()
@@ -1350,13 +1373,18 @@ fn icon_action(
         .hover(|d| d.bg(theme::raised()))
         .on_click(on_click)
         .child(if busy {
-            motion::spinner(
-                SharedString::from(format!("{id}-spin")),
-                icon_path,
-                px(theme::icon_medium()),
-                theme::BEHIND,
-            )
-            .into_any_element()
+            div()
+                .flex()
+                .items_center()
+                .gap_1p5()
+                .child(motion::spinner(
+                    SharedString::from(format!("{id}-spin")),
+                    icon_path,
+                    px(theme::icon_medium()),
+                    theme::BEHIND,
+                ))
+                .child(busy_label)
+                .into_any_element()
         } else {
             icon(icon_path, px(theme::icon_medium()), theme::text_dim()).into_any_element()
         })

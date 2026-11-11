@@ -59,12 +59,20 @@ fn cloning_row(ix: usize, name: &str) -> impl IntoElement + use<> {
                 .text_ellipsis()
                 .child(name.to_string()),
         )
-        .child(motion::spinner(
-            SharedString::from(format!("repo-cloning-spinner-{ix}")),
-            "icons/icon-spinner.svg",
-            px(theme::icon_tiny()),
-            theme::text_dim(),
-        ))
+        .child(
+            div()
+                .id(SharedString::from(format!("repo-cloning-status-{ix}")))
+                .role(gpui::Role::Status)
+                .aria_label("Cloning repository")
+                .flex()
+                .items_center()
+                .child(motion::spinner(
+                    SharedString::from(format!("repo-cloning-spinner-{ix}")),
+                    "icons/icon-spinner.svg",
+                    px(theme::icon_tiny()),
+                    theme::text_dim(),
+                )),
+        )
         .child(
             div()
                 .text_size(px(theme::font_meta()))

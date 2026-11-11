@@ -168,13 +168,19 @@ impl AzureView {
             .text_size(px(theme::font_body()))
             .text_color(theme::text_dim())
             .child(if busy {
-                motion::spinner(
-                    "azure-latest-spinner",
-                    "icons/icon-spinner.svg",
-                    px(theme::icon_small()),
-                    color,
-                )
-                .into_any_element()
+                div()
+                    .id("azure-latest-status")
+                    .role(gpui::Role::Status)
+                    .aria_label("Latest run in progress")
+                    .flex()
+                    .items_center()
+                    .child(motion::spinner(
+                        "azure-latest-spinner",
+                        "icons/icon-spinner.svg",
+                        px(theme::icon_small()),
+                        color,
+                    ))
+                    .into_any_element()
             } else {
                 icon(glyph, px(theme::icon_small()), color).into_any_element()
             })
@@ -705,13 +711,19 @@ fn run_strip(run: &ActivityRun) -> AnyElement {
                 .gap_1p5()
                 .text_color(color)
                 .child(if run.is_running() {
-                    motion::spinner(
-                        "run-strip-spinner",
-                        "icons/icon-spinner.svg",
-                        px(theme::icon_tiny()),
-                        color,
-                    )
-                    .into_any_element()
+                    div()
+                        .id("run-strip-status")
+                        .role(gpui::Role::Status)
+                        .aria_label("Run in progress")
+                        .flex()
+                        .items_center()
+                        .child(motion::spinner(
+                            "run-strip-spinner",
+                            "icons/icon-spinner.svg",
+                            px(theme::icon_tiny()),
+                            color,
+                        ))
+                        .into_any_element()
                 } else {
                     icon(glyph, px(theme::icon_tiny()), color).into_any_element()
                 })
@@ -819,13 +831,19 @@ fn stage_card(ix: usize, stage: &RunStage) -> AnyElement {
                 .min_h(px(44.))
                 .px_4()
                 .child(if glyph == "icons/icon-spinner.svg" {
-                    motion::spinner(
-                        SharedString::from(format!("run-stage-spin-{ix}")),
-                        "icons/icon-spinner.svg",
-                        px(theme::icon_small()),
-                        color,
-                    )
-                    .into_any_element()
+                    div()
+                        .id(SharedString::from(format!("run-stage-status-{ix}")))
+                        .role(gpui::Role::Status)
+                        .aria_label(format!("Running stage {}", stage.name))
+                        .flex()
+                        .items_center()
+                        .child(motion::spinner(
+                            SharedString::from(format!("run-stage-spin-{ix}")),
+                            "icons/icon-spinner.svg",
+                            px(theme::icon_small()),
+                            color,
+                        ))
+                        .into_any_element()
                 } else {
                     icon(glyph, px(theme::icon_small()), color).into_any_element()
                 })
