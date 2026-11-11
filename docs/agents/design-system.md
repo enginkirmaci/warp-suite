@@ -27,6 +27,8 @@ palette click moves every surface and the accent family in all three (see
 | Settings | `warpui_kit_core::settings` | a settings page needs a row, switch or segment |
 | Controls | `warpui_kit_core::{controls,field}` | a button, menu row, popover, field or keycap |
 | Text menu | `warpui_kit_core::text_menu` | a selectable read-only surface needs a right-click Copy |
+| Text surfaces | `warpui-kit-markdown`, `text_menu` | text should be a document or a label |
+| Keyboard | the app's list pane (notes' tree is the reference) | arrows, focus or a list cursor |
 | Kit mapping | `warpui_kit_core::kit` | a kit component renders the wrong tone |
 
 ## Palettes
@@ -330,6 +332,33 @@ toasts, dialogs), `SPIN` 800 ms, `PROGRESS` 1200 ms.
   `enable-animations` on Linux, `MinAnimate` on Windows). Each GPUI app has a
   Reduce motion switch in Appearance and stores it in its own settings.
 
+### Where it shows
+
+Motion is a state signal, so one state shows at three levels and the levels
+must agree:
+
+1. **The object.** The row that is working animates: a repo row spins and
+   names its git job, a chat row spins, a running tool's title line carries the
+   spinner and its word. A row that is only *near* running work does not.
+2. **Its head.** The pane or tile says the same thing in its title row — the
+   same spinner and word where the head has room (the chat head's `Running`), a
+   list head's `Loading…`, the detail head's progress line. The head is what
+   stays visible when the row is scrolled away or the tab is in the background.
+3. **The window.** When the window has work running, the title bar carries one
+   activity chip for it (spinner, count, word), and the OS window title
+   carries the same summary as plain text (`2 running — Warp Agent`). Both
+   change on the same state change and both drop the indicator when the window
+   is idle.
+
+- **Never motion alone.** Every spinner has a word beside it, an accessible
+  name on the animated element, and a tooltip naming what runs. Reduced motion
+  keeps the glyph and the word; it only stops the turn.
+- **The OS title states, it does not move.** The in-app head may carry the same
+  spinner as its row, but the OS window title is a string: it carries the word
+  and count, never a frame animation.
+- **A title does not invent work.** It repeats a count the app already has
+  (`Store::activity`, the tile's `running`) and shows nothing at zero.
+
 ## Controls
 
 The shapes the family repeats. Copy the numbers, since they come from the
@@ -369,6 +398,15 @@ mockup, and use the shared helper where one exists.
   switch_row_with_desc, subhead, rows}` — a 60-high row, label and optional
   description left, control right, `border_light()` rule between rows, no card
   around them. Switches use the kit's 36×20 `Switch`.
+- **Nested scrollers:** a scroller inside another (a fold in the chat
+  transcript, a menu over a list) takes the wheel itself while it has content
+  left and lets the step chain out only when it is hard against the edge in
+  that direction. GPUI hands one wheel event to every scrollable hitbox under
+  the pointer, so without this the outer one moves on the same tick.
+  `scroll::consume_wheel` is that rule — call it from the nested element's
+  `.on_scroll`, tracked by its own `ScrollHandle`; `fold_body(id, &handle)`
+  already does. Do not share one handle between two folds: their offsets
+  would move together.
 - **Keycap:** `field::kbd()` — 20 high, 4px radius, `line_strong()` edge,
   `font_mono_meta`; station's draw call is the same shape.
 - **Search field:** `search_bg()` is `well()`, `search_border()` is
@@ -415,6 +453,72 @@ Use the core helper for new code rather than adding another copy.
   keyboard shortcut or the menu; a bump of `gpui-kit` gets the probe in
   `kits/warpui-kit-core/tests/text_editing_probe.rs` first.
 
+## Text surfaces
+
+Two kinds of text. The line is what the surface *is*, not how long it is.
+
+- **Content** is prose the user reads or writes: a chat message, reasoning,
+  tool output, a question, a note, a README or summary, a PR or issue body, a
+  license. It renders as markdown through `warpui-kit-markdown` — the
+  read-only viewer (`read_only_document` / `render_read_only_*`) where the
+  user never edits, the live editor where they do (warp-notes). A surface
+  where one editor per item is the wrong cost — a volatile list of small
+  comments, a streaming tool payload — may use `TextView` instead, and then
+  keeps `text_menu`. Selection, links and highlighted code stay either way.
+- **Labels** are fixed UI vocabulary: buttons, menu rows, tabs, list-row
+  titles, field labels, section heads, tool names, statuses, counts. They are
+  plain `div`/`SharedString` text, never markdown, never an editor, never a
+  selection menu. Emphasis comes from `font_weight` and the palette, not from
+  markup.
+
+Rules that follow:
+
+- **The context menu belongs to the surface.** A `LiveEditor` owns its menu
+  (Cut/Copy/Paste/Select all while editing, Copy/Select all read-only); do not
+  wrap it in `text_menu`. A `TextView` or diff body takes
+  `text_menu::attach(…, text_menu::focus(cx))`. A label takes the row's action
+  menu (pin, rename, delete), not a Copy menu.
+- **An item's own actions extend the text menu, they do not replace it.** A
+  chat bubble may add Edit/Reprompt/Fork, but Copy and Select all stay for a
+  selection inside it, and Ctrl/Cmd+C copies the selection.
+- **A one-line clamp is still content.** `max_lines(1)` is layout; a tool's
+  output is content even when it is clamped. A tool's *title* is a label and
+  stays plain text.
+- **No parser may take the window down.** A text the markdown parser cannot
+  handle falls back to plain prose (warp-agent's `text_view` guard), never to a
+  panic and never to a label.
+
+## Keyboard navigation
+
+Keys belong to the surface that has focus. A window may hold several lists;
+each has its own cursor, and only the focused one moves. There is no
+window-wide list cursor and no window-level arrow handler.
+
+- **A list is a focusable pane.** Give it its own `FocusHandle`,
+  `.track_focus(&handle)` on the list element, and handle keys in that
+  element's `.on_key_down`. A click on a row or on the pane focuses it. Do not
+  put the handler on the window: it would take arrows from the editor, the
+  composer and the search field.
+- **One cursor per list.** `Up`/`Down` step it, `Home`/`End` go to the ends,
+  `PageUp`/`PageDown` move by a page, `Enter` opens or activates, `Left`/`Right`
+  collapse and expand in a tree. The cursor scrolls into view on every move.
+  Notes' `handle_tree_key` / `move_tree_cursor` is the reference key map; a new
+  list copies the map, not the tree's path logic.
+- **Cursor and selection are different.** The cursor is the keyboard's
+  position; the open/active row keeps its accent edge and may differ (notes
+  previews on click, opens on `Enter`). The cursor carries the focus emphasis
+  only while its pane is focused; an unfocused list may keep it as a quiet
+  marker, so two lists never look armed at once.
+- **Fields and editors win.** With a text field, the composer or the markdown
+  editor focused, arrows move the caret/selection and never reach a list. That
+  is why the list handler lives on the list.
+- **Global keys stay global.** Quick open, search, palette and app shortcuts
+  stay on the window context. A list claims `Enter`, `Space`, `Delete` and
+  `F2` only while focused, plus `Shift+F10` for its row menu.
+- **The cursor is accessible.** Rows carry `a11y_tree_item`/`aria_selected`
+  and the list exposes a name, so a probe can move the cursor without a
+  pointer.
+
 ## The About screen
 
 Every GPUI app carries **About above Settings** at the bottom of the rail, and
@@ -458,5 +562,8 @@ the version the row promises.
   `controls.rs` for a button/menu, `field.rs` for a field, `settings.rs` for a
   settings row, `about.rs` for anything the About screen shows, `motion.rs` for
   anything that moves.
+- A new list or text surface: settle content vs label first
+  (`## Text surfaces`), then give the list its own focus and key handler
+  (`## Keyboard navigation`).
 - Startup, text size or palette plumbing: `bootstrap.rs` / `scale.rs`.
 - App-only layout constants: the app's `theme.rs`.

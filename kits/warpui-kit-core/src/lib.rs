@@ -20,6 +20,7 @@
 //!   follow hooks, first theme pass, reduced motion
 //! - [`pump`] — the net-event drain loop both store-driven apps ran by hand
 //! - [`controls`] — the one button look, menu row, popover card and fold body
+//! - [`scroll`] — the wheel rule for a scroller nested in another one
 //! - [`field`] — the one text box: `.field`, `.area` and the `.kbd` chip
 //! - [`media`] — attachment mime guesses and inline images from bytes
 //! - [`tooltip`] and [`tooltip_overlay`] — the two tooltip mechanisms
@@ -43,6 +44,7 @@ pub mod motion;
 pub mod palette;
 pub mod pump;
 pub mod scale;
+pub mod scroll;
 pub mod settings;
 pub mod shell;
 pub mod text_menu;

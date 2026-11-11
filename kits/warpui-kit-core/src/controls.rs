@@ -7,10 +7,12 @@
 //! palette switch moves these with the rest of the family.
 
 use crate::palette;
+use crate::scroll;
 use crate::shell;
 use gpui::prelude::*;
 use gpui::{
-    AnyElement, App, ClickEvent, Div, ElementId, FontWeight, Role, SharedString, Window, div, px,
+    AnyElement, App, ClickEvent, Div, ElementId, FontWeight, Role, ScrollHandle, SharedString,
+    Window, div, px,
 };
 
 /// The button looks: the accent fill, and the two quiet ones, which are the
@@ -140,7 +142,14 @@ pub fn popover_card() -> Div {
 
 /// The collapsible fold body: inset panel, 260px cap, scrollable. Returns a
 /// stateful div so callers add their text styling.
-pub fn fold_body(id: impl Into<ElementId>) -> gpui::Stateful<Div> {
+///
+/// The body is a scroller nested inside its host (a fold in a chat sits in the
+/// transcript's list), so it takes the wheel step itself while it has content
+/// left and lets the step chain out only at its edge — see [`crate::scroll`].
+/// `scroll` is the caller's per-fold offset; keep one handle per fold so two
+/// open folds do not share a position.
+pub fn fold_body(id: impl Into<ElementId>, scroll: &ScrollHandle) -> gpui::Stateful<Div> {
+    let handle = scroll.clone();
     div()
         .id(id.into())
         .rounded(px(6.))
@@ -148,4 +157,6 @@ pub fn fold_body(id: impl Into<ElementId>) -> gpui::Stateful<Div> {
         .p_2()
         .max_h(px(260.))
         .overflow_y_scroll()
+        .track_scroll(scroll)
+        .on_scroll(move |event, window, cx| scroll::consume_wheel(&handle, event, window, cx))
 }

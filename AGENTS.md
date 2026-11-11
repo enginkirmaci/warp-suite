@@ -241,6 +241,19 @@ when one side changes, update the other side in the **same commit**.
 - Bind app keybindings **after** that bootstrap, so they win ties against the
   bindings `gpui_kit::init` installs. Scope with action contexts (`"Input"`,
   `"Composer > Input"`), not global remaps.
+- Motion is a state signal: a running or loading surface shows a spinner and a
+  word at its row, in its head/title, and in the window's title bar and OS
+  title. Every spinner has a word and an accessible name; reduced motion keeps
+  the word. See `docs/agents/design-system.md#motion`.
+- Content text renders as markdown through `warpui-kit-markdown` (read-only
+  viewer or the live editor) and keeps its context menu; labels — buttons,
+  rows, tabs, field and section labels, tool names, statuses — stay plain
+  text with no markdown and no selection menu. See
+  `docs/agents/design-system.md#text-surfaces`.
+- Keyboard list navigation belongs to the focused pane: each list owns a
+  `FocusHandle` and its own `.on_key_down`; never add a window-level arrow
+  handler. warp-notes' tree (`handle_tree_key`) is the reference. See
+  `docs/agents/design-system.md#keyboard-navigation`.
 - An app's `theme.rs` re-exports `warpui-kit-core` and adds only layout
   constants. App code holds no color literal, font family or font size. Read
   the live palette through the reader helpers; do not cache palette values in
