@@ -1,6 +1,7 @@
-//! The History tab's commit detail: a file's title row folds its patch, while
-//! the patch itself is selectable text. A press or a selection drag inside the
-//! diff must not reach the fold toggle (it used to sit on the whole row).
+//! The History tab's commit detail: the head band over a file rail and the
+//! selected file's diff. The diff is selectable text, a plain press in it must
+//! not change the selection, and a repository with no commits settles into the
+//! design's empty state instead of "Loading history…" forever.
 
 use gpui::prelude::*;
 use gpui::{
@@ -9,6 +10,7 @@ use gpui::{
 };
 use std::path::PathBuf;
 use std::sync::Arc;
+use warp_station::net::{NetCommand, UiEvent};
 use warp_station::store::{Store, WorkspaceTab};
 use warp_station::ui::changes::ChangesView;
 use warp_station_core::model::{GitChangedFile, GitCommitDetails, GitCommitInfo};
@@ -17,6 +19,7 @@ use warp_station_core::settings::SettingsService;
 
 const HASH: &str = "6272a3c0000000000000000000000000000000000";
 const FILE: &str = "src/x.rs";
+const OTHER_FILE: &str = "Cargo.toml";
 const PATCH: &str = "\
 --- a/src/x.rs
 +++ b/src/x.rs
@@ -25,6 +28,13 @@ const PATCH: &str = "\
 -fn b() {}
 +fn b() { let x = 1; }
  fn c() {}
+";
+const OTHER_PATCH: &str = "\
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -1,2 +1,3 @@
+ [package]
++version = \"0.2.0\"
 ";
 
 fn scratch(name: &str) -> PathBuf {
@@ -62,12 +72,12 @@ fn repo() -> RepoEntry {
     }
 }
 
-fn changed_file() -> GitChangedFile {
+fn changed_file(path: &str, additions: u32, deletions: u32) -> GitChangedFile {
     GitChangedFile {
-        path: FILE.into(),
+        path: path.into(),
         status_code: "M".into(),
-        additions: Some(1),
-        deletions: Some(1),
+        additions: Some(additions),
+        deletions: Some(deletions),
     }
 }
 
@@ -100,19 +110,19 @@ fn click(vcx: &mut VisualTestContext, selector: &'static str) {
 }
 
 #[gpui_kit::gpui::test]
-fn the_diff_body_stays_open_and_selectable(cx: &mut TestAppContext) {
+fn the_selected_file_diff_stays_selectable(cx: &mut TestAppContext) {
     cx.update(gpui_kit::init);
     cx.update(warp_station::theme::apply_kit_theme);
 
-    let settings = scratch("fold");
-    let (net_tx, _net_rx) = async_channel::unbounded();
+    let settings = scratch("split");
+    let (net_tx, net_rx) = async_channel::unbounded();
     let store = cx.new(|cx| {
         let mut store = Store::with_settings(net_tx, Arc::new(SettingsService::at(settings)));
         store.replace_repos(vec![repo()]);
         store.select_repo("/probe/alpha", cx);
         store.set_history(vec![GitCommitInfo {
             hash: HASH.into(),
-            subject: "fix: keep the diff open".into(),
+            subject: "fix: split the history detail".into(),
             author: Some("Probe Author".into()),
             date: chrono::Local::now(),
         }]);
@@ -122,10 +132,10 @@ fn the_diff_body_stays_open_and_selectable(cx: &mut TestAppContext) {
     store.update(cx, |store, _| {
         store.commit_details = Some(GitCommitDetails {
             hash: HASH.into(),
-            files: vec![changed_file()],
+            files: vec![changed_file(FILE, 1, 1), changed_file(OTHER_FILE, 1, 0)],
             body: Some("The body stays readable too.".into()),
         });
-        store.commit_file_patch = Some((format!("{HASH}|{FILE}"), PATCH.into()));
+        store.commit_file_patches = vec![(format!("{HASH}|{FILE}"), PATCH.into())];
     });
 
     let (_host, vcx) = cx.add_window_view(|window, cx| {
@@ -133,36 +143,45 @@ fn the_diff_body_stays_open_and_selectable(cx: &mut TestAppContext) {
         Host { changes }
     });
     draw(vcx);
+    draw(vcx);
 
     assert!(
-        vcx.debug_bounds("commit-detail-file").is_some(),
-        "the commit detail lists its changed file"
+        vcx.debug_bounds("commit-subject").is_some(),
+        "the head band names the commit it shows"
+    );
+    for selector in ["detail-copy-sha", "detail-revert", "detail-checkout"] {
+        assert!(
+            vcx.debug_bounds(selector).is_some(),
+            "the head band keeps {selector}"
+        );
+    }
+    assert!(
+        vcx.debug_bounds("commit-file-0").is_some() && vcx.debug_bounds("commit-file-1").is_some(),
+        "the rail lists every file in the commit"
     );
     assert!(
         vcx.debug_bounds("commit-detail-patch").is_none(),
-        "the patch starts folded"
+        "the old inline patch fold is gone"
     );
-
-    click(vcx, "commit-detail-file");
+    assert!(
+        vcx.debug_bounds("commit-diff").is_some(),
+        "the selected file gets the diff pane"
+    );
     let patch = vcx
-        .debug_bounds("commit-detail-patch")
-        .expect("the title row opens the patch");
+        .debug_bounds("diff-text")
+        .expect("the selected file's patch is drawn");
 
     // A plain click in the diff body is a press into selectable text, not a
-    // fold: this is the reported bug.
+    // file selection: the rail and the diff must stay where they are.
     vcx.simulate_click(patch.center(), Modifiers::default());
     draw(vcx);
     assert!(
-        vcx.debug_bounds("commit-detail-patch").is_some(),
-        "a click inside the diff must not fold it"
+        vcx.debug_bounds("diff-text").is_some(),
+        "a click inside the diff keeps it on screen"
     );
 
     // Dragging across a line selects it; the mouse-up is still inside the
-    // diff, so it must not reach the file's toggle either.
-    assert!(
-        vcx.debug_bounds("commit-detail-patch").is_some(),
-        "the patch is still open"
-    );
+    // diff, so it must not reach the rail either.
     // drag inside the diff's own text column, whose origin moves with the
     // code font: a fixed offset from the card would land in the gutter once
     // the diff drew one step smaller
@@ -171,7 +190,7 @@ fn the_diff_body_stays_open_and_selectable(cx: &mut TestAppContext) {
         .expect("the patch draws its code column");
     let line = text.size.height / 4.;
     let start = point(text.origin.x + px(2.), text.origin.y + line * 1.5);
-    let end = point(text.origin.x + px(180.), text.origin.y + line * 1.5);
+    let end = point(text.origin.x + px(120.), text.origin.y + line * 1.5);
     vcx.simulate_mouse_down(start, MouseButton::Left, Modifiers::default());
     vcx.simulate_mouse_move(end, Some(MouseButton::Left), Modifiers::default());
     vcx.simulate_mouse_up(end, MouseButton::Left, Modifiers::default());
@@ -182,15 +201,85 @@ fn the_diff_body_stays_open_and_selectable(cx: &mut TestAppContext) {
         selected.contains("fn a()") || selected.contains("fn b()"),
         "the drag selects the diff's code: {selected:?}"
     );
-    assert!(
-        vcx.debug_bounds("commit-detail-patch").is_some(),
-        "a selection drag leaves the diff open"
-    );
 
-    // The title row is still the one control that folds it.
-    click(vcx, "commit-detail-file");
+    // Pick the other file: the rail's selection moves and its patch is put on
+    // the wire, which is what the store's answer below fills.
+    click(vcx, "commit-file-1");
+    let asked = std::iter::from_fn(|| net_rx.try_recv().ok()).any(|command| {
+        matches!(
+            command,
+            NetCommand::GetCommitFilePatch { path, .. } if path == OTHER_FILE
+        )
+    });
+    assert!(asked, "selecting a rail row asks for that file's patch");
+
+    vcx.update_entity(&store, |store, _| {
+        store.commit_file_patches = vec![(format!("{HASH}|{OTHER_FILE}"), OTHER_PATCH.into())];
+    });
+    draw(vcx);
+    draw(vcx);
     assert!(
-        vcx.debug_bounds("commit-detail-patch").is_none(),
-        "clicking the title row folds the patch"
+        vcx.debug_bounds("diff-text").is_some(),
+        "the second file's patch draws in the same pane"
+    );
+    assert!(
+        vcx.debug_bounds("commit-diff").is_some(),
+        "the diff pane survives the selection"
+    );
+}
+
+#[gpui_kit::gpui::test]
+fn a_repository_with_no_commits_shows_the_empty_state(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+    cx.update(warp_station::theme::apply_kit_theme);
+
+    let settings = scratch("empty");
+    let (net_tx, net_rx) = async_channel::unbounded();
+    let store = cx.new(|cx| {
+        let mut store = Store::with_settings(net_tx, Arc::new(SettingsService::at(settings)));
+        store.replace_repos(vec![repo()]);
+        store.select_repo("/probe/alpha", cx);
+        store.open_detail_tab(WorkspaceTab::History, cx);
+        store
+    });
+
+    let (_host, vcx) = cx.add_window_view(|window, cx| {
+        let changes = cx.new(|cx| ChangesView::new(store.clone(), window, cx));
+        Host { changes }
+    });
+    draw(vcx);
+
+    assert!(
+        vcx.debug_bounds("history-loading").is_some(),
+        "the tab says it is loading the first time it opens"
+    );
+    assert!(
+        vcx.debug_bounds("history-empty").is_none(),
+        "an in-flight pass is not an empty repository"
+    );
+    let asked = std::iter::from_fn(|| net_rx.try_recv().ok())
+        .any(|command| matches!(command, NetCommand::LoadHistory { .. }));
+    assert!(asked, "opening History asks the net thread for a pass");
+
+    // The pass settles with no commits: emptiness is now an answer.
+    vcx.update_entity(&store, |store, cx| {
+        store.on_net_event(
+            UiEvent::HistoryLoaded {
+                folder: "/probe/alpha".into(),
+                commits: Vec::new(),
+                unpushed: None,
+            },
+            cx,
+        );
+    });
+    draw(vcx);
+
+    assert!(
+        vcx.debug_bounds("history-empty").is_some(),
+        "a settled empty history shows the design's empty state"
+    );
+    assert!(
+        vcx.debug_bounds("history-loading").is_none(),
+        "nothing is loading once the pass settles"
     );
 }

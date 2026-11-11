@@ -121,6 +121,10 @@ pub struct Store {
     pub change_patch_result: Option<(String, bool, String)>,
     history: Vec<warp_station_core::model::GitCommitInfo>,
     history_generation: u64,
+    /// Whether the selected repo's last history pass settled. An empty answer
+    /// means "no commits", not "still loading"; the History tab tells the two
+    /// apart with this and only shows its empty state once it is true.
+    history_loaded: bool,
     /// GitHub activity per folder — feeds the PR/Issues tabs; the entry
     /// counts on the repo rows come from these snapshots. Arc-shared so a
     /// view render clones a pointer, not the whole snapshot.
@@ -276,7 +280,9 @@ pub struct Store {
     home_tab: WorkspaceTab,
     /// Drill-down for the selected history commit, drained by the view.
     pub commit_details: Option<warp_station_core::model::GitCommitDetails>,
-    pub commit_file_patch: Option<(String, String)>,
+    /// One commit's file patches, keyed `hash|path`, drained by the view. A
+    /// queue, not a slot: the rail can ask for two files before either lands.
+    pub commit_file_patches: Vec<(String, String)>,
     /// When the next full-list GitHub/Azure activity pass fires: the rail's
     /// PR/issue counts cadence, deliberately slower than the fetch/refresh
     /// clocks it no longer rides on. Armed by
@@ -398,6 +404,7 @@ impl Store {
             change_patch_result: None,
             history: Vec::new(),
             history_generation: 0,
+            history_loaded: false,
             github_by_folder: std::collections::HashMap::new(),
             azure_by_folder: std::collections::HashMap::new(),
             github_details: None,
@@ -461,7 +468,7 @@ impl Store {
             home_repo: None,
             home_tab: WorkspaceTab::default(),
             commit_details: None,
-            commit_file_patch: None,
+            commit_file_patches: Vec::new(),
             next_activity_refresh: None,
             fetch_progress: None,
             fetch_baseline: None,
@@ -635,6 +642,18 @@ impl Store {
 
     pub fn history_generation(&self) -> u64 {
         self.history_generation
+    }
+
+    /// True once a history pass for the selected repo has answered — with
+    /// commits or with none. Cleared when a pass starts and on repo switch.
+    pub fn history_loaded(&self) -> bool {
+        self.history_loaded
+    }
+
+    /// Marks the next history answer as in flight: the tab's empty list says
+    /// "Loading history…" again instead of "no commits".
+    pub fn start_history_pass(&mut self) {
+        self.history_loaded = false;
     }
 
     pub fn set_history(&mut self, commits: Vec<warp_station_core::model::GitCommitInfo>) {
@@ -896,6 +915,7 @@ impl Store {
                 if self.selected_repo.as_deref() == Some(folder.as_str()) {
                     self.set_history(commits);
                     self.unpushed = unpushed;
+                    self.history_loaded = true;
                 }
                 cx.notify();
             }
@@ -1484,7 +1504,8 @@ impl Store {
                 patch,
             } => {
                 if self.selected_repo.as_deref() == Some(folder.as_str()) {
-                    self.commit_file_patch = Some((format!("{hash}|{path}"), patch));
+                    self.commit_file_patches
+                        .push((format!("{hash}|{path}"), patch));
                 }
                 cx.notify();
             }
@@ -3797,9 +3818,10 @@ impl Store {
         self.branches.clear();
         self.recent_commits.clear();
         self.set_history(Vec::new());
+        self.history_loaded = false;
         self.unpushed = None;
         self.commit_details = None;
-        self.commit_file_patch = None;
+        self.commit_file_patches.clear();
         self.github_details = None;
         self.open_pull = None;
         self.open_issue = None;
@@ -4046,6 +4068,7 @@ impl Store {
         self.kick_github_pass(std::slice::from_ref(&path));
         self.reload_open_pull();
         if !self.history.is_empty() {
+            self.start_history_pass();
             let _ = self
                 .net
                 .send_blocking(NetCommand::LoadHistory { folder: path });

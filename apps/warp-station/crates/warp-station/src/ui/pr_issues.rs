@@ -148,7 +148,7 @@ impl ItemListView {
         &self,
         open_count: usize,
         closed_count: Option<usize>,
-        new_target: Option<(ActivitySource, String)>,
+        new_target: Option<NewTarget>,
         show_controls: bool,
         sort: IssueSort,
         window: &Window,
@@ -156,7 +156,10 @@ impl ItemListView {
     ) -> impl IntoElement + use<> {
         let this = cx.entity();
         let closed_view = this.clone();
-        let label = new_verb(self.pull_requests, new_target.as_ref().map(|(s, _)| *s));
+        let label = new_verb(
+            self.pull_requests,
+            new_target.as_ref().map(|target| target.source),
+        );
         let (open_id, closed_id) = if self.pull_requests {
             ("pr-state-open", "pr-state-closed")
         } else {
@@ -258,12 +261,14 @@ impl ItemListView {
                         theme::text_muted(),
                     )),
             )
-            .when_some(new_target, |bar, (source, url)| {
+            .when_some(new_target, |bar, target| {
                 // the workbench's detail owns the one filled primary, so the
                 // list's New stays a plain button — and a pull request is
                 // written in the pane, not in the browser
                 let store = self.store.clone();
                 let pull_requests = self.pull_requests;
+                let source = target.source;
+                let url = target.url.clone();
                 bar.child(
                     div()
                         .id("list-new")
@@ -288,8 +293,8 @@ impl ItemListView {
                             // own create page
                             if pull_requests && source == ActivitySource::GitHub {
                                 store.update(cx, |store, cx| store.open_new_pull(cx));
-                            } else {
-                                let _ = warp_station_core::terminal::open_folder(&url);
+                            } else if let Some(url) = url.as_ref() {
+                                let _ = warp_station_core::terminal::open_folder(url);
                             }
                         })
                         .child(icon(
@@ -470,17 +475,19 @@ impl Render for ItemListView {
             items.retain(|item| item.matches(&self.query));
         }
 
-        // the New verb follows the platform the rows do: GitHub keeps the
-        // in-pane form, Azure opens its create page
-        let new_target = if github_on {
+        // the New verb follows the platform the rows do: a GitHub pull request
+        // is written in the in-pane form, so it needs no snapshot URL; GitHub
+        // issues and Azure verbs open their platform's create page.
+        let new_target = if self.pull_requests && github_on {
+            Some(NewTarget {
+                source: ActivitySource::GitHub,
+                url: None,
+            })
+        } else if github_on {
             github.as_ref().and_then(|snapshot| {
-                snapshot.url.as_ref().map(|url| {
-                    let tail = if self.pull_requests {
-                        "compare"
-                    } else {
-                        "issues/new"
-                    };
-                    (ActivitySource::GitHub, format!("{url}/{tail}"))
+                snapshot.url.as_ref().map(|url| NewTarget {
+                    source: ActivitySource::GitHub,
+                    url: Some(format!("{url}/issues/new")),
                 })
             })
         } else {
@@ -490,7 +497,10 @@ impl Render for ItemListView {
                 } else {
                     snapshot.new_work_item_url()
                 };
-                url.map(|url| (ActivitySource::Azure, url))
+                url.map(|url| NewTarget {
+                    source: ActivitySource::Azure,
+                    url: Some(url),
+                })
             })
         };
         let toolbar = self.render_toolbar(
@@ -511,7 +521,20 @@ impl Render for ItemListView {
             .selected_entry()
             .map(|repo| repo.name.clone())
             .unwrap_or_default();
-        let body = if self.closed && closed_failed && total == 0 {
+        // E2E hook: WARP_STATION_NEW_PULL=1 opens the form once, before the body
+        // picks the empty state — a repository with no rows must still show it
+        if self
+            .store
+            .update(cx, |store, _| std::mem::take(&mut store.new_pull_requested))
+        {
+            self.store.update(cx, |store, cx| store.open_new_pull(cx));
+        }
+        let writing = self.pull_requests && self.store.read(cx).new_pull.is_some();
+        let body = if writing {
+            // the form is the detail column even when no row sits beside it:
+            // a repository's first pull request starts here
+            self.render_workbench(&items, cx)
+        } else if self.closed && closed_failed && total == 0 {
             let message = format!("Could not load closed {title}.");
             div()
                 .flex_1()
@@ -551,9 +574,9 @@ impl Render for ItemListView {
                 match new_target.as_ref() {
                     // the toolbar already carries the verb; the empty state
                     // names it so the way forward is not a hunt
-                    Some((source, _)) => format!(
+                    Some(target) => format!(
                         "Use {} to {} the first one.",
-                        new_verb(self.pull_requests, Some(*source)),
+                        new_verb(self.pull_requests, Some(target.source)),
                         if self.pull_requests { "open" } else { "file" },
                     ),
                     None => missing_target_note(self.pull_requests, github_on, azure_on),
@@ -623,13 +646,6 @@ impl ItemListView {
         } else {
             pane_width - WORK_LIST
         };
-        // E2E hook: WARP_STATION_NEW_PULL=1 opens the form once, for a capture
-        if self
-            .store
-            .update(cx, |store, _| std::mem::take(&mut store.new_pull_requested))
-        {
-            self.store.update(cx, |store, cx| store.open_new_pull(cx));
-        }
         let writing = self.store.read(cx).new_pull.is_some();
         let selected = self
             .store
@@ -1069,6 +1085,14 @@ fn new_verb(pull_requests: bool, source: Option<ActivitySource>) -> &'static str
         (false, Some(ActivitySource::Azure)) => "New work item",
         (false, _) => "New issue",
     }
+}
+
+/// The New verb's destination: a GitHub pull request is written in the pane,
+/// so it has no URL; the other verbs open the platform's create page.
+#[derive(Clone, Debug)]
+struct NewTarget {
+    source: ActivitySource,
+    url: Option<String>,
 }
 
 /// What an empty list asks for when it has no known create target: name the

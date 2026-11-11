@@ -1604,7 +1604,7 @@ fn seed_github(
 ) {
     let snapshot = warp_station_core::github::GitHubSnapshot {
         available: true,
-        // a resolved repository: the tab's New verb needs the link
+        // a resolved repository: the Issues tab's New verb needs the link
         url: Some("https://github.com/o/alpha".into()),
         runs: Vec::new(),
         pulls: (0..pulls).map(|n| github_item(n, true)).collect(),
@@ -1988,8 +1988,9 @@ fn the_new_pull_request_form_opens_in_the_pane(cx: &mut TestAppContext) {
         "the list stays beside it"
     );
     for field in [
-        "new-pull-head",
+        "new-pull-source",
         "new-pull-base",
+        "new-pull-swap",
         "new-pull-title",
         "new-pull-description",
         "new-pull-reviewer",
@@ -2006,12 +2007,143 @@ fn the_new_pull_request_form_opens_in_the_pane(cx: &mut TestAppContext) {
         Some("main".into()),
         "the source starts on the checked out branch"
     );
+    let description = cx
+        .debug_bounds("new-pull-description")
+        .expect("the description draws");
+    assert!(
+        f32::from(description.size.height) >= 120.,
+        "the description is a message box, not a line"
+    );
 
     click(cx, "new-pull-cancel");
     assert!(cx.debug_bounds("new-pull").is_none());
     assert!(
         cx.debug_bounds("pull-request").is_some(),
         "Cancel gives the selection back"
+    );
+}
+
+/// The New pull request verb needs no snapshot URL: the form is written in the
+/// pane, so `gh` alone makes it reachable.
+#[gpui::test]
+fn the_new_pull_verb_needs_no_snapshot_url(cx: &mut TestAppContext) {
+    let (store, _net_rx) =
+        scratch_store(cx, "new-pull-no-url", vec![entry("alpha", "/probe/alpha")]);
+    // the repository resolved, but there is no page to link to
+    cx.update_entity(&store, |s: &mut Store, _| {
+        s.github_by_folder.insert(
+            "/probe/alpha".into(),
+            std::sync::Arc::new(warp_station_core::github::GitHubSnapshot {
+                available: true,
+                url: None,
+                runs: Vec::new(),
+                pulls: Vec::new(),
+                issues: Vec::new(),
+            }),
+        );
+    });
+    let cx = open_window(&store, cx);
+    draw(cx);
+    click(cx, "detail-tab-pulls");
+
+    assert!(
+        cx.debug_bounds("list-new").is_some(),
+        "the verb does not wait for a URL"
+    );
+    click(cx, "list-new");
+    assert!(
+        cx.debug_bounds("new-pull").is_some(),
+        "the in-pane form opens without gh"
+    );
+}
+
+/// The branch row is two pills over the probed branches: a pill opens its menu,
+/// a pick lands in the form, and the swap trades source and base.
+#[gpui::test]
+fn the_branch_pills_choose_the_pair(cx: &mut TestAppContext) {
+    use warp_station_core::model::{GitBranchKind, GitBranchRef};
+
+    let (store, _net_rx) =
+        scratch_store(cx, "new-pull-pills", vec![entry("alpha", "/probe/alpha")]);
+    seed_github(&store, "/probe/alpha", 1, 0, cx);
+    let cx = open_window(&store, cx);
+    // the branch probe answers after the window has selected the repository
+    cx.update_entity(&store, |s: &mut Store, cx| {
+        s.branches = ["main", "feat/x", "release"]
+            .into_iter()
+            .map(|name| GitBranchRef {
+                name: name.into(),
+                kind: GitBranchKind::Local,
+            })
+            .collect();
+        cx.notify();
+    });
+    draw(cx);
+    click(cx, "detail-tab-pulls");
+    click(cx, "list-new");
+
+    assert!(cx.debug_bounds("new-pull-source").is_some());
+    assert!(cx.debug_bounds("new-pull-base").is_some());
+
+    click(cx, "new-pull-source");
+    assert!(
+        cx.debug_bounds("new-pull-branch-menu").is_some(),
+        "a pill opens its menu"
+    );
+    assert!(cx.debug_bounds("new-pull-branch-feat/x").is_some());
+    click(cx, "new-pull-branch-feat/x");
+    assert!(
+        cx.debug_bounds("new-pull-branch-menu").is_none(),
+        "a pick dismisses the menu"
+    );
+    assert_eq!(
+        store.read_with(cx, |s, _| s.new_pull.as_ref().map(|f| f.head.clone())),
+        Some("feat/x".into())
+    );
+
+    click(cx, "new-pull-base");
+    click(cx, "new-pull-branch-release");
+    assert_eq!(
+        store.read_with(cx, |s, _| s.new_pull.as_ref().map(|f| f.base.clone())),
+        Some("release".into())
+    );
+
+    click(cx, "new-pull-swap");
+    assert_eq!(
+        store.read_with(cx, |s, _| s
+            .new_pull
+            .as_ref()
+            .map(|f| (f.head.clone(), f.base.clone()))),
+        Some(("release".into(), "feat/x".into()))
+    );
+}
+
+/// A pill opened before the branch probe answers says so instead of drawing an
+/// empty card, and its own press takes the menu away again.
+#[gpui::test]
+fn an_unanswered_branch_probe_says_so(cx: &mut TestAppContext) {
+    let (store, _net_rx) = scratch_store(
+        cx,
+        "new-pull-no-branches",
+        vec![entry("alpha", "/probe/alpha")],
+    );
+    seed_github(&store, "/probe/alpha", 1, 0, cx);
+    let cx = open_window(&store, cx);
+    draw(cx);
+    click(cx, "detail-tab-pulls");
+    click(cx, "list-new");
+
+    click(cx, "new-pull-source");
+    assert!(cx.debug_bounds("new-pull-branch-menu").is_some());
+    assert!(
+        cx.debug_bounds("new-pull-branch-empty").is_some(),
+        "the empty menu names its state"
+    );
+
+    click(cx, "new-pull-source");
+    assert!(
+        cx.debug_bounds("new-pull-branch-menu").is_none(),
+        "the pill toggles its own menu"
     );
 }
 

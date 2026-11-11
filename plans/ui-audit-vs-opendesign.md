@@ -171,6 +171,9 @@ Landed in this pass, with the full gate green (`cargo fmt --all --check`, clippy
 | S5 | the About hero no longer repeats the list row's `This app` tag | `kits/warpui-kit-core/src/about.rs` |
 | S6 | settled toward the app: OD documents the fourth Agent scope (`Running`) | OD `DESIGN.md` |
 | R3/R4 | pills use `rounded_full()`; the 18 px hover square is back on the 4/6/8 grid | `ui/overview.rs`, `ui/window.rs`, `ui/repos_list.rs` |
+| S3b | the History detail is the design's split: a commit-head band, a 240 Files rail and the shared diff pane (path bar + unified/split/wrap); the commit row's avatar leads its meta line; the commit body is no longer drawn (the design's head has no body slot) | `ui/changes.rs` |
+| S3c | an empty history says "No commits yet" instead of "Loading history…": the store carries a settled flag per pass | `store/mod.rs`, `ui/changes.rs` |
+| S2b | New pull request is reachable without `gh` (the in-pane form needs no URL), and its branch row is two branch pills with `into` and a swap: popover list with the current branch ticked; Description is a 120-high multiline box | `ui/pr_issues.rs`, `ui/new_pull.rs`, `assets/icons/icon-swap.svg` |
 
 Two audit entries were withdrawn after checking the prototype: the launcher
 dropdown repeating the "Open in" card (the prototype has both) and the tag

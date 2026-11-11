@@ -1,9 +1,10 @@
 //! The Changes and History tabs: the selected repo's commit workspace. Changes
 //! is the git toolbar (branch, Fetch, Pull, Push, Sync) over the file list and
 //! commit box on the left and the selected file's diff on the right. History is
-//! the day-grouped commits on the left and the selected commit on the right.
-//! The heavy data lives on the store; this view owns only ephemeral state (the
-//! selected file, fetched patches, dropdown state, the commit draft).
+//! the day-grouped commits on the left and the selected commit's head band over
+//! a file rail and that file's diff on the right. The heavy data lives on the
+//! store; this view owns only ephemeral state (the selected file, fetched
+//! patches, dropdown state, the commit draft).
 
 use crate::net::{GitAction, NetCommand};
 use crate::store::Store;
@@ -70,6 +71,9 @@ const HISTORY_ROW_HEIGHT: f32 = 58.;
 const FILE_COLUMN_W: f32 = 320.;
 /// The commit list's width.
 const HISTORY_COLUMN_W: f32 = 320.;
+/// The drilled commit's file rail, and the height of its group header and rows.
+const COMMIT_RAIL_W: f32 = 240.;
+const COMMIT_RAIL_ROW_H: f32 = 34.;
 /// The git toolbar's height.
 const TOOLBAR_H: f32 = 52.;
 /// The branch selector's width.
@@ -111,12 +115,11 @@ pub struct ChangesView {
     /// click confirms the arm.
     detail_armed: Option<&'static str>,
     detail_patches: std::collections::HashMap<String, String>,
-    expanded_details: std::collections::HashSet<String>,
-    /// One scroll handle per expanded commit-detail patch. The patches scroll
-    /// inside the commit detail's own scroller, so each consumes the wheel
-    /// events it can act on (see the on_scroll_wheel at the patch) instead of
-    /// letting one event move both it and the pane behind it.
-    patch_scrolls: std::collections::HashMap<String, gpui::ScrollHandle>,
+    /// Keys (`hash|path`) whose patch is already on the wire or landed; stops
+    /// a rail selection from re-asking on every render.
+    detail_requests: std::collections::HashSet<String>,
+    /// The file the drilled commit's rail shows; reset when the drill moves.
+    commit_file: usize,
     /// The repo the view's local state belongs to; a mismatch resets it all.
     loaded_for: Option<String>,
     /// Staged/unstaged groups, rebuilt only when the store's change snapshot
@@ -165,8 +168,8 @@ impl ChangesView {
             drilled_commit: None,
             detail_armed: None,
             detail_patches: std::collections::HashMap::new(),
-            expanded_details: std::collections::HashSet::new(),
-            patch_scrolls: std::collections::HashMap::new(),
+            detail_requests: std::collections::HashSet::new(),
+            commit_file: 0,
             loaded_for: None,
             groups_cache: None,
             history_rows: Vec::new(),
@@ -204,8 +207,8 @@ impl ChangesView {
         self.drilled_commit = None;
         self.detail_armed = None;
         self.detail_patches.clear();
-        self.expanded_details.clear();
-        self.patch_scrolls.clear();
+        self.detail_requests.clear();
+        self.commit_file = 0;
     }
 
     /// Closes the branch picker from an outside click or Escape. Returns
@@ -228,7 +231,12 @@ impl ChangesView {
         let needs_load = self.store.read(cx).history().is_empty();
         self.history_open = true;
         self.drilled_commit = None;
+        self.commit_file = 0;
         if needs_load && let Some(folder) = self.store.read(cx).selected_repo.clone() {
+            self.store.update(cx, |store, cx| {
+                store.start_history_pass();
+                cx.notify();
+            });
             let _ = self
                 .store
                 .read(cx)
@@ -243,7 +251,7 @@ impl ChangesView {
     /// Drills into one commit's detail.
     pub fn drill_commit(&mut self, hash: &str, cx: &mut Context<Self>) {
         self.drilled_commit = Some(hash.to_string());
-        self.expanded_details.clear();
+        self.commit_file = 0;
         if let Some(folder) = self.store.read(cx).selected_repo.clone() {
             let _ = self
                 .store
@@ -257,27 +265,64 @@ impl ChangesView {
         cx.notify();
     }
 
-    fn toggle_detail_patch(&mut self, hash: &str, path: &str, cx: &mut Context<Self>) {
+    /// Asks for one commit file's patch, once per key.
+    fn request_commit_patch(&mut self, hash: &str, path: &str, cx: &mut Context<Self>) {
         let key = format!("{hash}|{path}");
-        if self.expanded_details.contains(&key) {
-            self.expanded_details.remove(&key);
-        } else {
-            self.expanded_details.insert(key.clone());
-            if !self.detail_patches.contains_key(&key)
-                && let Some(folder) = self.store.read(cx).selected_repo.clone()
-            {
-                let _ = self
-                    .store
-                    .read(cx)
-                    .net
-                    .send_blocking(NetCommand::GetCommitFilePatch {
-                        folder: std::path::PathBuf::from(folder),
-                        hash: hash.to_string(),
-                        path: path.to_string(),
-                    });
-            }
+        if self.detail_patches.contains_key(&key) {
+            return;
         }
+        let Some(folder) = self.store.read(cx).selected_repo.clone() else {
+            return;
+        };
+        if !self.detail_requests.insert(key) {
+            return;
+        }
+        let _ = self
+            .store
+            .read(cx)
+            .net
+            .send_blocking(NetCommand::GetCommitFilePatch {
+                folder: std::path::PathBuf::from(folder),
+                hash: hash.to_string(),
+                path: path.to_string(),
+            });
+    }
+
+    /// Selects one file on the drilled commit's rail and loads its diff.
+    fn select_commit_file(&mut self, index: usize, cx: &mut Context<Self>) {
+        self.commit_file = index;
+        self.ensure_commit_file_selected(cx);
         cx.notify();
+    }
+
+    /// Keeps the drilled commit's rail selection on a live file: the first
+    /// one stands in until the user picks another, and the patch it needs is
+    /// put on the wire here (renders stay idempotent).
+    fn ensure_commit_file_selected(&mut self, cx: &mut Context<Self>) {
+        let Some(hash) = self.drilled_commit.clone() else {
+            return;
+        };
+        let (detail_hash, path) = {
+            let store = self.store.read(cx);
+            let Some(details) = store.commit_details.as_ref() else {
+                return;
+            };
+            if !details.hash.starts_with(&hash[..hash.len().min(7)]) {
+                return;
+            }
+            if details.files.is_empty() {
+                self.commit_file = 0;
+                return;
+            }
+            if self.commit_file >= details.files.len() {
+                self.commit_file = 0;
+            }
+            (
+                details.hash.clone(),
+                details.files[self.commit_file].path.clone(),
+            )
+        };
+        self.request_commit_patch(&detail_hash, &path, cx);
     }
 
     /// Shows a file's diff, loading its patch the first time.
@@ -378,10 +423,10 @@ impl Render for ChangesView {
             self.commit_message
                 .update(cx, |state, cx| state.set_value(draft.as_str(), window, cx));
         }
-        if let Some((key, patch)) = self
-            .store
-            .update(cx, |store, _| store.commit_file_patch.take())
-        {
+        for (key, patch) in self.store.update(cx, |store, _| {
+            std::mem::take(&mut store.commit_file_patches)
+        }) {
+            self.detail_requests.remove(&key);
             self.detail_patches.insert(key, patch.replace('\r', ""));
         }
 
@@ -413,6 +458,7 @@ impl Render for ChangesView {
         }
         let groups = self.groups_cache.as_ref().expect("groups cached").1.clone();
         self.ensure_file_selected(&groups, cx);
+        self.ensure_commit_file_selected(cx);
 
         if self.history_open {
             return div()
@@ -488,32 +534,56 @@ impl Render for ChangesView {
 impl ChangesView {
     /// The selected file's diff.
     fn render_diff(&mut self, window: &mut Window, cx: &mut Context<Self>) -> gpui::AnyElement {
-        let pane = div()
-            .id("changes-diff")
-            .debug_selector(|| "changes-diff".into())
-            .flex_1()
-            .min_w_0()
-            .h_full()
-            .flex()
-            .flex_col()
-            .bg(theme::well());
         let Some(key) = self.selected_file.clone() else {
-            return pane.into_any_element();
+            return div()
+                .id("changes-diff")
+                .debug_selector(|| "changes-diff".into())
+                .flex_1()
+                .min_w_0()
+                .h_full()
+                .flex()
+                .flex_col()
+                .bg(theme::well())
+                .into_any_element();
         };
+        let patch = self.patches.get(&key).map(String::as_str);
+        self.render_diff_pane(
+            "changes-diff",
+            "changes-diff-menu",
+            &key.0,
+            patch,
+            window,
+            cx,
+        )
+    }
+
+    /// The Changes and History tabs' shared diff pane: the 44-high path bar
+    /// with the persisted wrap/layout toggles over the selectable diff body.
+    /// `None` is a patch still on the wire, `Some("")` a settled answer with
+    /// nothing textual to draw (binary or mode-only).
+    fn render_diff_pane(
+        &self,
+        pane_selector: &'static str,
+        menu_name: &'static str,
+        path: &str,
+        patch: Option<&str>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> gpui::AnyElement {
         let split = self.diff_view == DiffViewMode::Split;
         let show_tooltips = self.store.read(cx).settings().general.show_tooltips;
         // an empty patch is a state, not a one-row diff: a binary file or a
         // mode-only change has nothing textual to draw
-        let has_patch = matches!(self.patches.get(&key), Some(patch) if !patch.is_empty());
-        let body: gpui::AnyElement = match self.patches.get(&key) {
+        let has_patch = matches!(patch, Some(patch) if !patch.is_empty());
+        let body: gpui::AnyElement = match patch {
             Some(patch) if !patch.is_empty() => div()
-                .id("changes-diff-scroll")
+                .id(SharedString::from(format!("{pane_selector}-scroll")))
                 .flex_1()
                 .min_h_0()
                 .flex()
                 .flex_col()
                 .child(diff_controls::attach_filling(
-                    gpui::ElementId::Name("changes-diff-menu".into()),
+                    gpui::ElementId::Name(menu_name.into()),
                     render_diff_with_scroll(
                         patch,
                         None,
@@ -532,81 +602,81 @@ impl ChangesView {
             Some(_) => diff_controls::state("No textual changes"),
             None => diff_controls::state("Loading patch…"),
         };
-        pane.child(
-            div()
-                .flex_shrink_0()
-                .h(px(44.))
-                .px_4()
-                .flex()
-                .items_center()
-                .justify_between()
-                .gap_3()
-                .bg(theme::panel())
-                .border_b_1()
-                .border_color(theme::hairline())
-                .font_family(theme::code_font())
-                .text_size(px(theme::font_mono_meta()))
-                .text_color(theme::text())
-                .child(
-                    div()
-                        .flex_1()
-                        .min_w_0()
-                        .overflow_hidden()
-                        .whitespace_nowrap()
-                        .text_ellipsis()
-                        .child(key.0),
-                )
-                .child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap_1()
-                        .child(diff_controls::wrap_toggle(
-                            "diff",
-                            self.diff_wrap,
-                            self.store.clone(),
-                            {
-                                let this = cx.entity();
+        let wrap_view = cx.entity();
+        let layout_view = wrap_view.clone();
+        div()
+            .id(pane_selector)
+            .debug_selector(move || pane_selector.to_string())
+            .flex_1()
+            .min_w_0()
+            .h_full()
+            .flex()
+            .flex_col()
+            .bg(theme::well())
+            .child(
+                div()
+                    .flex_shrink_0()
+                    .h(px(44.))
+                    .px_4()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap_3()
+                    .bg(theme::panel())
+                    .border_b_1()
+                    .border_color(theme::hairline())
+                    .font_family(theme::code_font())
+                    .text_size(px(theme::font_mono_meta()))
+                    .text_color(theme::text())
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .overflow_hidden()
+                            .whitespace_nowrap()
+                            .text_ellipsis()
+                            .child(path.to_string()),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_1()
+                            .child(diff_controls::wrap_toggle(
+                                "diff",
+                                self.diff_wrap,
+                                self.store.clone(),
                                 move |next, cx| {
-                                    this.update(cx, |this, cx| {
+                                    wrap_view.update(cx, |this, cx| {
                                         this.diff_wrap = next;
                                         cx.notify();
                                     });
-                                }
-                            },
-                            show_tooltips,
-                        ))
-                        .child(diff_controls::view_toggle(
-                            "diff",
-                            split,
-                            self.store.clone(),
-                            {
-                                let this = cx.entity();
+                                },
+                                show_tooltips,
+                            ))
+                            .child(diff_controls::view_toggle(
+                                "diff",
+                                split,
+                                self.store.clone(),
                                 move |next, cx| {
-                                    this.update(cx, |this, cx| {
+                                    layout_view.update(cx, |this, cx| {
                                         this.diff_view = next;
                                         cx.notify();
                                     });
-                                }
-                            },
-                            show_tooltips,
-                        )),
-                ),
-        )
-        .child(body)
-        .children((has_patch && !self.diff_wrap).then(|| self.render_diff_scrollbars()))
-        .into_any_element()
-    }
-
-    /// Pinned horizontal bars under the diff body. The kit tracks each
-    /// viewport with the matching handle; the bars live here, outside the
-    /// vertical scroller, so they stay visible while the diff scrolls.
-    fn render_diff_scrollbars(&self) -> gpui::AnyElement {
-        diff_controls::scrollbars(
-            "diff",
-            &self.diff_scroll,
-            self.diff_view == DiffViewMode::Split,
-        )
+                                },
+                                show_tooltips,
+                            )),
+                    ),
+            )
+            .child(body)
+            .children((has_patch && !self.diff_wrap).then(|| {
+                diff_controls::scrollbars(
+                    "diff",
+                    &self.diff_scroll,
+                    self.diff_view == DiffViewMode::Split,
+                )
+            }))
+            .into_any_element()
     }
 
     fn render_file_list(
@@ -963,15 +1033,46 @@ impl ChangesView {
             self.history_cache_key = (generation, today);
         }
         if self.history_rows.is_empty() {
+            // An empty answer and a pending pass are different states: the
+            // store settles the pass, so only a live one says "Loading".
+            if !self.store.read(cx).history_loaded() {
+                return div()
+                    .id("history-list")
+                    .debug_selector(|| "history-loading".into())
+                    .size_full()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .text_size(px(theme::font_body()))
+                    .text_color(theme::text_dim())
+                    .child("Loading history…")
+                    .into_any_element();
+            }
             return div()
                 .id("history-list")
+                .debug_selector(|| "history-empty".into())
                 .size_full()
                 .flex()
+                .flex_col()
                 .items_center()
                 .justify_center()
-                .text_size(px(theme::font_body()))
-                .text_color(theme::text_dim())
-                .child("Loading history…")
+                .gap_1p5()
+                .p_6()
+                .child(
+                    div()
+                        .text_size(px(theme::font_heading()))
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_color(theme::text())
+                        .text_align(gpui::TextAlign::Center)
+                        .child("No commits yet"),
+                )
+                .child(
+                    div()
+                        .text_size(px(theme::font_meta()))
+                        .text_color(theme::text_dim())
+                        .text_align(gpui::TextAlign::Center)
+                        .child("Commits on this branch will show here."),
+                )
                 .into_any_element();
         }
 
@@ -1044,9 +1145,9 @@ impl ChangesView {
                     .flex_1()
                     .min_h_0()
                     .flex()
-                    .flex_row()
-                    .items_center()
-                    .gap_2()
+                    .flex_col()
+                    .justify_center()
+                    .gap_0p5()
                     .pl(px(13.))
                     .pr_3()
                     .border_l_3()
@@ -1063,122 +1164,111 @@ impl ChangesView {
                     })
                     .child(
                         div()
-                            .rounded_full()
-                            .bg(theme::chip())
-                            .w(px(22.))
-                            .h(px(22.))
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .text_size(px(theme::font_mono_meta()))
-                            .text_color(theme::text_muted())
-                            .child(row.initials.clone()),
+                            .text_size(px(theme::font_body()))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(theme::text())
+                            .overflow_hidden()
+                            .whitespace_nowrap()
+                            .text_ellipsis()
+                            .child(row.subject.clone()),
                     )
                     .child(
+                        // the design's commit meta line: the avatar sits with
+                        // author, age, the unpushed mark and the SHA, so the
+                        // subject gets the column's full width
                         div()
-                            .flex_1()
+                            .flex()
+                            .flex_row()
+                            .items_center()
+                            .gap_1()
                             .min_w_0()
                             .overflow_hidden()
-                            .flex()
-                            .flex_col()
                             .child(
                                 div()
-                                    .text_size(px(theme::font_body()))
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(theme::text())
+                                    .rounded_full()
+                                    .bg(theme::chip())
+                                    .w(px(20.))
+                                    .h(px(20.))
+                                    .flex_shrink_0()
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .text_size(px(theme::font_micro()))
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .text_color(theme::text_muted())
+                                    .child(row.initials.clone()),
+                            )
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .text_size(px(theme::font_meta()))
+                                    .text_color(theme::text_dim())
                                     .overflow_hidden()
                                     .whitespace_nowrap()
                                     .text_ellipsis()
-                                    .child(row.subject.clone()),
+                                    .child(format!("{} · {}", row.author, row.rel)),
                             )
+                            .when(unpushed_mark, |meta| {
+                                // the design asks for an unpushed mark,
+                                // not a word: the arrow keeps the SHA on
+                                // a 320 column
+                                meta.child(
+                                    div()
+                                        .id(SharedString::from(format!(
+                                            "unpushed-{}",
+                                            row.short_hash
+                                        )))
+                                        .role(gpui::Role::Status)
+                                        .aria_label("unpushed")
+                                        .flex_shrink_0()
+                                        .text_size(px(theme::font_meta()))
+                                        .font_weight(FontWeight::MEDIUM)
+                                        .text_color(theme::AHEAD)
+                                        .tooltip(crate::ui::tooltip_text("Not pushed yet"))
+                                        .child("\u{2191}"),
+                                )
+                            })
                             .child(
-                                // the design's commit meta line: author, age and
-                                // the SHA share one row under the subject, so a
-                                // 320 column never squeezes the hash out
+                                // hash chip: clicking copies the full SHA without
+                                // drilling in
                                 div()
-                                    .flex()
-                                    .flex_row()
-                                    .items_center()
-                                    .gap_1()
-                                    .min_w_0()
-                                    .overflow_hidden()
-                                    .child(
-                                        div()
-                                            .flex_1()
-                                            .min_w_0()
-                                            .text_size(px(theme::font_meta()))
-                                            .text_color(theme::text_dim())
-                                            .overflow_hidden()
-                                            .whitespace_nowrap()
-                                            .text_ellipsis()
-                                            .child(format!("{} · {}", row.author, row.rel)),
-                                    )
-                                    .when(unpushed_mark, |meta| {
-                                        // the design asks for an unpushed mark,
-                                        // not a word: the arrow keeps the SHA on
-                                        // a 320 column
-                                        meta.child(
-                                            div()
-                                                .id(SharedString::from(format!(
-                                                    "unpushed-{}",
-                                                    row.short_hash
-                                                )))
-                                                .role(gpui::Role::Status)
-                                                .aria_label("unpushed")
-                                                .flex_shrink_0()
-                                                .text_size(px(theme::font_meta()))
-                                                .font_weight(FontWeight::MEDIUM)
-                                                .text_color(theme::AHEAD)
-                                                .tooltip(crate::ui::tooltip_text("Not pushed yet"))
-                                                .child("\u{2191}"),
-                                        )
+                                    .id(SharedString::from(format!("copy-sha-{}", row.short_hash)))
+                                    .a11y_button(format!("Copy SHA {}", row.short_hash))
+                                    .cursor_pointer()
+                                    .flex_shrink_0()
+                                    .rounded_md()
+                                    .px_1()
+                                    .text_size(px(theme::font_meta()))
+                                    .font_family(gpui::SharedString::from(theme::code_font()))
+                                    .text_color(theme::text_faint())
+                                    .hover(|s| s.text_color(theme::blue_bright()))
+                                    .on_click({
+                                        let store = self.store.clone();
+                                        let full = row.hash.clone();
+                                        let short = row.short_hash.clone();
+                                        move |_, _, cx| {
+                                            cx.stop_propagation();
+                                            cx.write_to_clipboard(gpui::ClipboardItem::new_string(
+                                                full.clone(),
+                                            ));
+                                            store.update(cx, |s, cx| {
+                                                s.notify_success(format!(
+                                                    "Copied {short} to clipboard"
+                                                ));
+                                                cx.notify();
+                                            });
+                                        }
                                     })
-                                    .child(
-                                        // hash chip: clicking copies the full SHA without
-                                        // drilling in
-                                        div()
-                                            .id(SharedString::from(format!(
-                                                "copy-sha-{}",
-                                                row.short_hash
-                                            )))
-                                            .a11y_button(format!("Copy SHA {}", row.short_hash))
-                                            .cursor_pointer()
-                                            .flex_shrink_0()
-                                            .rounded_md()
-                                            .px_1()
-                                            .text_size(px(theme::font_meta()))
-                                            .font_family(gpui::SharedString::from(
-                                                theme::code_font(),
-                                            ))
-                                            .text_color(theme::text_faint())
-                                            .hover(|s| s.text_color(theme::blue_bright()))
-                                            .on_click({
-                                                let store = self.store.clone();
-                                                let full = row.hash.clone();
-                                                let short = row.short_hash.clone();
-                                                move |_, _, cx| {
-                                                    cx.stop_propagation();
-                                                    cx.write_to_clipboard(
-                                                        gpui::ClipboardItem::new_string(
-                                                            full.clone(),
-                                                        ),
-                                                    );
-                                                    store.update(cx, |s, cx| {
-                                                        s.notify_success(format!(
-                                                            "Copied {short} to clipboard"
-                                                        ));
-                                                        cx.notify();
-                                                    });
-                                                }
-                                            })
-                                            .child(row.short_hash.clone()),
-                                    ),
+                                    .child(row.short_hash.clone()),
                             ),
                     ),
             )
             .into_any_element()
     }
 
+    /// The drilled commit: the design's head band (subject, meta, actions)
+    /// over its two-level split — the file rail and the selected file's diff.
     fn render_commit_detail(
         &mut self,
         hash: String,
@@ -1198,16 +1288,6 @@ impl ChangesView {
                 .child("Loading commit…")
                 .into_any_element();
         };
-
-        let mut list = div()
-            .id("commit-detail")
-            .size_full()
-            .overflow_y_scroll()
-            .restrict_scroll_to_axis()
-            .flex()
-            .flex_col()
-            .p_4()
-            .gap_3();
 
         // author + time from the loaded history rows (the detail model
         // doesn't carry them)
@@ -1229,12 +1309,26 @@ impl ChangesView {
                 )
             });
 
+        let additions = details
+            .files
+            .iter()
+            .filter_map(|f| f.additions)
+            .sum::<u32>();
+        let deletions = details
+            .files
+            .iter()
+            .filter_map(|f| f.deletions)
+            .sum::<u32>();
+        let file_count = details.files.len();
+        let short_hash = details.hash[..7.min(details.hash.len())].to_string();
+
         // two-click armed destructive actions
         let armed = self.detail_armed;
         let action_button = |id: &'static str, label: &'static str, armed_now: bool| {
             let text = if armed_now { "Confirm" } else { label };
             div()
                 .id(id)
+                .debug_selector(move || id.to_string())
                 .a11y_button(text)
                 .cursor_pointer()
                 .h(px(warpui_kit_core::shell::CONTROL_HEIGHT))
@@ -1259,14 +1353,20 @@ impl ChangesView {
                 .child(text.to_string())
         };
 
-        // flex_shrink_0: the SHA beside it never wraps, so tight panes must
-        // squeeze the files-changed text, not slide these buttons over it
-        let mut actions_row = div().flex().flex_row().gap_2().flex_shrink_0();
+        // the design's commit-acts row: 8 gap, 10 under the meta line
+        let mut actions_row = div()
+            .mt(px(10.))
+            .flex()
+            .flex_row()
+            .flex_wrap()
+            .gap_2()
+            .flex_shrink_0();
         actions_row = actions_row.child({
             let store = self.store.clone();
             let full_hash = details.hash.clone();
             div()
                 .id("detail-copy-sha")
+                .debug_selector(|| "detail-copy-sha".into())
                 .a11y_button("Copy SHA")
                 .cursor_pointer()
                 .h(px(warpui_kit_core::shell::CONTROL_HEIGHT))
@@ -1332,224 +1432,258 @@ impl ChangesView {
                 },
             )
         });
-        // the list cuts a long subject off, so the detail shows it whole
-        list = list.children(history_meta.as_ref().map(|(subject, ..)| {
-            div()
-                .debug_selector(|| "commit-subject".into())
-                .text_size(px(theme::font_heading()))
-                .font_weight(FontWeight::SEMIBOLD)
-                .text_color(theme::text())
-                .child(subject.clone())
-        }));
 
-        let additions = details
+        // the head band: subject, then author · age · SHA · N files · +a −d,
+        // then the verbs, on the panel surface
+        let (author, rel) = history_meta
+            .as_ref()
+            .map(|(_, author, rel)| (author.clone(), rel.clone()))
+            .unwrap_or_else(|| ("Unknown".into(), String::new()));
+        let separator = || div().text_color(theme::text_faint()).child("·");
+        let meta = div()
+            .mt_0p5()
+            .flex()
+            .flex_row()
+            .flex_wrap()
+            .items_center()
+            .gap_1p5()
+            .text_size(px(theme::font_meta()))
+            .text_color(theme::text_dim())
+            .child(format!("{author} · {rel}"))
+            .child(separator())
+            .child(
+                div()
+                    .font_family(gpui::SharedString::from(theme::code_font()))
+                    .text_color(theme::text_faint())
+                    .child(short_hash.clone()),
+            )
+            .child(separator())
+            .child(format!(
+                "{file_count} {}",
+                if file_count == 1 { "file" } else { "files" }
+            ))
+            .child(separator())
+            .child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap_1()
+                    .font_family(gpui::SharedString::from(theme::code_font()))
+                    .child(
+                        div()
+                            .text_color(theme::SUCCESS_BRIGHT)
+                            .child(format!("+{additions}")),
+                    )
+                    .child(
+                        div()
+                            .text_color(theme::DANGER)
+                            .child(format!("−{deletions}")),
+                    ),
+            );
+        let head = div()
+            .flex_shrink_0()
+            .px_4()
+            .py(px(14.))
+            .bg(theme::panel())
+            .border_b_1()
+            .border_color(theme::hairline())
+            .flex()
+            .flex_col()
+            .child(
+                div()
+                    .debug_selector(|| "commit-subject".into())
+                    .text_size(px(theme::font_heading()))
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .text_color(theme::text())
+                    .child(
+                        history_meta
+                            .as_ref()
+                            .map(|(subject, ..)| subject.clone())
+                            .unwrap_or_else(|| short_hash.clone()),
+                    ),
+            )
+            .child(meta)
+            .child(actions_row);
+
+        // the files rail: a 240 column's group header over one 34-high row
+        // per changed file, selected file on the raised surface
+        let selected_file = details
             .files
-            .iter()
-            .filter_map(|f| f.additions)
-            .sum::<u32>();
-        let deletions = details
-            .files
-            .iter()
-            .filter_map(|f| f.deletions)
-            .sum::<u32>();
-        list = list.child(
-            div()
+            .len()
+            .checked_sub(1)
+            .map(|last| self.commit_file.min(last))
+            .unwrap_or(0);
+        let mut rows = div()
+            .id("commit-files")
+            .debug_selector(|| "commit-files".into())
+            .flex_1()
+            .min_h_0()
+            .overflow_y_scroll()
+            .restrict_scroll_to_axis()
+            .flex()
+            .flex_col()
+            .py_1();
+        for (index, file) in details.files.iter().enumerate() {
+            let selected = index == selected_file;
+            let (dir, name) = match file.path.rsplit_once('/') {
+                Some((dir, name)) => (format!("{dir}/"), name.to_string()),
+                None => (String::new(), file.path.clone()),
+            };
+            let status = file.display_status_code().to_string();
+            let mut counts = div()
+                .flex_shrink_0()
                 .flex()
                 .flex_row()
                 .items_center()
-                .gap_2()
-                .child(
+                .gap_1()
+                .font_family(gpui::SharedString::from(theme::code_font()))
+                .text_size(px(theme::font_micro()));
+            if let Some(added) = file.additions.filter(|added| *added > 0) {
+                counts = counts.child(
                     div()
-                        .flex_1()
-                        .min_w_0()
-                        .flex()
-                        .flex_row()
-                        .items_center()
-                        .gap_2()
-                        .child(
-                            div()
-                                .flex_shrink_0()
-                                .whitespace_nowrap()
-                                .text_size(px(theme::font_meta()))
-                                .font_family(gpui::SharedString::from(theme::code_font()))
-                                .text_color(theme::text_faint())
-                                .child(details.hash[..7.min(details.hash.len())].to_string()),
-                        )
-                        .child(
-                            div()
-                                .min_w_0()
-                                .text_size(px(theme::font_meta()))
-                                .text_color(theme::text_muted())
-                                .overflow_hidden()
-                                .whitespace_nowrap()
-                                .text_ellipsis()
-                                .child(format!(
-                                    "{} files changed · +{additions} −{deletions}",
-                                    details.files.len()
-                                )),
-                        ),
-                )
-                .child(actions_row),
-        );
-
-        list = list.child(div().id("detail-files").flex().flex_col().gap_0p5());
-
-        let mut files = div().flex().flex_col().gap_0p5();
-        for file in &details.files {
-            let key = format!("{}|{}", details.hash, file.path);
-            let expanded = self.expanded_details.contains(&key);
-            let mut row = div()
-                .flex()
-                .flex_col()
-                .rounded_md()
-                .px_1()
-                .when(expanded, |d| d.bg(theme::tint(theme::accent())));
-            // Only the title row toggles the patch. The patch below belongs to
-            // the row for layout, but it is selectable diff text: with the
-            // click on the whole row, selecting a line (or any press in the
-            // diff) collapsed it on mouse-up.
-            row = row.child(
+                        .text_color(theme::SUCCESS_BRIGHT)
+                        .child(format!("+{added}")),
+                );
+            }
+            if let Some(deleted) = file.deletions.filter(|deleted| *deleted > 0) {
+                counts = counts.child(div().text_color(theme::DANGER).child(format!("−{deleted}")));
+            }
+            rows = rows.child(
                 div()
-                    .id(SharedString::from(format!("detail-file-{}", file.path)))
-                    .debug_selector(|| "commit-detail-file".into())
-                    .a11y_tree_item(file.path.clone(), Some(expanded))
+                    .id(SharedString::from(format!("commit-file-{index}")))
+                    .debug_selector(move || format!("commit-file-{index}"))
+                    .a11y_button(file.path.clone())
+                    .aria_selected(selected)
                     .cursor_pointer()
+                    .flex_shrink_0()
+                    .h(px(COMMIT_RAIL_ROW_H))
+                    .pl(px(13.))
+                    .pr_2()
                     .flex()
                     .flex_row()
                     .items_center()
                     .gap_2()
-                    .py_0p5()
-                    .rounded_md()
-                    .hover(|s| s.bg(theme::hover_bg()))
-                    .on_click({
-                        let hash = details.hash.clone();
-                        let path = file.path.clone();
-                        cx.listener(move |this, _, _, cx| {
-                            this.toggle_detail_patch(&hash, &path, cx)
-                        })
+                    .border_l_3()
+                    .border_color(if selected {
+                        theme::accent()
+                    } else {
+                        theme::surface()
                     })
+                    .when(selected, |d| d.bg(theme::raised()))
+                    .when(!selected, |d| d.hover(|s| s.bg(theme::panel())))
+                    .on_click(cx.listener(move |this, _, _, cx| this.select_commit_file(index, cx)))
+                    .child(
+                        div()
+                            .w(px(14.))
+                            .flex_shrink_0()
+                            .font_family(gpui::SharedString::from(theme::code_font()))
+                            .text_size(px(theme::font_mono_meta()))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(diff_controls::status_color(&status))
+                            .child(status),
+                    )
                     .child(
                         div()
                             .flex_1()
                             .min_w_0()
-                            .text_size(px(theme::font_body()))
-                            .font_family(gpui::SharedString::from(theme::code_font()))
-                            .text_color(theme::text_dim())
-                            .child(file.path.clone()),
+                            .flex()
+                            .flex_row()
+                            .gap_1p5()
+                            .overflow_hidden()
+                            .whitespace_nowrap()
+                            .text_size(px(theme::font_meta()))
+                            .child(div().flex_shrink_0().text_color(theme::text()).child(name))
+                            .when(!dir.is_empty(), |line| {
+                                line.child(
+                                    div()
+                                        .min_w_0()
+                                        .overflow_hidden()
+                                        .text_ellipsis()
+                                        .text_color(theme::text_muted())
+                                        .child(dir),
+                                )
+                            }),
                     )
-                    .when_some(file.additions, |row, a| {
-                        row.child(
-                            div()
-                                .text_size(px(theme::font_meta()))
-                                .text_color(theme::SUCCESS_BRIGHT)
-                                .child(format!("+{a}")),
-                        )
-                    })
-                    .when_some(file.deletions, |row, d| {
-                        row.child(
-                            div()
-                                .text_size(px(theme::font_meta()))
-                                .text_color(theme::DANGER)
-                                .child(format!("−{d}")),
-                        )
-                    }),
+                    .child(counts),
             );
-            if expanded {
-                let patch = self
-                    .detail_patches
-                    .get(&key)
-                    .map(|p| p.as_str())
-                    .unwrap_or("loading patch…");
-                let handle = self
-                    .patch_scrolls
-                    .entry(file.path.clone())
-                    .or_default()
-                    .clone();
-                row = row.child(
-                    div()
-                        .id(SharedString::from(format!("detail-patch-{}", file.path)))
-                        .debug_selector(|| "commit-detail-patch".into())
-                        .ml_4()
-                        .mr_1()
-                        .mb_1()
-                        .rounded_md()
-                        .bg(theme::card())
-                        .border_1()
-                        .border_color(theme::border_light())
-                        .py_2()
-                        .max_h(px(220.))
-                        .overflow_hidden()
-                        .overflow_y_scroll()
-                        .restrict_scroll_to_axis()
-                        .track_scroll(&handle)
-                        // the patch scrolls inside the commit detail's own
-                        // scroller: an event it can act on is consumed here,
-                        // so it never also moves the pane behind it, while an
-                        // edge event still chains outward, browser-style
-                        .on_scroll(move |event: &gpui::ScrollEvent, window, cx| {
-                            let delta = event.delta.pixel_delta(window.line_height()).y;
-                            let handle = &handle;
-                            if wheel_reaches_content(handle.offset(), handle.max_offset(), delta) {
-                                cx.stop_propagation();
-                            }
-                        })
-                        .child(warpui_kit_core::text_menu::attach(
-                            gpui::ElementId::Name("commit-diff-menu".into()),
-                            warpui_kit_diff::render_diff(
-                                patch,
-                                None,
-                                theme::font_mono_meta(),
-                                window,
-                                cx,
-                            ),
-                            warpui_kit_core::text_menu::focus(cx),
-                        )),
-                );
-            }
-            files = files.child(row);
         }
-        list = list.child(files);
-
-        if let Some(body) = &details.body {
-            let mut card = div()
-                .id("detail-body")
-                .rounded_md()
-                .bg(theme::card())
-                .border_1()
-                .border_color(theme::border_light())
-                .p_2()
-                .text_size(px(theme::font_body()))
-                .text_color(theme::text_dim())
-                .child(body.clone());
-            if let Some((_, author, when)) = history_meta {
-                card = card.child(
-                    div()
-                        .mt_1()
-                        .flex()
-                        .flex_row()
-                        .items_center()
-                        .gap_1p5()
-                        .text_size(px(theme::font_control()))
-                        .text_color(theme::text_faint())
-                        .child(div().child(author))
-                        .child(div().child(when)),
-                );
-            }
-            list = list.child(card);
-        } else if let Some((_, author, when)) = history_meta {
-            list = list.child(
+        let rail = div()
+            .w(px(warpui_kit_core::shell::scaled(COMMIT_RAIL_W)))
+            .flex_shrink_0()
+            .h_full()
+            .min_h_0()
+            .flex()
+            .flex_col()
+            .bg(theme::surface())
+            .border_r_1()
+            .border_color(theme::hairline())
+            .child(
                 div()
+                    .flex_shrink_0()
+                    .h(px(COMMIT_RAIL_ROW_H))
+                    .pl_4()
+                    .pr_3()
                     .flex()
                     .flex_row()
                     .items_center()
-                    .gap_1p5()
-                    .text_size(px(theme::font_control()))
-                    .text_color(theme::text_faint())
-                    .child(div().child(author))
-                    .child(div().child(when)),
-            );
-        }
-        list.into_any_element()
+                    .gap_2()
+                    .text_size(px(theme::font_meta()))
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .text_color(theme::text_dim())
+                    .child("Files")
+                    .child(
+                        div()
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(theme::text_muted())
+                            .child(file_count.to_string()),
+                    ),
+            )
+            .child(rows);
+
+        // the selected file's diff, through the Changes tab's own pane
+        let diff = match details.files.get(selected_file) {
+            Some(file) => {
+                let key = format!("{}|{}", details.hash, file.path);
+                let patch = self.detail_patches.get(&key).map(String::as_str);
+                self.render_diff_pane(
+                    "commit-diff",
+                    "commit-diff-menu",
+                    &file.path,
+                    patch,
+                    window,
+                    cx,
+                )
+            }
+            None => div()
+                .id("commit-diff")
+                .debug_selector(|| "commit-diff".into())
+                .flex_1()
+                .min_w_0()
+                .h_full()
+                .flex()
+                .flex_col()
+                .bg(theme::well())
+                .child(diff_controls::state("No files in this commit"))
+                .into_any_element(),
+        };
+
+        div()
+            .size_full()
+            .flex()
+            .flex_col()
+            .min_h_0()
+            .child(head)
+            .child(
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .flex()
+                    .flex_row()
+                    .child(rail)
+                    .child(diff),
+            )
+            .into_any_element()
     }
 
     /// The middle card: "Commit message" title, the message textarea with
@@ -2694,24 +2828,4 @@ fn new_branch_form(
                 ),
         )
         .into_any_element()
-}
-
-/// True when a vertical scroller at `offset` (≤ 0, clamped to `max_offset`)
-/// has room to move for `delta` — the "the inner one handled it" test. A
-/// wheel event routed to an inner scrollable must not also scroll an outer
-/// one, but a scroller already hard against the edge in the wheel's
-/// direction lets the event pass, as browsers chain it. The notes app's
-/// proven pattern, copied rather than shared.
-fn wheel_reaches_content(
-    offset: gpui::Point<gpui::Pixels>,
-    max_offset: gpui::Point<gpui::Pixels>,
-    delta: gpui::Pixels,
-) -> bool {
-    if delta < px(0.) {
-        // scrolling toward the bottom: room is whatever is left below
-        -offset.y < max_offset.y
-    } else {
-        // scrolling back toward the top: any offset off the top moves
-        offset.y < px(0.)
-    }
 }

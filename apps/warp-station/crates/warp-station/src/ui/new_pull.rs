@@ -16,7 +16,7 @@ use crate::ui::pull_request::{
 use crate::ui::{A11y, icon};
 use gpui::prelude::*;
 use gpui::{AnyElement, Context, Entity, FontWeight, SharedString, Window, div, px};
-use gpui_kit::component::input::{InputEvent, InputState, TextareaState};
+use gpui_kit::component::input::{InputState, TextareaState};
 use warp_station_core::model::ComparePreview;
 use warpui_kit_core::{field, motion, shell};
 
@@ -58,15 +58,22 @@ pub struct NewPullView {
     title: Entity<InputState>,
     description: Entity<TextareaState>,
     reviewer: Entity<InputState>,
-    /// Source and base are free text, as the design draws them.
-    head: Entity<InputState>,
-    base: Entity<InputState>,
-    /// The branches last handed to the store, so typing is not a loop.
-    branches: (String, String),
+    /// Which pill's branch menu is open.
+    branch_menu: Option<BranchMenu>,
+    /// The menu that was open when a pill was pressed, so its own click
+    /// toggles instead of the outside-press dismissal reopening it.
+    branch_menu_at_press: Option<BranchMenu>,
     /// The Create split's menu.
     primary_menu: bool,
     /// The form is the whole detail pane: the workbench's list is not beside it.
     pub stacked: bool,
+}
+
+/// The two pills in the branch row, each with its own menu.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum BranchMenu {
+    Source,
+    Base,
 }
 
 impl NewPullView {
@@ -77,72 +84,45 @@ impl NewPullView {
             cx.new(|cx| TextareaState::new(window, cx).placeholder("Describe the change…"));
         let reviewer =
             cx.new(|cx| InputState::new(window, cx).placeholder("Search people or teams"));
-        let head = cx.new(|cx| InputState::new(window, cx).placeholder("branch"));
-        let base = cx.new(|cx| InputState::new(window, cx).placeholder("branch"));
-        // the preview follows the branches as they are typed
-        cx.subscribe(&head, |this, _, event: &InputEvent, cx| {
-            if matches!(event, InputEvent::Change) {
-                this.sync_branches(cx);
-            }
-        })
-        .detach();
-        cx.subscribe(&base, |this, _, event: &InputEvent, cx| {
-            if matches!(event, InputEvent::Change) {
-                this.sync_branches(cx);
-            }
-        })
-        .detach();
         Self {
             store,
             tab: NewPullTab::Overview,
             title,
             description,
             reviewer,
-            head,
-            base,
-            branches: (String::new(), String::new()),
+            branch_menu: None,
+            branch_menu_at_press: None,
             primary_menu: false,
             stacked: false,
         }
     }
 
-    /// Pushes what the two branch fields say into the store, which owns the
-    /// compare request.
-    fn sync_branches(&mut self, cx: &mut Context<Self>) {
-        let head = self.head.read(cx).value().trim().to_string();
-        let base = self.base.read(cx).value().trim().to_string();
-        if (head.clone(), base.clone()) == self.branches {
+    /// A pick in a pill's menu lands in the form, which owns the pair.
+    fn pick_branch(&mut self, menu: BranchMenu, branch: String, cx: &mut Context<Self>) {
+        let Some(form) = self.store.read(cx).new_pull.clone() else {
+            self.branch_menu = None;
+            cx.notify();
             return;
-        }
-        self.branches = (head.clone(), base.clone());
+        };
+        let (head, base) = match menu {
+            BranchMenu::Source => (branch, form.base),
+            BranchMenu::Base => (form.head, branch),
+        };
+        self.branch_menu = None;
         self.store
             .update(cx, |store, cx| store.set_new_pull_branches(head, base, cx));
         cx.notify();
     }
 
-    /// Seeds the branch fields from the store the first time the form draws,
-    /// and again when a different form is opened over a different repository.
-    fn seed_branches(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    fn swap(&mut self, cx: &mut Context<Self>) {
         let Some(form) = self.store.read(cx).new_pull.clone() else {
             return;
         };
-        if (form.head.clone(), form.base.clone()) == self.branches {
-            return;
-        }
-        self.branches = (form.head.clone(), form.base.clone());
-        self.head
-            .update(cx, |input, cx| input.set_value(&form.head, window, cx));
-        self.base
-            .update(cx, |input, cx| input.set_value(&form.base, window, cx));
-    }
-
-    fn swap(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let (head, base) = (self.base.read(cx).value(), self.head.read(cx).value());
-        self.head
-            .update(cx, |input, cx| input.set_value(&head, window, cx));
-        self.base
-            .update(cx, |input, cx| input.set_value(&base, window, cx));
-        self.sync_branches(cx);
+        self.branch_menu = None;
+        self.store.update(cx, |store, cx| {
+            store.set_new_pull_branches(form.base, form.head, cx)
+        });
+        cx.notify();
     }
 
     /// Create, or Create as draft. The form always answers on Overview, where
@@ -160,6 +140,10 @@ impl NewPullView {
     }
 
     pub fn dismiss(&mut self, cx: &mut Context<Self>) -> bool {
+        if self.branch_menu.take().is_some() {
+            cx.notify();
+            return true;
+        }
         if self.primary_menu {
             self.primary_menu = false;
             cx.notify();
@@ -172,7 +156,6 @@ impl NewPullView {
 impl Render for NewPullView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl gpui::IntoElement {
         let this = cx.entity();
-        self.seed_branches(window, cx);
         self.store.update(cx, |store, _| store.load_compare());
 
         let store = self.store.read(cx);
@@ -230,7 +213,7 @@ impl Render for NewPullView {
             .flex_col()
             .bg(theme::panel())
             .child(self.head_row(&repo_name, &this))
-            .child(self.branch_row(window, cx))
+            .child(self.branch_row(cx))
             .child(self.tab_strip(files, commits, &this))
             .child(body)
             .child(self.footer(creating, &this));
@@ -313,9 +296,18 @@ impl NewPullView {
 
     // ---- branches ---------------------------------------------------------
 
-    fn branch_row(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+    fn branch_row(&self, cx: &mut Context<Self>) -> AnyElement {
         let this = cx.entity();
         let swap = this.clone();
+        let (head, base) = self
+            .store
+            .read(cx)
+            .new_pull
+            .as_ref()
+            .map_or((String::new(), String::new()), |form| {
+                (form.head.clone(), form.base.clone())
+            });
+        let branches = self.store.read(cx).branches.clone();
         div()
             .debug_selector(|| "new-pull-branches".into())
             .flex_shrink_0()
@@ -323,12 +315,32 @@ impl NewPullView {
             .pb(px(16.))
             .flex()
             .flex_row()
-            .items_end()
+            .items_center()
             .gap_2()
-            .child(labeled_field(
+            .child(self.branch_pill(
+                "new-pull-source",
                 "Source",
-                field::mono("new-pull-head", &self.head, window, cx),
+                &head,
+                BranchMenu::Source,
+                &branches,
+                cx,
             ))
+            .child(
+                div()
+                    .flex_shrink_0()
+                    .text_size(px(theme::font_meta()))
+                    .text_color(theme::text_muted())
+                    .child("into"),
+            )
+            .child(self.branch_pill(
+                "new-pull-base",
+                "Base",
+                &base,
+                BranchMenu::Base,
+                &branches,
+                cx,
+            ))
+            .child(div().flex_1())
             .child(
                 div()
                     .id("new-pull-swap")
@@ -341,22 +353,183 @@ impl NewPullView {
                     .flex()
                     .items_center()
                     .justify_center()
-                    .mb(px(1.))
                     .hover(|s| s.bg(theme::raised()))
-                    .on_click(move |_, window, cx| {
-                        swap.update(cx, |view, cx| view.swap(window, cx));
+                    .on_click(move |_, _, cx| {
+                        swap.update(cx, |view, cx| view.swap(cx));
                     })
                     .child(icon(
-                        "icons/icon-refresh.svg",
+                        "icons/icon-swap.svg",
                         px(theme::icon_small()),
                         theme::text_muted(),
                     )),
             )
-            .child(labeled_field(
-                "Base",
-                field::mono("new-pull-base", &self.base, window, cx),
-            ))
             .into_any_element()
+    }
+
+    /// One branch pill and, when it is the open menu, its card hanging under it.
+    fn branch_pill(
+        &self,
+        selector: &'static str,
+        role: &'static str,
+        branch: &str,
+        menu: BranchMenu,
+        branches: &[warp_station_core::model::GitBranchRef],
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let open = self.branch_menu == Some(menu);
+        let empty = branch.trim().is_empty();
+        let name: SharedString = if empty {
+            "Select a branch".into()
+        } else {
+            branch.to_string().into()
+        };
+        let pill = div()
+            .id(selector)
+            .debug_selector(move || selector.into())
+            .a11y_button(format!("{role} branch: {branch}"))
+            .cursor_pointer()
+            .flex_shrink_0()
+            .h(px(shell::CONTROL_HEIGHT))
+            .px_2()
+            .rounded(px(6.))
+            .border_1()
+            .border_color(theme::line_strong())
+            .bg(theme::panel())
+            .flex()
+            .items_center()
+            .gap_2()
+            .text_size(px(theme::font_control()))
+            .font_weight(FontWeight::MEDIUM)
+            .text_color(if empty {
+                theme::text_muted()
+            } else {
+                theme::text()
+            })
+            .hover(|s| s.bg(theme::raised()))
+            // the pill must toggle its menu, not close and reopen it: the
+            // menu's capture-phase outside press closes it before the click,
+            // so remember what was open before that runs
+            .capture_any_mouse_down(cx.listener(move |view, _, _, _| {
+                view.branch_menu_at_press = view.branch_menu;
+            }))
+            .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_click(cx.listener(move |view, _, _, cx| {
+                view.branch_menu = if view.branch_menu_at_press == Some(menu) {
+                    None
+                } else {
+                    Some(menu)
+                };
+                view.branch_menu_at_press = None;
+                view.primary_menu = false;
+                cx.notify();
+            }))
+            .child(icon(
+                "icons/icon-source-branch.svg",
+                px(theme::icon_tiny()),
+                theme::text_muted(),
+            ))
+            .child(
+                div()
+                    .min_w(px(0.))
+                    .overflow_hidden()
+                    .whitespace_nowrap()
+                    .text_ellipsis()
+                    .child(name),
+            )
+            .child(icon(
+                "icons/icon-chevron-down.svg",
+                px(theme::active_tokens().icon_nano),
+                theme::text_muted(),
+            ));
+        div()
+            .relative()
+            .flex_shrink_0()
+            .child(pill)
+            .children(open.then(|| self.branch_menu_card(menu, branch, branches, cx)))
+            .into_any_element()
+    }
+
+    /// The branch list under a pill: the probed branches, the current one
+    /// checked, and a quiet row while the probe has not answered.
+    fn branch_menu_card(
+        &self,
+        menu: BranchMenu,
+        current: &str,
+        branches: &[warp_station_core::model::GitBranchRef],
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let mut card = div()
+            .id("new-pull-branch-menu")
+            .debug_selector(|| "new-pull-branch-menu".into())
+            .absolute()
+            .top(px(shell::CONTROL_HEIGHT + 4.))
+            .left(px(0.))
+            .w(px(240.))
+            .max_h(px(320.))
+            .overflow_y_scroll()
+            .p(px(4.))
+            .rounded(px(8.))
+            .border_1()
+            .border_color(theme::line_strong())
+            .bg(theme::popup())
+            .shadow_lg()
+            .occlude()
+            .on_mouse_down_out(cx.listener(|view, _, _, cx| {
+                view.branch_menu = None;
+                cx.notify();
+            }))
+            .flex()
+            .flex_col()
+            .gap(px(2.));
+        if branches.is_empty() {
+            card = card.child(
+                div()
+                    .debug_selector(|| "new-pull-branch-empty".into())
+                    .h(px(32.))
+                    .px_2()
+                    .flex()
+                    .items_center()
+                    .text_size(px(theme::font_control()))
+                    .text_color(theme::text_muted())
+                    .child("No branches yet"),
+            );
+        } else {
+            for branch in branches {
+                let name = branch.name.clone();
+                let selected = branch.name == current;
+                let selector = format!("new-pull-branch-{}", branch.name);
+                let pick = name.clone();
+                card = card.child(
+                    div()
+                        .id(SharedString::from(selector.clone()))
+                        .debug_selector(move || selector.clone())
+                        .a11y_toggle(name.clone(), selected)
+                        .cursor_pointer()
+                        .flex_shrink_0()
+                        .rounded(px(6.))
+                        .h(px(32.))
+                        .px_2()
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .text_size(px(theme::font_control()))
+                        .text_color(theme::text())
+                        .hover(|row| row.bg(theme::line_strong()))
+                        .on_click(cx.listener(move |view, _, _, cx| {
+                            view.pick_branch(menu, pick.clone(), cx);
+                        }))
+                        .child(name)
+                        .when(selected, |row| {
+                            row.child(icon(
+                                "icons/icon-check.svg",
+                                px(theme::icon_small()),
+                                theme::accent_ink(),
+                            ))
+                        }),
+                );
+            }
+        }
+        gpui::deferred(card).into_any_element()
     }
 
     // ---- tabs -------------------------------------------------------------
@@ -434,7 +607,9 @@ impl NewPullView {
             ))
             .child(labeled_field(
                 "Description",
-                field::area("new-pull-description", &self.description, window, cx),
+                // the design's message box: a four-line floor, then the
+                // textarea grows (and the Overview scrolls) with the text
+                field::area("new-pull-description", &self.description, window, cx).min_h(px(120.)),
             ))
             .child(labeled_field(
                 "Reviewer (optional)",
