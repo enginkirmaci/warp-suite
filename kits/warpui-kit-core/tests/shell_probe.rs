@@ -197,3 +197,109 @@ fn a_described_row_keeps_its_control_inside_a_narrow_pane(cx: &mut gpui::TestApp
         "the row must not grow past its container: {row:?}"
     );
 }
+
+/// A strip tab is as wide as its own title, up to the kit's cap: the widths
+/// follow the labels, and a title past the cap clips instead of widening the
+/// tab forever.
+#[gpui_kit::gpui::test]
+fn a_strip_tab_takes_its_title_up_to_a_cap(cx: &mut TestAppContext) {
+    struct Tabs;
+    impl Render for Tabs {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            let huge = "x".repeat(80);
+            div().flex().flex_row().w_full().child(
+                shell::tab_strip()
+                    .debug_selector(|| "probe-strip".into())
+                    .child(
+                        shell::strip_tab("probe-tab-short", "ui", false, palette::panel())
+                            .debug_selector(|| "probe-tab-short".into())
+                            .child("ui"),
+                    )
+                    .child(
+                        shell::strip_tab(
+                            "probe-tab-long",
+                            "meridian-auth-service",
+                            false,
+                            palette::panel(),
+                        )
+                        .debug_selector(|| "probe-tab-long".into())
+                        .child("meridian-auth-service"),
+                    )
+                    .child(
+                        shell::strip_tab("probe-tab-huge", huge.clone(), false, palette::panel())
+                            .debug_selector(|| "probe-tab-huge".into())
+                            .child(huge),
+                    ),
+            )
+        }
+    }
+
+    cx.update(gpui_kit::init);
+    let (_root, cx) = cx.add_window_view(|_, _| Tabs);
+    cx.simulate_resize(size(px(1440.), px(300.)));
+    cx.run_until_parked();
+    cx.update(|window, cx| drop(window.draw(cx)));
+
+    let short = cx.debug_bounds("probe-tab-short").expect("short");
+    let long = cx.debug_bounds("probe-tab-long").expect("long");
+    let huge = cx.debug_bounds("probe-tab-huge").expect("huge");
+    assert_eq!(short.size.width, px(120.), "a short title keeps the floor");
+    assert!(
+        long.size.width > px(180.),
+        "the tab takes the title's width, got {:?}",
+        long.size.width
+    );
+    assert!(
+        huge.size.width > long.size.width,
+        "a longer title still widens the tab"
+    );
+    assert_eq!(huge.size.width, px(320.), "and the cap holds it");
+}
+
+/// A crowded strip leaves every tab at its title's width and overflows: the
+/// strip scrolls, so no tab is squeezed back into a truncated label.
+#[gpui_kit::gpui::test]
+fn a_crowded_strip_keeps_each_title_its_width(cx: &mut TestAppContext) {
+    struct Crowded;
+    impl Render for Crowded {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div().w(px(360.)).child(
+                shell::tab_strip()
+                    .debug_selector(|| "probe-strip".into())
+                    .child(
+                        shell::strip_tab(
+                            "probe-tab-a",
+                            "meridian-auth-service",
+                            false,
+                            palette::panel(),
+                        )
+                        .debug_selector(|| "probe-tab-a".into())
+                        .child("meridian-auth-service"),
+                    )
+                    .child(
+                        shell::strip_tab(
+                            "probe-tab-b",
+                            "pelican-monorepo",
+                            false,
+                            palette::panel(),
+                        )
+                        .debug_selector(|| "probe-tab-b".into())
+                        .child("pelican-monorepo"),
+                    ),
+            )
+        }
+    }
+
+    cx.update(gpui_kit::init);
+    let (_root, cx) = cx.add_window_view(|_, _| Crowded);
+    cx.simulate_resize(size(px(1440.), px(300.)));
+    cx.run_until_parked();
+    cx.update(|window, cx| drop(window.draw(cx)));
+
+    let a = cx.debug_bounds("probe-tab-a").expect("a");
+    let b = cx.debug_bounds("probe-tab-b").expect("b");
+    assert!(
+        a.size.width > px(180.) && b.size.width > px(150.),
+        "both tabs keep their title's width in a 360 strip: {a:?} {b:?}"
+    );
+}

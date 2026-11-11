@@ -44,7 +44,9 @@ pub const COMPACT_WINDOW_WIDTH: f32 = 1180.;
 
 const STRIP_TAB_HEIGHT: f32 = 35.;
 const STRIP_TAB_MIN_WIDTH: f32 = 120.;
-const STRIP_TAB_MAX_WIDTH: f32 = 240.;
+/// The widest a strip tab goes before its title clips: a tab takes its own
+/// title's width up to this cap, and the strip scrolls instead of squeezing.
+const STRIP_TAB_MAX_WIDTH: f32 = 320.;
 /// The selected row's and tab's edge.
 const MARK: f32 = 2.;
 
@@ -299,6 +301,9 @@ pub fn strip_tab(
         .h(px(scaled(STRIP_TAB_HEIGHT)))
         .min_w(px(scaled(STRIP_TAB_MIN_WIDTH)))
         .max_w(px(scaled(STRIP_TAB_MAX_WIDTH)))
+        // the title owns the width; a crowded strip scrolls rather than
+        // trimming every tab down to its label
+        .flex_shrink_0()
         .px_3()
         .rounded_t(px(6.))
         .text_size(px(fonts::font_body()))

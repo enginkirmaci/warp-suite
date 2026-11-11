@@ -3408,6 +3408,51 @@ fn a_repo_opens_in_a_tab_with_the_list_out_of_the_way(cx: &mut TestAppContext) {
     assert_eq!(cx.read_entity(&store, |s, _| s.repo_tabs.len()), 1);
 }
 
+/// A tab takes its own title's width: a long repo name is not squeezed into a
+/// truncated label, and the widest it goes is the kit's strip-tab cap.
+#[gpui::test]
+fn a_repo_tab_is_as_wide_as_its_title(cx: &mut TestAppContext) {
+    let short = "ui";
+    let long = "pelican-monorepo-android-scribe";
+    let longest = "warp-suite-desktop-applications-monorepo";
+    let (store, net_rx) = scratch_store(
+        cx,
+        "tab-width",
+        vec![
+            entry(short, "/probe/short"),
+            entry(long, "/probe/long"),
+            entry(longest, "/probe/longest"),
+        ],
+    );
+    // the channel stays open for the whole probe
+    std::mem::forget(net_rx);
+    let cx = open_window(&store, cx);
+    cx.update_entity(&store, |s: &mut Store, cx| {
+        s.open_repo_tab("/probe/short", cx);
+        s.open_repo_tab("/probe/long", cx);
+        s.open_repo_tab("/probe/longest", cx);
+    });
+    draw(cx);
+
+    let short = cx.debug_bounds("repo-strip-tab-0").expect("short tab");
+    let long = cx.debug_bounds("repo-strip-tab-1").expect("long tab");
+    let longest = cx.debug_bounds("repo-strip-tab-2").expect("longest tab");
+    assert!(
+        long.size.width > short.size.width,
+        "the width follows the title: {short:?} {long:?}"
+    );
+    assert!(
+        long.size.width > gpui::px(240.),
+        "the tab grows past the old 240 px cap, got {:?}",
+        long.size.width
+    );
+    assert!(
+        longest.size.width <= gpui::px(320.),
+        "and the strip-tab cap holds it: {:?}",
+        longest.size.width
+    );
+}
+
 #[gpui::test]
 fn each_view_keeps_its_own_detail_tab(cx: &mut TestAppContext) {
     let (store, cx) = two_repos(cx);
