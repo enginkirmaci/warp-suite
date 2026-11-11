@@ -38,6 +38,27 @@ pub enum ZoneRef {
     Overlay(usize),
 }
 
+/// The hovered zone across every monitor overlay.
+///
+/// `window` indexes the engine's overlay windows (one per monitor); `zone` is
+/// the zone inside that monitor's [`MonitorZones`]. They are two different
+/// index spaces, and the merged-zone hit test needs the zone's own index.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Hover {
+    pub window: usize,
+    pub zone: ZoneRef,
+}
+
+impl Hover {
+    /// The merged-zone index this hover keeps armed on `window`.
+    pub fn armed_overlay(self, window: usize) -> Option<usize> {
+        match self.zone {
+            ZoneRef::Overlay(index) if self.window == window => Some(index),
+            _ => None,
+        }
+    }
+}
+
 /// Zones for one monitor, in coordinates local to its work area.
 #[derive(Clone, Debug, Default)]
 pub struct MonitorZones {
@@ -579,5 +600,52 @@ mod tests {
         let layout = Layout::default();
         let zones = MonitorZones::build(800, 600, Some(&layout));
         assert_eq!(zones.areas, vec![Rect::new(0, 0, 800, 600)]);
+    }
+
+    #[test]
+    fn a_hover_arms_only_the_zone_inside_its_own_window() {
+        let hover = Hover {
+            window: 1,
+            zone: ZoneRef::Overlay(3),
+        };
+        assert_eq!(hover.armed_overlay(1), Some(3));
+        // The window index is not a zone index: another monitor must not see
+        // this zone armed.
+        assert_eq!(hover.armed_overlay(0), None);
+
+        let area = Hover {
+            window: 0,
+            zone: ZoneRef::Area(2),
+        };
+        assert_eq!(area.armed_overlay(0), None);
+    }
+
+    #[test]
+    fn every_merged_zone_holds_after_its_own_mini() {
+        let layout = shipped_layout();
+        let zones = MonitorZones::build(2752, 1104, Some(&layout));
+
+        for (index, overlay) in zones.overlays.iter().enumerate() {
+            let (cx, cy) = overlay.mini.center();
+            assert_eq!(
+                zones.hit_test(cx, cy, None),
+                Some(ZoneRef::Overlay(index)),
+                "mini of overlay {index} must select it"
+            );
+
+            // A few pixels off the mini, still nearer its centre than the
+            // centre of the cell underneath, keeps that same merged zone.
+            let x = cx + 8;
+            let y = cy;
+            assert!(
+                overlay.full.contains(x, y),
+                "overlay {index} full rect must contain a point beside its mini"
+            );
+            assert_eq!(
+                zones.hit_test(x, y, Some(index)),
+                Some(ZoneRef::Overlay(index)),
+                "overlay {index} must stay selected next to its mini"
+            );
+        }
     }
 }

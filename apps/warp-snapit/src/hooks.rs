@@ -192,10 +192,9 @@ unsafe extern "system" fn mouse_hook(code: i32, wparam: WPARAM, lparam: LPARAM) 
             if runtime.is_configured_up(message, data.mouseData)
                 && runtime.listening.swap(false, Ordering::AcqRel) =>
         {
-            // Carry the actual button in the message: the engine may process
-            // this after a newer drag has already started.
-            let was_left = (message == WM_LBUTTONUP) as i32;
-            runtime.post(WM_APP_DRAG_END, was_left, 0);
+            // Carry the release point: the engine resolves the drop there
+            // instead of trusting the last coalesced move it saw.
+            runtime.post(WM_APP_DRAG_END, data.pt.x, data.pt.y);
         }
         _ => {}
     }

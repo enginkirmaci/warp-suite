@@ -68,8 +68,9 @@ Keep this order; several steps depend on the previous one:
   passes `--note`. A missing binary shows a toast and nothing else breaks.
 - **SnapIt.** Reads the same `~/.warp/snapit` files as warp-snapit. On Windows
   the auto-start setting launches the configured executable with
-  `--parent <pid>`. The default executable name is historical; the Rust port is
-  `warp-snapit.exe`.
+  `--parent <pid>`. An empty setting resolves to the packaged
+  `warp-snapit.exe` next to the app; the retired .NET `Tools.SnapIt.exe` is
+  never started.
 - **Shared UI.** Text size and palette come from `~/.warp/ui.json` through
   `warpui-kit-core`; the app stores neither, and the accent follows the live
   palette like the other apps. Do not copy a fixed accent into a new app.

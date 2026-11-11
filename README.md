@@ -125,9 +125,10 @@ together. When one changes, update the other side in the **same** commit.
   and Warp Station read the same versioned snake_case `~/.warp/snapit`
   `settings.json`/layouts. The old .NET-shaped files are importer input only;
   `"x,y"` points and `"#AARRGGBB"` colours stay. Warp Station's
-  `snapit.executable` setting points at the Rust `warp-snapit.exe`, which is a
-  portable-zip deliverable (no installer) and skipped in the Linux bundle
-  (`linux_skip = true` in `apps.toml`).
+  `snapit.executable` setting names the Rust `warp-snapit.exe` (empty = the
+  packaged exe next to the app), which is a portable-zip deliverable (no
+  installer) and skipped in the Linux bundle (`linux_skip = true` in
+  `apps.toml`).
 - **Shared notes store** (default `~/notes`, `notes_store_path` overrides; one
   repo per folder under `projects/`):
   [warp-notes](https://github.com/enginkirmaci/warp-notes) always gets

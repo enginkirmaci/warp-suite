@@ -7,6 +7,7 @@
 
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
+use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
@@ -23,18 +24,30 @@ use crate::hooks::{
 };
 use crate::log;
 use crate::overlay::Overlay;
-use crate::settings::{self, Config, ExcludedApplication, HoldKeyBehaviour, Layout, SettingsStore};
+use crate::settings::{
+    self, Config, ExcludedApplication, HoldKeyBehaviour, Layout, MouseButton, SettingsStore,
+};
 use crate::win32;
-use crate::zones::ZoneRef;
+use crate::zones::Hover;
 
 /// One-shot timer used to defer the actual window move after a left-button
 /// snap, matching the .NET app's `Task.Delay(100)`.
 const TIMER_DELAYED_MOVE: usize = 1;
 const DELAYED_MOVE_MS: u32 = 100;
 
+/// Repeating timer that ends a drag whose button-up the hook never delivered.
+const TIMER_DRAG_WATCH: usize = 2;
+const DRAG_WATCH_MS: u32 = 250;
+/// Consecutive polls with the button up before the watchdog ends the drag.
+const WATCH_MISSES: u8 = 3;
+/// The pointer must also have been quiet this long, so a device that reports
+/// its drag without pressing the button cannot end a drag that is moving.
+const WATCH_QUIET: Duration = Duration::from_millis(300);
+
 /// `SPI_SETWORKAREA`: the taskbar/working-area part of `WM_SETTINGCHANGE`.
 const SPI_SETWORKAREA: usize = 0x2f;
 
+#[derive(Clone, Copy)]
 struct Target {
     rect: Rect,
     dpi: u32,
@@ -59,6 +72,7 @@ struct DragState {
     start: (i32, i32),
     active: Option<ActiveWindow>,
     target: Option<Target>,
+    last_move: Option<Instant>,
 }
 
 pub struct Engine {
@@ -70,9 +84,10 @@ pub struct Engine {
     layouts: Vec<Layout>,
     excluded: Vec<ExcludedApplication>,
     overlays: Vec<Overlay>,
-    hover: Option<(usize, ZoneRef)>,
+    hover: Option<Hover>,
     drag: DragState,
     pending_move: Option<PendingMove>,
+    watch_misses: u8,
     hooks: Option<Hooks>,
     cornering: Option<Cornering>,
 }
@@ -95,6 +110,7 @@ impl Engine {
             hover: None,
             drag: DragState::default(),
             pending_move: None,
+            watch_misses: 0,
             hooks: None,
             cornering: None,
         };
@@ -168,6 +184,7 @@ impl Engine {
         for overlay in &mut self.overlays {
             overlay.hide();
         }
+        self.stop_watch();
     }
 
     /// Shows the overlays on the first move after drag detection, then leaves
@@ -181,7 +198,7 @@ impl Engine {
 
         for index in 0..self.overlays.len() {
             let hover = match self.hover {
-                Some((hovered, zone)) if hovered == index => Some(zone),
+                Some(hovered) if hovered.window == index => Some(hovered.zone),
                 _ => None,
             };
             if let Err(error) = self.overlays[index].paint(&self.settings.theme, hover) {
@@ -189,11 +206,16 @@ impl Engine {
             }
             self.overlays[index].show();
         }
+        self.start_watch();
+        log::line(&format!(
+            "overlays shown on {} monitor(s)",
+            self.overlays.len()
+        ));
     }
 
     fn paint_overlay(&mut self, index: usize) {
         let hover = match self.hover {
-            Some((hovered, zone)) if hovered == index => Some(zone),
+            Some(hovered) if hovered.window == index => Some(hovered.zone),
             _ => None,
         };
         if let Some(overlay) = self.overlays.get_mut(index)
@@ -246,6 +268,7 @@ impl Engine {
         if !self.drag.listening {
             return;
         }
+        self.drag.last_move = Some(Instant::now());
         if !self.holding_key_result() {
             return;
         }
@@ -281,11 +304,19 @@ impl Engine {
         }
 
         if self.settings.disable_for_fullscreen && win32::is_fullscreen(&window) {
+            log::line(&format!(
+                "window is fullscreen; snapping skipped: {}",
+                window.title
+            ));
             self.stop_listening();
             return;
         }
 
         if self.settings.disable_for_modal && !win32::is_allowed_window_style(window.hwnd) {
+            log::line(&format!(
+                "window style is not snappable; snapping skipped: {}",
+                window.title
+            ));
             self.stop_listening();
             return;
         }
@@ -293,11 +324,20 @@ impl Engine {
         if self.settings.drag_by_title {
             let (caption, frame) = win32::system_caption_metrics();
             if window.rect.top + caption + 2 + frame * 2 < point.1 {
+                log::line("drag started below the title bar; snapping skipped");
                 self.stop_listening();
                 return;
             }
         }
 
+        log::line(&format!(
+            "drag detected on window {:#x}: {}x{} at ({}, {})",
+            window.hwnd.0 as usize,
+            window.rect.width(),
+            window.rect.height(),
+            window.rect.left,
+            window.rect.top,
+        ));
         self.drag.detected = true;
         self.drag.active = Some(ActiveWindow {
             hwnd: window.hwnd,
@@ -314,10 +354,9 @@ impl Engine {
                 continue;
             }
 
-            let current = match self.hover {
-                Some((hovered, _)) if hovered == index => Some(index),
-                _ => None,
-            };
+            // The sticky hit test needs the merged zone's own index; the
+            // overlay-window index is a different space.
+            let current = self.hover.and_then(|hover| hover.armed_overlay(index));
 
             if let Some(zone) = overlay.hit_test(point.0, point.1, current) {
                 if let Some(rect) = overlay.target(zone) {
@@ -327,32 +366,52 @@ impl Engine {
             }
         }
 
-        let new_hover = found.as_ref().map(|(index, zone, _, _)| (*index, *zone));
+        let new_hover = found.as_ref().map(|(index, zone, _, _)| Hover {
+            window: *index,
+            zone: *zone,
+        });
         let old_hover = self.hover;
         self.hover = new_hover;
 
-        if old_hover.map(|(index, _)| index) != new_hover.map(|(index, _)| index)
-            && let Some((index, _)) = old_hover
-        {
-            self.paint_overlay(index);
-        }
-        if let Some((index, _)) = new_hover {
-            self.paint_overlay(index);
+        if old_hover != new_hover {
+            log::line(&format!("hover: {new_hover:?}"));
+            // Repaint the window that lost the hover, then the one that took
+            // it; a hover inside one window only needs that one repaint.
+            if let Some(old) = old_hover
+                && new_hover.is_none_or(|new| new.window != old.window)
+            {
+                self.paint_overlay(old.window);
+            }
+            if let Some(new) = new_hover {
+                self.paint_overlay(new.window);
+            }
         }
 
         self.drag.target = found.map(|(_, _, rect, dpi)| Target { rect, dpi });
     }
 
-    fn drag_end(&mut self, was_left: bool) {
+    /// `x`/`y` are the button-up position, so the drop does not depend on how
+    /// many moves the coalesced queue happened to process.
+    fn drag_end(&mut self, x: i32, y: i32) {
         if !self.drag.listening {
+            // A stale end must still not leave overlays painted.
+            self.cancel();
             return;
         }
 
         // Mouse moves are coalesced, so the last position the engine saw can
-        // be older than the release point. Resolve the drop at the latest
-        // pointer position before committing the target.
+        // be older than the release point. Resolve the drop at the point the
+        // button came up on before committing the target.
+        let previous = self.drag.target;
         if self.drag.detected && self.overlays.iter().any(Overlay::is_visible) {
-            self.select(self.runtime.latest_point());
+            self.select((x, y));
+            // The release point can land a pixel outside the zone, or in an
+            // area-padding gap, after the last move selected it. Keep the
+            // target that was actually highlighted while the pointer is
+            // inside it.
+            if self.drag.target.is_none() {
+                self.drag.target = previous.filter(|target| target.rect.contains(x, y));
+            }
         }
 
         let active = self.drag.active.take();
@@ -364,9 +423,13 @@ impl Engine {
         self.hover = None;
 
         let (Some(active), Some(target)) = (active, target) else {
+            log::line(&format!(
+                "drop at ({x}, {y}) selected no zone; window stays put"
+            ));
             return;
         };
         if target.rect.is_empty() {
+            log::line(&format!("drop at ({x}, {y}) selected an empty zone"));
             return;
         }
 
@@ -382,6 +445,10 @@ impl Engine {
         // Windows needs a second placement when the window crosses a monitor
         // with a different scale factor.
         let repeat = target.dpi != active.dpi;
+
+        // The hook only posts an end for the configured button, so the left
+        // button (whose drag needs the delayed placement) is a setting.
+        let was_left = self.settings.mouse_button == MouseButton::Left;
 
         if was_left {
             self.schedule_move(active.hwnd, rect, repeat);
@@ -412,18 +479,86 @@ impl Engine {
     }
 
     fn on_timer(&mut self, timer: usize) {
-        if timer != TIMER_DELAYED_MOVE {
+        match timer {
+            TIMER_DELAYED_MOVE => {
+                // SAFETY: the same window/timer pair `schedule_move` started.
+                unsafe {
+                    let _ = KillTimer(Some(self.hwnd), TIMER_DELAYED_MOVE);
+                }
+
+                if let Some(pending) = self.pending_move.take() {
+                    Self::perform_move(pending);
+                }
+            }
+            TIMER_DRAG_WATCH => self.watch_drag(),
+            _ => {}
+        }
+    }
+
+    /// Starts the timer that watches the button while the overlays are up.
+    ///
+    /// A low-level hook can be removed or skipped (secure desktop, a driver
+    /// that swallows the release), and then no button-up ever reaches the
+    /// engine: the overlays stay painted over the desktop until something else
+    /// happens to clear them. Polling the physical button state recovers from
+    /// that.
+    fn start_watch(&mut self) {
+        self.watch_misses = 0;
+        if !win32::button_state_is_readable(self.settings.mouse_button) {
             return;
         }
 
-        // SAFETY: the same window/timer pair `schedule_move` started.
+        // SAFETY: `self.hwnd` is this engine's window and None makes WM_TIMER
+        // go to its window_proc with our timer id.
+        let timer = unsafe { SetTimer(Some(self.hwnd), TIMER_DRAG_WATCH, DRAG_WATCH_MS, None) };
+        if timer == 0 {
+            log::line("could not start the drag watchdog; a missed button-up will stick");
+        }
+    }
+
+    fn stop_watch(&mut self) {
+        self.watch_misses = 0;
+        // SAFETY: the timer belongs to this engine's window; killing an
+        // already-dead timer is a no-op.
         unsafe {
-            let _ = KillTimer(Some(self.hwnd), TIMER_DELAYED_MOVE);
+            let _ = KillTimer(Some(self.hwnd), TIMER_DRAG_WATCH);
+        }
+    }
+
+    fn watch_drag(&mut self) {
+        if !self.drag.listening || self.overlays.iter().all(|overlay| !overlay.is_visible()) {
+            self.stop_watch();
+            return;
         }
 
-        if let Some(pending) = self.pending_move.take() {
-            Self::perform_move(pending);
+        if win32::mouse_button_down(self.settings.mouse_button) {
+            self.watch_misses = 0;
+            return;
         }
+
+        // Only a drag whose input has gone quiet can be recovered safely: a
+        // pointer that still moves means the hook is alive and the release is
+        // the next event, not a state to repair.
+        if self
+            .drag
+            .last_move
+            .is_some_and(|last| last.elapsed() < WATCH_QUIET)
+        {
+            self.watch_misses = 0;
+            return;
+        }
+
+        self.watch_misses = self.watch_misses.saturating_add(1);
+        if self.watch_misses < WATCH_MISSES {
+            return;
+        }
+
+        let point = win32::cursor_position().unwrap_or_else(|| self.runtime.latest_point());
+        log::line(&format!(
+            "button-up hook was missed; finishing the drag at ({}, {})",
+            point.0, point.1
+        ));
+        self.drag_end(point.0, point.1);
     }
 
     fn perform_move(pending: PendingMove) {
@@ -492,7 +627,9 @@ pub unsafe extern "system" fn window_proc(
                 return LRESULT(0);
             }
             WM_APP_DRAG_END => {
-                engine.drag_end(wparam.0 != 0);
+                // The point packed like every other engine message: x in
+                // wparam, y in lparam.
+                engine.drag_end(wparam.0 as u32 as i32, lparam.0 as u32 as i32);
                 return LRESULT(0);
             }
             WM_APP_CANCEL => {

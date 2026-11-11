@@ -20,19 +20,23 @@ use windows::Win32::Graphics::Gdi::{
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::HiDpi::{GetDpiForMonitor, GetDpiForSystem, MDT_EFFECTIVE_DPI};
+use windows::Win32::UI::Input::KeyboardAndMouse::{
+    GetAsyncKeyState, VK_LBUTTON, VK_MBUTTON, VK_RBUTTON, VK_XBUTTON1, VK_XBUTTON2,
+};
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DestroyWindow, EDD_GET_DEVICE_INTERFACE_NAME, GWL_STYLE, GetDesktopWindow,
-    GetForegroundWindow, GetSystemMetrics, GetWindowLongW, GetWindowRect, GetWindowTextW, HWND_TOP,
-    HWND_TOPMOST, RegisterClassW, SM_CYCAPTION, SM_CYFIXEDFRAME, SW_HIDE, SW_SHOWNOACTIVATE,
-    SW_SHOWNORMAL, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW, SetWindowPos,
-    ShowWindow, ULW_ALPHA, UpdateLayeredWindow, WINDOW_EX_STYLE, WINDOW_STYLE, WNDCLASS_STYLES,
-    WNDCLASSW, WNDPROC, WS_EX_APPWINDOW, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
-    WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_POPUP,
+    CreateWindowExW, DestroyWindow, EDD_GET_DEVICE_INTERFACE_NAME, GWL_STYLE, GetCursorPos,
+    GetDesktopWindow, GetForegroundWindow, GetSystemMetrics, GetWindowLongW, GetWindowRect,
+    GetWindowTextW, HWND_TOP, HWND_TOPMOST, RegisterClassW, SM_CYCAPTION, SM_CYFIXEDFRAME, SW_HIDE,
+    SW_SHOWNOACTIVATE, SW_SHOWNORMAL, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW,
+    SetWindowPos, ShowWindow, ULW_ALPHA, UpdateLayeredWindow, WINDOW_EX_STYLE, WINDOW_STYLE,
+    WNDCLASS_STYLES, WNDCLASSW, WNDPROC, WS_EX_APPWINDOW, WS_EX_LAYERED, WS_EX_NOACTIVATE,
+    WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_POPUP,
 };
 use windows::core::BOOL;
 use windows::core::{PCWSTR, w};
 
 use crate::geometry::Rect;
+use crate::settings::MouseButton;
 
 // ---------------------------------------------------------------------------
 // Strings
@@ -199,6 +203,38 @@ pub fn system_caption_metrics() -> (i32, i32) {
             GetSystemMetrics(SM_CYFIXEDFRAME),
         )
     }
+}
+
+pub fn cursor_position() -> Option<(i32, i32)> {
+    let mut point = POINT::default();
+    // SAFETY: `point` is a valid POINT output buffer.
+    unsafe { GetCursorPos(&mut point) }.ok()?;
+    Some((point.x, point.y))
+}
+
+/// Whether the engine can read this button's physical state.
+///
+/// `GetAsyncKeyState` documents the three main buttons; the extra buttons
+/// rely on the driver and read as up on some systems, which would end a drag
+/// that is still going.
+pub fn button_state_is_readable(button: MouseButton) -> bool {
+    matches!(
+        button,
+        MouseButton::Left | MouseButton::Right | MouseButton::Middle
+    )
+}
+
+pub fn mouse_button_down(button: MouseButton) -> bool {
+    let key = match button {
+        MouseButton::Left => VK_LBUTTON,
+        MouseButton::Right => VK_RBUTTON,
+        MouseButton::Middle => VK_MBUTTON,
+        MouseButton::XButton1 => VK_XBUTTON1,
+        MouseButton::XButton2 => VK_XBUTTON2,
+    };
+
+    // SAFETY: GetAsyncKeyState only reads the system's key state.
+    unsafe { GetAsyncKeyState(key.0 as i32) < 0 }
 }
 
 // ---------------------------------------------------------------------------

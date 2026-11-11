@@ -7,11 +7,11 @@ use std::sync::atomic::{AtomicIsize, Ordering};
 
 use anyhow::{Context, Result};
 use windows::Win32::Foundation::{
-    CloseHandle, ERROR_ALREADY_EXISTS, ERROR_SUCCESS, GetLastError, HANDLE, HWND, LPARAM,
-    SetLastError, WPARAM,
+    CloseHandle, E_ACCESSDENIED, ERROR_ALREADY_EXISTS, ERROR_SUCCESS, GetLastError, HANDLE, HWND,
+    LPARAM, SetLastError, WPARAM,
 };
 use windows::Win32::System::Console::SetConsoleCtrlHandler;
-use windows::Win32::System::Threading::CreateMutexW;
+use windows::Win32::System::Threading::{CreateMutexW, OpenMutexW, SYNCHRONIZATION_SYNCHRONIZE};
 use windows::Win32::UI::HiDpi::{
     DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, SetProcessDpiAwarenessContext,
 };
@@ -19,7 +19,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     DefWindowProcW, GWLP_USERDATA, GetWindowLongPtrW, PostMessageW, SetProcessDPIAware,
     SetWindowLongPtrW, UnregisterClassW,
 };
-use windows::core::{BOOL, w};
+use windows::core::{BOOL, PCWSTR, w};
 
 use crate::cli::Cli;
 use crate::engine::{self, Engine};
@@ -75,6 +75,36 @@ impl Drop for InstanceGuard {
     }
 }
 
+/// Whether the retired .NET companion holds its single-instance mutex.
+///
+/// `SnapIt.Common/Applications/AppInstance.cs` keeps the mutex named below for
+/// the life of the process. Both companions install global mouse hooks and
+/// place the same windows, so one drag is resolved twice and the two overlays
+/// fight. Nothing here can stop the other process; the log line is what makes
+/// the collision visible.
+fn legacy_companion_running() -> bool {
+    // The .NET name is a bare GUID, so it lives in this session's namespace
+    // next to the named mutex the Rust app already took.
+    const NAME: &str = "{FF1FFB1E-5D42-4B8F-B42A-52DA1A1964B7}";
+    let name: Vec<u16> = NAME.encode_utf16().chain(std::iter::once(0)).collect();
+
+    // SAFETY: `OpenMutexW` only reads the NUL-terminated name; the returned
+    // handle, if any, is closed immediately below.
+    match unsafe { OpenMutexW(SYNCHRONIZATION_SYNCHRONIZE, false, PCWSTR(name.as_ptr())) } {
+        Ok(handle) => {
+            // SAFETY: `handle` came from OpenMutexW and is closed once here.
+            unsafe {
+                let _ = CloseHandle(handle);
+            }
+            true
+        }
+        // An elevated companion owns the mutex with an ACL this process may
+        // not enter; access denied still means the process is there.
+        Err(error) if error.code() == E_ACCESSDENIED => true,
+        Err(_) => false,
+    }
+}
+
 pub fn run(cli: Cli) -> Result<()> {
     enable_dpi_awareness();
 
@@ -89,6 +119,14 @@ pub fn run(cli: Cli) -> Result<()> {
         log::line("another snapit instance is already running");
         return Ok(());
     };
+
+    if legacy_companion_running() {
+        log::line(
+            "the .NET SnapIt companion is running too: both hook the mouse and \
+             place windows, so point Warp Station's SnapIt executable at \
+             warp-snapit.exe and close the old companion",
+        );
+    }
 
     let runtime = Runtime::new(config.settings.clone());
 

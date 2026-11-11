@@ -1,6 +1,6 @@
 //! Start/stop the SnapIt companion that snaps dragged windows into zone
 //! layouts; it watches this process (--parent) and exits when Warp Station dies.
-//! The binary is the packaged Tools.SnapIt.exe next to the app unless a
+//! The binary is the packaged warp-snapit.exe next to the app unless a
 //! configured executable (settings, like the warp-agent one) resolves.
 
 #[cfg(windows)]
@@ -11,7 +11,7 @@ use std::process::{Child, Command};
 use std::sync::Mutex;
 
 #[cfg(windows)]
-const COMPANION_EXE: &str = "Tools.SnapIt.exe";
+const COMPANION_EXE: &str = "warp-snapit.exe";
 
 #[cfg(windows)]
 static CHILD: Mutex<Option<Child>> = Mutex::new(None);

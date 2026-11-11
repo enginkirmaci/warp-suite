@@ -164,8 +164,9 @@ when one side changes, update the other side in the **same commit**.
   the same versioned snake_case `settings.json`/layouts. The old .NET-shaped
   `Settings.json`, `ExcludedApplicationSettings.json` and PascalCase layouts
   are importer input only. Points stay `"x,y"` and colours `"#AARRGGBB"`.
-  Warp Station's `snapit.executable` setting must point at the Rust
-  `warp-snapit.exe`; the Rust port ships as a portable zip
+  Warp Station's `snapit.executable` setting names the Rust `warp-snapit.exe`
+  (the default: the packaged `warp-snapit.exe` next to the app), never the
+  retired .NET `Tools.SnapIt.exe`; the Rust port ships as a portable zip
   (`linux_skip = true`), not an installer.
 - **Notes store** (default `~/notes`, `notes_store_path` overrides): one store
   root, repo notes under `projects/<repo>`, notes outside a repo at the root.

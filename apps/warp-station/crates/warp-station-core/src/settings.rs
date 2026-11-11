@@ -370,7 +370,7 @@ pub struct ClipboardPasswordSettings {
 pub struct SnapitSettings {
     /// Spawns the SnapIt companion at app launch.
     pub auto_start: bool,
-    /// The companion binary to launch; empty = the packaged Tools.SnapIt.exe
+    /// The companion binary to launch; empty = the packaged warp-snapit.exe
     /// next to the app. A bare name resolves through PATH and the user
     /// install dirs, like the warp-agent executable.
     pub executable: String,

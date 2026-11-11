@@ -64,12 +64,26 @@ change: update Warp Station in the same commit. The schema contract is
 - The engine thread owns all windows and processes coalesced hook messages
   (`WM_APP_DRAG_START` / `MOUSE_MOVE` / `DRAG_END` / `CANCEL`). Mouse moves
   never block the hook threads.
+- The drop is resolved at the button-up point the hook carries in
+  `WM_APP_DRAG_END`, not at the last coalesced move, and the zone that was
+  highlighted is kept when the release point is still inside it. A merged
+  zone is armed by its mini; the sticky hit test needs that zone's own index,
+  which is not the overlay-window index (`zones::Hover` keeps the two apart).
+- While the overlays are up, a 250 ms timer checks the physical button. If it
+  is up, the pointer has been quiet for 300 ms and the drag still has no end,
+  the engine finishes the drag itself: a missed hook event must not leave the
+  overlay painted on screen.
 - Placement is delayed by 100 ms with a one-shot `WM_TIMER` and repeated when
   the window crosses monitors with different DPI, matching
   `SnapManager.MoveWindow`.
+- A drag, a hover change and a drop each write one line to
+  `~/.warp/snapit/snapit.log`; that file is the field diagnostic for "the
+  window did not move" reports. A running .NET companion is logged at startup
+  because two snap companions fight over the same drags.
 - The process holds the mutex `Local\DevTools.SnapIt.Rust`. The .NET companion
-  used `Local\DevTools.Tools.SnapIt.Companion`; it cannot read the native
-  files, so its old files are importer input, not a live format.
+  holds a bare GUID mutex of its own (`{FF1FFB1E-5D42-4B8F-B42A-52DA1A1964B7}`),
+  which the startup check opens to warn about a double run; it cannot read the
+  native files, so its old files are importer input, not a live format.
 - DPI awareness is per-monitor v2; the startup path also handles
   `SetConsoleCtrlHandler` and the parent watcher.
 
