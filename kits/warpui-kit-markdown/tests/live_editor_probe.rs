@@ -3,15 +3,17 @@
 //! wherever it has an answer.
 
 use gpui::{
-    AppContext as _, ClipboardItem, Context, Entity, IntoElement, Modifiers, ParentElement as _,
-    Point, Render, Styled as _, TestAppContext, VisualTestContext, Window, div, px,
+    AppContext as _, ClipboardItem, Context, Entity, InteractiveElement as _, IntoElement,
+    Modifiers, MouseButton, ParentElement as _, Point, Render, Styled as _, TestAppContext,
+    VisualTestContext, Window, div, px,
 };
 use gpui_kit::base::input::{
     Backspace, Copy, Delete, Enter, IndentInline, MoveDown, MoveEnd, MoveHome, MoveLeft, MoveRight,
     MoveToEnd, MoveToNextWord, MoveToStart, MoveUp, OutdentInline, Paste, Redo, Replace, Search,
     Undo,
 };
-use std::cell::RefCell;
+use gpui_kit::component::menu::PopupMenuItem;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use warpui_kit_core::palette;
 use warpui_kit_markdown::{
@@ -55,6 +57,35 @@ impl Render for HostLinkProbe {
                 .read_only(true)
                 .on_open_url(move |url, _window, _cx| opened.borrow_mut().push(url.to_string())),
         )
+    }
+}
+
+/// A read-only surface with a host row in its context menu.
+struct HostMenuProbe {
+    editor: Entity<LiveEditorState>,
+    hits: Rc<Cell<usize>>,
+}
+
+impl Render for HostMenuProbe {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        let hits = self.hits.clone();
+        div()
+            .size_full()
+            .child(
+                LiveEditor::new(&self.editor)
+                    .read_only(true)
+                    .host_menu(move |menu, _, _| {
+                        let hits = hits.clone();
+                        menu.separator().item(
+                            PopupMenuItem::element(|_, _| {
+                                div()
+                                    .debug_selector(|| "host-menu-action".into())
+                                    .child("Host action")
+                            })
+                            .on_click(move |_, _, _| hits.set(hits.get() + 1)),
+                        )
+                    }),
+            )
     }
 }
 
@@ -191,6 +222,35 @@ impl Harness {
         (this, opened)
     }
 
+    /// A read-only surface whose context menu carries a host row; returns the
+    /// number of times that row ran.
+    fn open_with_host_menu(tcx: &mut TestAppContext, text: &str) -> (Self, Rc<Cell<usize>>) {
+        tcx.update(gpui_kit::init);
+        let mut editor = None;
+        let hits = Rc::new(Cell::new(0));
+        let seen = hits.clone();
+        let handle = tcx.open_window(gpui::size(px(900.), px(700.)), |window, cx| {
+            let state = cx.new(|cx| {
+                let mut state = LiveEditorState::new(window, cx);
+                state.set_read_only(true, cx);
+                state.set_value(text.to_string(), window, cx);
+                state
+            });
+            editor = Some(state.clone());
+            HostMenuProbe {
+                editor: state,
+                hits: seen,
+            }
+        });
+        let cx = VisualTestContext::from_window(handle.into(), tcx).into_mut();
+        let mut this = Self {
+            cx,
+            editor: editor.expect("the window was built"),
+        };
+        this.settle();
+        (this, hits)
+    }
+
     /// A read-only surface sized to its document by a host that scrolls
     /// around it, as a chat message is.
     fn open_fit_read_only(tcx: &mut TestAppContext, text: &str) -> Self {
@@ -268,6 +328,29 @@ impl Harness {
     fn typed(&mut self, text: &str) {
         self.cx.simulate_input(text);
         self.settle();
+    }
+
+    /// A host's streaming update: the text arrives without opening a new
+    /// document, so selection and scroll must survive.
+    fn stream(&mut self, text: &str) {
+        let editor = self.editor.clone();
+        self.cx.update(|window, cx| {
+            editor.update(cx, |state, cx| {
+                state.apply_streamed(text.to_string(), window, cx)
+            });
+        });
+        self.settle();
+    }
+
+    fn select(&mut self, range: std::ops::Range<usize>) {
+        let editor = self.editor.clone();
+        self.cx
+            .update(|_, cx| editor.update(cx, |state, cx| state.set_selected_range(range, cx)));
+        self.settle();
+    }
+
+    fn scroll_top(&self) -> f32 {
+        self.cx.read(|cx| self.editor.read(cx).scroll_top())
     }
 
     /// The text with `¦` at the caret, or around the selection.
@@ -1213,5 +1296,92 @@ fn read_only_fit_content_leaves_the_wheel_to_its_host(tcx: &mut TestAppContext) 
     assert_eq!(
         after, 0.,
         "a message laid out at its own height has nothing to scroll"
+    );
+}
+
+#[gpui::test]
+fn streaming_an_append_keeps_the_selection_and_scroll(tcx: &mut TestAppContext) {
+    let body = "a paragraph of the reasoning\n\n".repeat(80);
+    let text = format!("{body}tail¦");
+    let mut h = Harness::open(tcx, &text);
+    h.select(0.."a paragraph".len());
+    let at = h.point_of(0);
+    h.wheel(at, -200.);
+    let before = h.scroll_top();
+    assert!(before > 0., "the probe scrolled the document first");
+
+    h.stream(&format!("{body}tail and one more chunk"));
+
+    let (selected, range) = h.cx.read(|cx| {
+        let editor = h.editor.read(cx);
+        (editor.selected_text(), editor.selected_range())
+    });
+    assert_eq!(selected.as_deref(), Some("a paragraph"));
+    assert_eq!(range, 0.."a paragraph".len());
+    assert!(
+        (h.scroll_top() - before).abs() < 0.5,
+        "an append must not move the viewport ({} -> {})",
+        before,
+        h.scroll_top()
+    );
+}
+
+#[gpui::test]
+fn streaming_a_change_before_the_selection_maps_it(tcx: &mut TestAppContext) {
+    let mut h = Harness::open(tcx, "aaa bbb ccc¦");
+    h.select(8..11);
+    h.stream("XXX bbb ccc");
+    assert_eq!(h.state(), "XXX bbb ¦ccc¦");
+}
+
+#[gpui::test]
+fn streaming_inside_the_selection_takes_the_new_text(tcx: &mut TestAppContext) {
+    let mut h = Harness::open(tcx, "hello world¦");
+    h.select(6..11);
+    h.stream("hello there");
+    assert_eq!(h.state(), "hello ¦there¦");
+}
+
+#[gpui::test]
+fn streaming_an_append_moves_a_caret_at_the_end(tcx: &mut TestAppContext) {
+    let mut h = Harness::open(tcx, "alpha¦");
+    h.stream("alpha beta");
+    assert_eq!(h.state(), "alpha beta¦");
+}
+
+/// A multi-byte prefix must not leave the mapped selection inside a char.
+#[gpui::test]
+fn streaming_maps_a_multibyte_selection(tcx: &mut TestAppContext) {
+    let mut h = Harness::open(tcx, "eski İstanbul¦");
+    let start = "eski ".len();
+    let end = start + "İstanbul".len();
+    h.select(start..end);
+    h.stream("yeni İstanbul");
+    let (selected, range) = h.cx.read(|cx| {
+        let editor = h.editor.read(cx);
+        (editor.selected_text(), editor.selected_range())
+    });
+    assert_eq!(selected.as_deref(), Some("İstanbul"));
+    assert_eq!(range, start..end);
+}
+
+#[gpui::test]
+fn a_host_row_is_appended_to_the_read_only_menu(tcx: &mut TestAppContext) {
+    let (mut h, hits) = Harness::open_with_host_menu(tcx, "alpha beta gamma");
+    h.select(0..5);
+    let at = h.point_of(0);
+    h.cx.simulate_mouse_down(at, MouseButton::Right, Modifiers::default());
+    h.cx.simulate_mouse_up(at, MouseButton::Right, Modifiers::default());
+    h.settle();
+
+    let bounds =
+        h.cx.debug_bounds("host-menu-action")
+            .expect("the host row is in the menu");
+    h.cx.simulate_click(bounds.center(), Modifiers::default());
+    h.settle();
+    assert_eq!(hits.get(), 1, "the host row ran once");
+    assert!(
+        h.cx.debug_bounds("host-menu-action").is_none(),
+        "activating the row dismisses the menu"
     );
 }

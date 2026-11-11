@@ -26,7 +26,7 @@ use gpui_kit::base::input::{Copy, Cut, Paste, SelectAll};
 use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::component::Sizable as _;
 use gpui_kit::component::input::Input;
-use gpui_kit::component::menu::ContextMenuExt as _;
+use gpui_kit::component::menu::{ContextMenuExt as _, PopupMenu};
 use std::collections::HashSet;
 use std::ops::Range;
 use std::panic::Location;
@@ -76,6 +76,7 @@ pub struct LiveEditor {
     read_only: Option<bool>,
     fit_content: Option<bool>,
     code_overlay: Option<CodeOverlay>,
+    host_menu: Option<HostMenu>,
     column: ColumnWidth,
     top_margin: TopMargin,
 }
@@ -104,6 +105,10 @@ enum TopMargin {
 /// the kit positions it over the block's painted band.
 pub(crate) type CodeOverlay = Rc<dyn Fn(&CodeBlock) -> Option<AnyElement>>;
 
+/// Extra rows a host appends to the read-only context menu, after the
+/// editor's Copy / Select all.
+pub(crate) type HostMenu = Rc<dyn Fn(PopupMenu, &mut Window, &mut Context<PopupMenu>) -> PopupMenu>;
+
 impl LiveEditor {
     pub fn new(state: &Entity<LiveEditorState>) -> Self {
         Self {
@@ -116,6 +121,7 @@ impl LiveEditor {
             read_only: None,
             fit_content: None,
             code_overlay: None,
+            host_menu: None,
             column: ColumnWidth::default(),
             top_margin: TopMargin::default(),
         }
@@ -205,6 +211,17 @@ impl LiveEditor {
         self.code_overlay = Some(Rc::new(overlay));
         self
     }
+
+    /// Append host rows to the read-only surface's context menu, after the
+    /// editor's Copy / Select all. The editor keeps the menu's focus,
+    /// dismissal and click-outside behaviour; the host only adds rows.
+    pub fn host_menu(
+        mut self,
+        menu: impl Fn(PopupMenu, &mut Window, &mut Context<PopupMenu>) -> PopupMenu + 'static,
+    ) -> Self {
+        self.host_menu = Some(Rc::new(menu));
+        self
+    }
 }
 
 impl RenderOnce for LiveEditor {
@@ -219,6 +236,7 @@ impl RenderOnce for LiveEditor {
             read_only,
             fit_content,
             code_overlay,
+            host_menu,
             column,
             top_margin,
         } = self;
@@ -257,7 +275,7 @@ impl RenderOnce for LiveEditor {
         let hover_state = state.clone();
 
         if read_only {
-            return Self::render_read_only(state, aria_label, code_overlay, window, cx);
+            return Self::render_read_only(state, aria_label, code_overlay, host_menu, window, cx);
         }
 
         let label = aria_label.unwrap_or_else(|| "Note".into());
@@ -387,6 +405,7 @@ impl LiveEditor {
         state: Entity<LiveEditorState>,
         label: Option<SharedString>,
         code_overlay: Option<CodeOverlay>,
+        host_menu: Option<HostMenu>,
         window: &mut Window,
         cx: &mut App,
     ) -> AnyElement {
@@ -479,10 +498,15 @@ impl LiveEditor {
                     .on_action(window.listener_for(&state, LiveEditorState::copy))
                     .on_action(window.listener_for(&state, LiveEditorState::select_all)),
             )
-            .context_menu(move |menu, _, _| {
-                menu.action_context(menu_focus.clone())
+            .context_menu(move |menu, window, cx| {
+                let menu = menu
+                    .action_context(menu_focus.clone())
                     .menu("Copy", Box::new(Copy))
-                    .menu("Select all", Box::new(SelectAll))
+                    .menu("Select all", Box::new(SelectAll));
+                match &host_menu {
+                    Some(host) => host(menu, window, cx),
+                    None => menu,
+                }
             })
             .into_any_element()
     }

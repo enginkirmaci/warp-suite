@@ -788,6 +788,89 @@ impl LiveEditorState {
         cx.notify();
     }
 
+    /// Feeds a streaming update without resetting the document.
+    ///
+    /// The unchanged prefix and suffix are kept, so an appended chunk leaves
+    /// the selection and the scroll exactly where they were. When text in the
+    /// middle is replaced, a selection after the suffix shifts with it, and a
+    /// selection inside the changed span collapses to the change's start;
+    /// offsets are clamped to character boundaries.
+    ///
+    /// Use this for a surface whose text grows while it is on screen (a
+    /// reasoning block). [`Self::set_value`] is for opening a document: it
+    /// clears undo history and parks the selection and scroll at the top.
+    pub fn apply_streamed(
+        &mut self,
+        text: impl Into<SharedString>,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let text: SharedString = text.into();
+        if text == self.text {
+            return;
+        }
+        let old = std::mem::replace(&mut self.text, text);
+        let (prefix, suffix) = common_edges(&old, &self.text);
+        let old_len = old.len();
+        let new_len = self.text.len();
+        // A caret parked at the end follows an appended chunk; a selection
+        // ending there keeps covering the text it already covered.
+        let caret_at_end = self.selection.is_caret() && self.selection.head == old_len;
+        let selection = Selection {
+            anchor: self.map_streamed_offset(
+                self.selection.anchor,
+                prefix,
+                suffix,
+                old_len,
+                new_len,
+                caret_at_end,
+            ),
+            head: self.map_streamed_offset(
+                self.selection.head,
+                prefix,
+                suffix,
+                old_len,
+                new_len,
+                caret_at_end,
+            ),
+        };
+
+        self.marked = None;
+        self.goal_x = None;
+        self.draft = None;
+        self.closed.clear();
+        self.reparse();
+        // An append must not pull the viewport to a caret the reader was not
+        // following; the selection is mapped, but it does not reveal.
+        self.reveal_caret = false;
+        self.selection = selection;
+        self.restart_blink(cx);
+        self.publish_read_only_selection(cx);
+        cx.emit(LiveEditorEvent::Change);
+        cx.notify();
+    }
+
+    fn map_streamed_offset(
+        &self,
+        offset: usize,
+        prefix: usize,
+        suffix: usize,
+        old_len: usize,
+        new_len: usize,
+        caret_at_end: bool,
+    ) -> usize {
+        let mapped = if caret_at_end && old_len == prefix {
+            new_len
+        } else if offset <= prefix {
+            offset
+        } else if offset >= old_len.saturating_sub(suffix) {
+            new_len.saturating_sub(old_len.saturating_sub(offset))
+        } else {
+            prefix
+        };
+        mapped.min(new_len)
+    }
+
     /// Replaces the whole text as one undoable edit.
     pub fn replace_all(
         &mut self,
@@ -3051,6 +3134,26 @@ pub(super) fn input_handler(
     state: Entity<LiveEditorState>,
 ) -> gpui::ElementInputHandler<LiveEditorState> {
     gpui::ElementInputHandler::new(bounds, state)
+}
+
+/// The byte lengths of the common prefix and suffix of `old` and `new`, both
+/// on character boundaries.
+fn common_edges(old: &str, new: &str) -> (usize, usize) {
+    let mut prefix = 0;
+    for (a, b) in old.chars().zip(new.chars()) {
+        if a != b {
+            break;
+        }
+        prefix += a.len_utf8();
+    }
+    let mut suffix = 0;
+    for (a, b) in old[prefix..].chars().rev().zip(new[prefix..].chars().rev()) {
+        if a != b {
+            break;
+        }
+        suffix += a.len_utf8();
+    }
+    (prefix, suffix)
 }
 
 /// The line and column of `byte` in `text`, both 1-based.
