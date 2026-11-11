@@ -507,6 +507,50 @@ fn a_repository_without_runs_still_shows_its_items(cx: &mut TestAppContext) {
     assert!(cx.debug_bounds("run-detail").is_none());
 }
 
+/// Azure alone still draws the Pull requests tab. The strip hung on the GitHub
+/// switch, so an Azure repository with an open pull request — a count its row
+/// already showed — had no tab to open it in.
+#[gpui::test]
+fn an_azure_only_setup_still_draws_the_pull_request_tab(cx: &mut TestAppContext) {
+    let (store, _net_rx) = scratch_store(cx, "azure-only");
+    let cx = open_window(&store, cx);
+    cx.update_entity(&store, |s: &mut Store, _| {
+        s.update_settings(|settings| {
+            settings.repos.enable_github = false;
+            settings.repos.enable_azure_devops = true;
+            settings.repos.azure_devops_pat = "pat".into();
+        });
+    });
+    draw(cx);
+    seed_azure(
+        &store,
+        AzureSnapshot {
+            available: true,
+            pulls: vec![AzureItem {
+                number: 214,
+                title: "Sync the bridge".into(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        },
+        cx,
+    );
+
+    assert!(
+        cx.debug_bounds("detail-tab-pulls").is_some(),
+        "the Pull requests tab is in the strip"
+    );
+    assert!(
+        cx.debug_bounds("detail-tab-issues").is_some(),
+        "work items list under Issues, so that tab stays too"
+    );
+    click(cx, "detail-tab-pulls");
+    assert!(
+        cx.debug_bounds("PR-az-214").is_some(),
+        "the Azure pull request's row"
+    );
+}
+
 /// The policy that keeps the primary on Set auto-complete.
 fn blocked_policy() -> Vec<AzurePolicy> {
     vec![AzurePolicy {

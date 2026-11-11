@@ -379,8 +379,9 @@ impl ItemListView {
 
 impl Render for ItemListView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl gpui::IntoElement {
-        let (folder, github, azure, sort) = {
+        let (folder, github, azure, sort, azure_enabled, azure_token) = {
             let store = self.store.read(cx);
+            let app = store.settings();
             let folder = store.selected_repo.clone();
             let github = folder
                 .as_ref()
@@ -388,7 +389,16 @@ impl Render for ItemListView {
             let azure = folder
                 .as_ref()
                 .and_then(|f| store.azure_by_folder.get(f).cloned());
-            (folder, github, azure, store.issue_sort())
+            let token =
+                warp_station_core::azure::resolve_pat(&app.repos.azure_devops_pat).is_some();
+            (
+                folder,
+                github,
+                azure,
+                store.issue_sort(),
+                app.repos.enable_azure_devops,
+                token,
+            )
         };
         if self.folder != folder {
             self.folder = folder.clone();
@@ -426,6 +436,11 @@ impl Render for ItemListView {
         let github_on = shown(ActivitySource::GitHub);
         let azure_on = shown(ActivitySource::Azure);
         let connected = github_on || azure_on;
+        // An empty tab names the platform that is switched on, not the one that
+        // happened to answer: an Azure-only setup has to point at Azure, and at
+        // the token Settings holds when that is what it is waiting for.
+        let azure_named = azure_enabled && !github_on;
+        let azure_token_missing = azure_named && !azure_token;
 
         let mut open_items: Vec<ActivityItem> = Vec::new();
         if github_on && let Some(snapshot) = github.as_ref() {
@@ -573,7 +588,7 @@ impl Render for ItemListView {
         } else if !connected {
             empty_note(
                 format!("No {state} {title}"),
-                missing_target_note(self.pull_requests, github_on, azure_on),
+                missing_target_note(self.pull_requests, azure_named, azure_token_missing),
             )
         } else if total == 0 {
             let detail = if self.closed {
@@ -591,7 +606,9 @@ impl Render for ItemListView {
                         new_verb(self.pull_requests, Some(target.source)),
                         if self.pull_requests { "open" } else { "file" },
                     ),
-                    None => missing_target_note(self.pull_requests, github_on, azure_on),
+                    None => {
+                        missing_target_note(self.pull_requests, azure_named, azure_token_missing)
+                    }
                 }
             };
             empty_note(format!("No {state} {title}"), detail)
@@ -1158,15 +1175,18 @@ struct NewTarget {
 }
 
 /// What an empty list asks for when it has no known create target: name the
-/// integration whose remote or credentials are missing.
-fn missing_target_note(pull_requests: bool, github_on: bool, azure_on: bool) -> String {
-    let azure = azure_on && !github_on;
-    let integration = if azure { "Azure DevOps" } else { "GitHub" };
+/// integration whose remote or credentials are missing, and the one setting it
+/// cannot guess.
+fn missing_target_note(pull_requests: bool, azure: bool, azure_token_missing: bool) -> String {
     let action = match (pull_requests, azure) {
         (true, _) => "open a pull request",
         (false, true) => "file a work item",
         (false, false) => "file an issue",
     };
+    if azure_token_missing {
+        return format!("Add an Azure DevOps token in Settings → Integrations to {action}.");
+    }
+    let integration = if azure { "Azure DevOps" } else { "GitHub" };
     format!("Connect {integration} to {action}.")
 }
 
@@ -1200,4 +1220,32 @@ fn empty_note(title: String, detail: String) -> gpui::AnyElement {
             )
         })
         .into_any_element()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::missing_target_note;
+
+    /// An Azure-only tab names Azure — the switch that is on — and, when no
+    /// token resolves, the one setting that stands in the way. It used to say
+    /// "Connect GitHub" for a repository GitHub has never seen.
+    #[test]
+    fn an_empty_tab_names_the_platform_that_is_switched_on() {
+        assert_eq!(
+            missing_target_note(true, true, true),
+            "Add an Azure DevOps token in Settings → Integrations to open a pull request."
+        );
+        assert_eq!(
+            missing_target_note(true, true, false),
+            "Connect Azure DevOps to open a pull request."
+        );
+        assert_eq!(
+            missing_target_note(false, true, true),
+            "Add an Azure DevOps token in Settings → Integrations to file a work item."
+        );
+        assert_eq!(
+            missing_target_note(false, false, false),
+            "Connect GitHub to file an issue."
+        );
+    }
 }

@@ -3520,15 +3520,18 @@ impl Store {
         cx.notify();
     }
 
-    /// The detail tabs these settings allow: an integration that is off takes
-    /// its own tabs along. Pipelines stays for every repository — one with no
-    /// runs gets the tab and its empty state.
+    /// The detail tabs these settings allow. Pull requests and Issues list both
+    /// platforms' rows, so either integration keeps them: a repository on
+    /// Azure alone still gets the tab its open pull requests land in. Pipelines
+    /// stays for every repository — one with no runs gets the tab and its
+    /// empty state.
     pub fn detail_tabs(&self) -> Vec<WorkspaceTab> {
         let settings = self.settings();
+        let platforms = settings.repos.enable_github || settings.repos.enable_azure_devops;
         WorkspaceTab::ALL
             .into_iter()
             .filter(|tab| match tab {
-                WorkspaceTab::PullRequests | WorkspaceTab::Issues => settings.repos.enable_github,
+                WorkspaceTab::PullRequests | WorkspaceTab::Issues => platforms,
                 WorkspaceTab::Overview
                 | WorkspaceTab::Changes
                 | WorkspaceTab::History
@@ -4594,7 +4597,7 @@ mod tests {
 
     /// Pipelines is a tab of every repository, even with both integrations off:
     /// the tab itself carries the empty state that says what is missing. The
-    /// GitHub-backed tabs still follow their switch.
+    /// platform tabs still follow the two switches.
     #[test]
     fn pipelines_is_always_a_detail_tab() {
         let (tx, _rx) = async_channel::unbounded();
@@ -4618,6 +4621,37 @@ mod tests {
         assert!(tabs.contains(&WorkspaceTab::Pipelines));
         assert!(!tabs.contains(&WorkspaceTab::PullRequests));
         assert!(!tabs.contains(&WorkspaceTab::Issues));
+
+        let _ = std::fs::remove_file(&scratch);
+    }
+
+    /// Azure alone keeps the merged Pull requests and Issues tabs. The gate
+    /// hung on the GitHub switch alone, so an Azure repository with an open
+    /// pull request — a count the row already shows — drew no tab for it.
+    #[test]
+    fn an_azure_only_setup_keeps_the_pull_request_tabs() {
+        let (tx, _rx) = async_channel::unbounded();
+        let scratch = std::env::temp_dir().join(format!(
+            "warp-station-detail-tabs-azure-{}.json",
+            std::process::id()
+        ));
+        std::fs::write(&scratch, "{}").expect("scratch settings");
+        let store = Store::with_settings(tx, Arc::new(SettingsService::at(scratch.clone())));
+
+        store.update_settings(|settings| {
+            settings.repos.enable_github = false;
+            settings.repos.enable_azure_devops = true;
+        });
+
+        let tabs = store.detail_tabs();
+        assert!(
+            tabs.contains(&WorkspaceTab::PullRequests),
+            "an Azure pull request opens in the Pull requests tab, so the tab stays"
+        );
+        assert!(
+            tabs.contains(&WorkspaceTab::Issues),
+            "Azure work items list under Issues, so the tab stays too"
+        );
 
         let _ = std::fs::remove_file(&scratch);
     }
