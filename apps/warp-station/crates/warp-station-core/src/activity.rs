@@ -548,6 +548,10 @@ pub struct RunJob {
     pub result: Option<String>,
     pub start: Option<String>,
     pub finish: Option<String>,
+    /// The steps inside this job: Azure's timeline tasks. A row of a run with
+    /// no stages is the job itself, so its tasks sit here; a GitHub run's card
+    /// is the job, whose steps are already the rows and never nest.
+    pub steps: Vec<RunJob>,
 }
 
 impl RunJob {

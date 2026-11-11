@@ -628,6 +628,9 @@ fn parse_jobs(value: &serde_json::Value) -> Vec<crate::activity::RunStage> {
                                     result: step_result(step),
                                     start: text(step, "startedAt"),
                                     finish: text(step, "completedAt"),
+                                    // a GitHub step is already a row: the job
+                                    // above it is the card
+                                    steps: Vec::new(),
                                 })
                                 .collect()
                         })

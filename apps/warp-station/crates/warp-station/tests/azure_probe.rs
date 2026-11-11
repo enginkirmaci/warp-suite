@@ -301,6 +301,7 @@ fn an_actions_run_opens_its_detail_and_asks_once(cx: &mut TestAppContext) {
                                     result: Some("succeeded".into()),
                                     start: None,
                                     finish: None,
+                                    steps: Vec::new(),
                                 },
                                 RunJob {
                                     name: "cargo test".into(),
@@ -308,6 +309,7 @@ fn an_actions_run_opens_its_detail_and_asks_once(cx: &mut TestAppContext) {
                                     result: Some("failed".into()),
                                     start: Some("2026-11-02T09:31:00Z".into()),
                                     finish: Some("2026-11-02T09:32:10Z".into()),
+                                    steps: Vec::new(),
                                 },
                             ],
                         },
@@ -319,6 +321,7 @@ fn an_actions_run_opens_its_detail_and_asks_once(cx: &mut TestAppContext) {
                                 result: None,
                                 start: None,
                                 finish: None,
+                                steps: Vec::new(),
                             }],
                         },
                     ],
@@ -443,6 +446,7 @@ fn the_pipelines_workbench_shows_the_selected_run(cx: &mut TestAppContext) {
                                 result: Some("succeeded".into()),
                                 start: None,
                                 finish: None,
+                                steps: Vec::new(),
                             }],
                         },
                         RunStage {
@@ -453,6 +457,24 @@ fn the_pipelines_workbench_shows_the_selected_run(cx: &mut TestAppContext) {
                                 result: Some("failed".into()),
                                 start: None,
                                 finish: None,
+                                steps: vec![
+                                    RunJob {
+                                        name: "Set up Python".into(),
+                                        state: Some("completed".into()),
+                                        result: Some("succeeded".into()),
+                                        start: None,
+                                        finish: None,
+                                        steps: Vec::new(),
+                                    },
+                                    RunJob {
+                                        name: "pytest".into(),
+                                        state: Some("completed".into()),
+                                        result: Some("failed".into()),
+                                        start: None,
+                                        finish: None,
+                                        steps: Vec::new(),
+                                    },
+                                ],
                             }],
                         },
                     ],
@@ -470,6 +492,15 @@ fn the_pipelines_workbench_shows_the_selected_run(cx: &mut TestAppContext) {
     );
     assert!(cx.debug_bounds("run-stage-1").is_some());
     assert!(cx.debug_bounds("run-job-1-0").is_some(), "a job row");
+    assert!(
+        cx.debug_bounds("run-step-1-0-0").is_some(),
+        "the job's tasks are rows beneath it"
+    );
+    assert!(cx.debug_bounds("run-step-1-0-1").is_some());
+    assert!(
+        cx.debug_bounds("run-step-1-0-2").is_none(),
+        "one row per task"
+    );
     assert!(cx.debug_bounds("run-log").is_some(), "the log card");
     assert!(cx.debug_bounds("run-log-lines").is_some());
     assert!(

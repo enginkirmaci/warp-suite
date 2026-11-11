@@ -1730,9 +1730,19 @@ fn stage_id_of<'a>(
     record: &'a TimelineRecord,
     by_id: &std::collections::HashMap<&str, &'a TimelineRecord>,
 ) -> Option<&'a str> {
+    ancestor_of(record, by_id, |kind| kind.eq_ignore_ascii_case("stage"))
+}
+
+/// The nearest ancestor (itself included) the `matches` predicate takes, as an
+/// id. The walk is bounded: a malformed timeline must not spin.
+fn ancestor_of<'a>(
+    record: &'a TimelineRecord,
+    by_id: &std::collections::HashMap<&str, &'a TimelineRecord>,
+    matches: impl Fn(&str) -> bool,
+) -> Option<&'a str> {
     let mut current = record;
     for _ in 0..8 {
-        if current.kind.eq_ignore_ascii_case("stage") {
+        if matches(&current.kind) {
             return Some(current.id.as_str());
         }
         let parent = current.parent.as_deref()?;
@@ -1741,9 +1751,14 @@ fn stage_id_of<'a>(
     None
 }
 
-/// Groups the timeline's flat records into stages and their jobs. A job sits
-/// under a stage directly, or under a phase (multi-config builds add one), so
-/// the parent chain is walked up to the stage.
+/// Groups the timeline's flat records into one card per stage, one row per
+/// job (a phase included: multi-config builds put their jobs under one) and
+/// the job's tasks nested beneath it.
+///
+/// A pipeline without stages — a single-job YAML, or a classic build — has
+/// jobs but no stage records at all. Those jobs are the pane's cards under one
+/// `Jobs` card, so such a run still shows its breakdown instead of "no stages
+/// reported".
 pub fn parse_timeline(json: &serde_json::Value) -> Vec<RunStage> {
     let records: Vec<TimelineRecord> = json
         .get("value")
@@ -1770,27 +1785,40 @@ pub fn parse_timeline(json: &serde_json::Value) -> Vec<RunStage> {
 
     let by_id: std::collections::HashMap<&str, &TimelineRecord> =
         records.iter().map(|r| (r.id.as_str(), r)).collect();
+    let is_job =
+        |kind: &str| kind.eq_ignore_ascii_case("job") || kind.eq_ignore_ascii_case("phase");
+    let is_task = |kind: &str| kind.eq_ignore_ascii_case("task");
 
+    // each job's own tasks, by the job's id: a task belongs to the nearest job
+    // or phase above it, however many levels that is
+    let mut tasks: std::collections::HashMap<&str, Vec<&TimelineRecord>> =
+        std::collections::HashMap::new();
+    for record in records.iter().filter(|r| is_task(&r.kind)) {
+        if let Some(job_id) = ancestor_of(record, &by_id, is_job) {
+            tasks.entry(job_id).or_default().push(record);
+        }
+    }
+
+    // the cards: one per stage, and the stage-less jobs in one of their own
     let mut stages: Vec<(&TimelineRecord, Vec<&TimelineRecord>)> = records
         .iter()
         .filter(|r| r.kind.eq_ignore_ascii_case("stage"))
         .map(|stage| (stage, Vec::new()))
         .collect();
     stages.sort_by_key(|(stage, _)| stage.order);
-    for record in &records {
-        let is_job =
-            record.kind.eq_ignore_ascii_case("job") || record.kind.eq_ignore_ascii_case("phase");
-        if !is_job {
-            continue;
-        }
-        let Some(stage_id) = stage_id_of(record, &by_id) else {
-            continue;
-        };
-        if let Some((_, jobs)) = stages.iter_mut().find(|(stage, _)| stage.id == stage_id) {
-            jobs.push(record);
+    let mut loose: Vec<&TimelineRecord> = Vec::new();
+    for record in records.iter().filter(|r| is_job(&r.kind)) {
+        match stage_id_of(record, &by_id) {
+            Some(stage_id) => {
+                if let Some((_, jobs)) = stages.iter_mut().find(|(stage, _)| stage.id == stage_id) {
+                    jobs.push(record);
+                }
+            }
+            None => loose.push(record),
         }
     }
-    stages
+
+    let mut cards: Vec<RunStage> = stages
         .into_iter()
         .map(|(stage, mut jobs)| {
             jobs.sort_by_key(|job| job.order);
@@ -1798,17 +1826,49 @@ pub fn parse_timeline(json: &serde_json::Value) -> Vec<RunStage> {
                 name: stage.name.clone(),
                 jobs: jobs
                     .into_iter()
-                    .map(|job| RunJob {
-                        name: job.name.clone(),
-                        state: job.state.clone(),
-                        result: job.result.clone(),
-                        start: job.start.clone(),
-                        finish: job.finish.clone(),
-                    })
+                    .map(|job| timeline_job(job, &tasks))
                     .collect(),
             }
         })
-        .collect()
+        .collect();
+    if !loose.is_empty() {
+        loose.sort_by_key(|job| job.order);
+        cards.push(RunStage {
+            name: "Jobs".to_string(),
+            jobs: loose
+                .into_iter()
+                .map(|job| timeline_job(job, &tasks))
+                .collect(),
+        });
+    }
+    cards
+}
+
+/// One timeline row: the job's own facts, with its tasks as steps beneath it.
+fn timeline_job(
+    job: &TimelineRecord,
+    tasks: &std::collections::HashMap<&str, Vec<&TimelineRecord>>,
+) -> RunJob {
+    let mut rows: Vec<&TimelineRecord> = tasks.get(job.id.as_str()).cloned().unwrap_or_default();
+    rows.sort_by_key(|task| task.order);
+    RunJob {
+        name: job.name.clone(),
+        state: job.state.clone(),
+        result: job.result.clone(),
+        start: job.start.clone(),
+        finish: job.finish.clone(),
+        steps: rows
+            .into_iter()
+            .map(|task| RunJob {
+                name: task.name.clone(),
+                state: task.state.clone(),
+                result: task.result.clone(),
+                start: task.start.clone(),
+                finish: task.finish.clone(),
+                steps: Vec::new(),
+            })
+            .collect(),
+    }
 }
 
 /// The `url` of the log list's last entry.
@@ -2143,20 +2203,53 @@ mod tests {
         assert_eq!(stages[1].failed(), 2);
         assert_eq!(stages[1].done(), 0, "its only clean job is still running");
         assert!(stages[1].jobs[2].is_running());
-        // a task is not a job row
+        // a task is not a job row: it nests under its own job
         assert!(!names.contains(&"Run tests"));
+        assert!(
+            stages[1].jobs[0].steps.is_empty(),
+            "the phase holds no tasks"
+        );
+        let steps: Vec<&str> = stages[1].jobs[1]
+            .steps
+            .iter()
+            .map(|step| step.name.as_str())
+            .collect();
+        assert_eq!(steps, ["Run tests"]);
+        assert!(stages[1].jobs[1].steps[0].is_failed());
+        assert!(stages[0].jobs[0].steps.is_empty());
     }
 
+    /// A pipeline without stage records — a single-job YAML, a classic build
+    /// — still has jobs and tasks; they are the cards and rows, so the pane
+    /// shows its breakdown instead of "no stages reported".
     #[test]
-    fn a_timeline_without_stages_is_empty_not_a_panic() {
+    fn a_timeline_without_stages_keeps_its_jobs() {
         assert!(parse_timeline(&serde_json::json!({})).is_empty());
         assert!(parse_timeline(&serde_json::json!({"value": []})).is_empty());
-        assert!(
-            parse_timeline(&serde_json::json!({"value": [
-                {"id": "j1", "type": "Job", "name": "Orphan"}
-            ]}))
-            .is_empty()
-        );
+
+        let cards = parse_timeline(&serde_json::json!({"value": [
+            {"id": "j1", "type": "Job", "name": "Build",
+             "state": "completed", "result": "succeeded", "order": 1},
+            {"id": "t1", "parentId": "j1", "type": "Task", "name": "cargo build",
+             "state": "completed", "result": "succeeded", "order": 1},
+            {"id": "t2", "parentId": "j1", "type": "Task", "name": "cargo test",
+             "state": "inProgress", "order": 2},
+            {"id": "j2", "type": "Job", "name": "Publish", "order": 2}
+        ]}));
+
+        assert_eq!(cards.len(), 1, "the stage-less jobs share one card");
+        assert_eq!(cards[0].name, "Jobs");
+        let jobs: Vec<&str> = cards[0].jobs.iter().map(|job| job.name.as_str()).collect();
+        assert_eq!(jobs, ["Build", "Publish"]);
+        let steps: Vec<&str> = cards[0].jobs[0]
+            .steps
+            .iter()
+            .map(|step| step.name.as_str())
+            .collect();
+        assert_eq!(steps, ["cargo build", "cargo test"]);
+        assert!(cards[0].jobs[0].steps[1].is_running());
+        assert!(cards[0].jobs[1].steps.is_empty(), "a job with no tasks yet");
+        assert_eq!(cards[0].done(), 1, "Build succeeded");
     }
 
     #[test]

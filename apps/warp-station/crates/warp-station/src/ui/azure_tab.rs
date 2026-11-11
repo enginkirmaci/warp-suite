@@ -1,9 +1,10 @@
 //! The Pipelines tab: the design's workbench. A 320 run list — GitHub Actions
 //! and Azure Pipelines interleaved, newest first, each row tagged with the
 //! source it came from — a hairline, then the selected run: its state, branch
-//! and commit, start, duration and trigger, one card per stage with its jobs,
-//! and the tail of its log. Below 900 px of pane the two take turns and Back
-//! returns to the list.
+//! and commit, start, duration and trigger, one card per stage with its jobs
+//! and each job's tasks under it (a pipeline without stages shows its jobs as
+//! the cards), and the tail of its log. Below 900 px of pane the two take
+//! turns and Back returns to the list.
 //!
 //! The run detail is source-neutral: the row is an `ActivityRun`, and each
 //! source answers with the same `RunDetail` — a timeline for Azure, one
@@ -888,8 +889,74 @@ fn stage_card(ix: usize, stage: &RunStage) -> AnyElement {
         );
     for (job_ix, job) in stage.jobs.iter().enumerate() {
         card = card.child(job_row(ix, job_ix, job));
+        for (step_ix, step) in job.steps.iter().enumerate() {
+            card = card.child(step_row(ix, job_ix, step_ix, step));
+        }
     }
     card.into_any_element()
+}
+
+/// One task under its job: indented, a size down, so the job stays the row and
+/// the steps read as what is inside it.
+fn step_row(stage_ix: usize, job_ix: usize, step_ix: usize, step: &RunJob) -> AnyElement {
+    let (glyph, color) = if step.is_failed() {
+        ("icons/icon-close.svg", theme::DANGER)
+    } else if step.is_running() {
+        ("icons/icon-spinner.svg", theme::BEHIND)
+    } else if step.is_done() {
+        ("icons/icon-check.svg", theme::SUCCESS_BRIGHT)
+    } else {
+        ("icons/icon-clock.svg", theme::text_muted())
+    };
+    let time = step.duration().unwrap_or_default();
+    let selector = format!("run-step-{stage_ix}-{job_ix}-{step_ix}");
+    let spinner_id = selector.clone();
+    div()
+        .id(SharedString::from(selector.clone()))
+        .debug_selector(move || selector.clone())
+        .min_h(px(30.))
+        .pl(px(46.))
+        .pr_4()
+        .flex()
+        .items_center()
+        .gap_2p5()
+        .text_size(px(theme::font_meta()))
+        .text_color(if step.is_failed() {
+            theme::DANGER
+        } else {
+            theme::text_dim()
+        })
+        .child(if glyph == "icons/icon-spinner.svg" {
+            motion::spinner(
+                SharedString::from(spinner_id),
+                "icons/icon-spinner.svg",
+                px(theme::icon_tiny()),
+                color,
+            )
+            .into_any_element()
+        } else {
+            icon(glyph, px(theme::icon_tiny()), color).into_any_element()
+        })
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .overflow_hidden()
+                .whitespace_nowrap()
+                .text_ellipsis()
+                .child(step.name.clone()),
+        )
+        .when(!time.is_empty(), |d| {
+            d.child(
+                div()
+                    .flex_shrink_0()
+                    .font_family(theme::code_font())
+                    .text_size(px(theme::font_mono_meta()))
+                    .text_color(theme::text_muted())
+                    .child(time),
+            )
+        })
+        .into_any_element()
 }
 
 fn job_row(stage_ix: usize, job_ix: usize, job: &RunJob) -> AnyElement {

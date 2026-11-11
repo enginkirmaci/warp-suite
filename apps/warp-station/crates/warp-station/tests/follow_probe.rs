@@ -122,6 +122,7 @@ fn detail(state: RunState, log: &str) -> RunDetail {
                 result: None,
                 start: None,
                 finish: None,
+                steps: Vec::new(),
             }],
         }],
         log: log.to_string(),
