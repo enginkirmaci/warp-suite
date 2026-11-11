@@ -154,16 +154,31 @@ pub enum NetCommand {
     },
     /// One run's stages and the tail of its log, for the Pipelines detail.
     /// One GitHub Actions run's jobs and failed log, for the Pipelines pane.
+    /// `with_log` is the follow loop's switch: a run that is still going has
+    /// no failed log worth the call.
     GitHubRunDetail {
         folder: PathBuf,
         gh_exe: String,
         run_id: u64,
+        with_log: bool,
     },
     AzureRunDetail {
         folder: PathBuf,
         pat: String,
         custom_base: String,
         build_id: u64,
+        with_log: bool,
+    },
+    /// The repository's recent runs only: the Pipelines follow loop's list
+    /// call, one request where the activity pass makes four.
+    GitHubRuns {
+        folder: PathBuf,
+        gh_exe: String,
+    },
+    AzureRuns {
+        folder: PathBuf,
+        pat: String,
+        custom_base: String,
     },
     /// One Azure pull request's record, policies and threads.
     AzurePullDetail {
@@ -562,11 +577,26 @@ pub enum UiEvent {
         folder: String,
         run_id: u64,
         detail: Option<Box<warp_station_core::activity::RunDetail>>,
+        /// What gh said about the core budget; the follow loop parks on it.
+        budget: warp_station_core::rate::RateBudget,
     },
     AzureRunDetailLoaded {
         folder: String,
         build_id: u64,
         detail: Option<warp_station_core::azure::RunDetail>,
+        budget: warp_station_core::rate::RateBudget,
+    },
+    /// The follow loop's list answer: `None` is a failed call, which leaves
+    /// the snapshot's list alone rather than blanking it.
+    GitHubRunsLoaded {
+        folder: String,
+        runs: Option<Vec<warp_station_core::github::GitHubRun>>,
+        budget: warp_station_core::rate::RateBudget,
+    },
+    AzureRunsLoaded {
+        folder: String,
+        runs: Option<Vec<warp_station_core::azure::PipelineRun>>,
+        budget: warp_station_core::rate::RateBudget,
     },
     AzurePullLoaded {
         folder: String,
@@ -1147,15 +1177,29 @@ fn spawn_read_intake(
                     folder,
                     gh_exe,
                     run_id,
+                    with_log,
                 } => {
                     let evt_tx = evt_tx.clone();
                     tokio::spawn(async move {
-                        let detail =
-                            warp_station_core::github::run_detail(&folder, &gh_exe, run_id).await;
+                        let detail = warp_station_core::github::run_detail(
+                            &folder, &gh_exe, run_id, with_log,
+                        )
+                        .await;
+                        // a refused call may be the budget: the free probe
+                        // says when it refills, so the loop can park instead
+                        // of retrying into the same hour
+                        let budget = if detail.is_none() {
+                            warp_station_core::github::rate_limit(&folder, &gh_exe)
+                                .await
+                                .unwrap_or_default()
+                        } else {
+                            Default::default()
+                        };
                         let _ = evt_tx.send_blocking(UiEvent::GitHubRunDetailLoaded {
                             folder: folder.to_string_lossy().to_string(),
                             run_id,
                             detail: detail.map(Box::new),
+                            budget,
                         });
                     });
                 }
@@ -1164,20 +1208,58 @@ fn spawn_read_intake(
                     pat,
                     custom_base,
                     build_id,
+                    with_log,
                 } => {
                     let evt_tx = evt_tx.clone();
                     tokio::spawn(async move {
-                        let detail = warp_station_core::azure::run_detail(
+                        let (detail, budget) = warp_station_core::azure::run_detail(
                             &folder,
                             &pat,
                             &custom_base,
                             build_id,
+                            with_log,
                         )
                         .await;
                         let _ = evt_tx.send_blocking(UiEvent::AzureRunDetailLoaded {
                             folder: folder.to_string_lossy().to_string(),
                             build_id,
                             detail,
+                            budget,
+                        });
+                    });
+                }
+                NetCommand::GitHubRuns { folder, gh_exe } => {
+                    let evt_tx = evt_tx.clone();
+                    tokio::spawn(async move {
+                        let runs = warp_station_core::github::runs(&folder, &gh_exe).await;
+                        let budget = if runs.is_none() {
+                            warp_station_core::github::rate_limit(&folder, &gh_exe)
+                                .await
+                                .unwrap_or_default()
+                        } else {
+                            Default::default()
+                        };
+                        let _ = evt_tx.send_blocking(UiEvent::GitHubRunsLoaded {
+                            folder: folder.to_string_lossy().to_string(),
+                            runs,
+                            budget,
+                        });
+                    });
+                }
+                NetCommand::AzureRuns {
+                    folder,
+                    pat,
+                    custom_base,
+                } => {
+                    let evt_tx = evt_tx.clone();
+                    tokio::spawn(async move {
+                        let (runs, budget) =
+                            warp_station_core::azure::pipeline_runs(&folder, &pat, &custom_base)
+                                .await;
+                        let _ = evt_tx.send_blocking(UiEvent::AzureRunsLoaded {
+                            folder: folder.to_string_lossy().to_string(),
+                            runs,
+                            budget,
                         });
                     });
                 }
@@ -1756,6 +1838,8 @@ async fn net_main(cmd_rx: Receiver<NetCommand>, evt_tx: Sender<UiEvent>) {
             | NetCommand::GitHubPullCreate { .. }
             | NetCommand::AzureRunDetail { .. }
             | NetCommand::GitHubRunDetail { .. }
+            | NetCommand::GitHubRuns { .. }
+            | NetCommand::AzureRuns { .. }
             | NetCommand::AzurePullDetail { .. }
             | NetCommand::AzurePullFiles { .. }
             | NetCommand::AzurePullCommits { .. }

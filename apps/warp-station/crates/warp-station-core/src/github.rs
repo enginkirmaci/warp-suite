@@ -452,29 +452,31 @@ pub async fn refresh(folder: &Path, gh_exe: &str) -> GitHubSnapshot {
     };
 
     let limit = ITEM_LIMIT.to_string();
-    let run_limit = RUN_LIST_LIMIT.to_string();
     let pr_args: Vec<&str> = vec!["pr", "list", "--json", PR_FIELDS, "--limit", &limit];
     let issue_args: Vec<&str> = vec!["issue", "list", "--json", ISSUE_FIELDS, "--limit", &limit];
-    let run_args: Vec<&str> = vec![
-        "run",
-        "list",
-        "--json",
-        RUN_LIST_FIELDS,
-        "--limit",
-        &run_limit,
-    ];
-    let (pr_json, issue_json, run_json) = tokio::join!(
+    let (pr_json, issue_json, runs) = tokio::join!(
         run_gh(gh_exe, folder, &pr_args),
         run_gh(gh_exe, folder, &issue_args),
-        run_gh(gh_exe, folder, &run_args)
+        runs(folder, gh_exe)
     );
     GitHubSnapshot {
         url: Some(url),
         pulls: parse_items(pr_json.as_deref(), true),
         issues: parse_items(issue_json.as_deref(), false),
-        runs: parse_runs(run_json.as_deref()),
+        runs: runs.unwrap_or_default(),
         available: true,
     }
+}
+
+/// The repository's recent workflow runs, the one call the Pipelines follow
+/// loop repeats — the activity pass's list without the pull request, issue and
+/// repository requests around it. `None` is a failed call, as opposed to a
+/// repository with no runs.
+pub async fn runs(folder: &Path, gh_exe: &str) -> Option<Vec<GitHubRun>> {
+    let limit = RUN_LIST_LIMIT.to_string();
+    let args = ["run", "list", "--json", RUN_LIST_FIELDS, "--limit", &limit];
+    let json = run_gh(gh_exe, folder, &args).await?;
+    Some(parse_runs(Some(&json)))
 }
 
 /// The closed pull requests (merged ones included) or issues, newest first as
@@ -542,28 +544,60 @@ pub async fn act_on_pull(
     run_gh_checked(gh_exe, folder, &args).await.map(|_| ())
 }
 
+/// The core REST budget gh reports. `gh api rate_limit` is free — GitHub does
+/// not count it against the limit — so a refused follow call can learn whether
+/// the budget was the reason and when the window refills, instead of guessing
+/// with a backoff that keeps retrying into the same hour.
+pub async fn rate_limit(folder: &Path, gh_exe: &str) -> Option<crate::rate::RateBudget> {
+    let json = run_gh(gh_exe, folder, &["api", "rate_limit"]).await?;
+    let value: serde_json::Value = serde_json::from_str(&json).ok()?;
+    let core = value.get("resources")?.get("core")?;
+    Some(crate::rate::RateBudget {
+        remaining: core
+            .get("remaining")
+            .and_then(|left| left.as_u64())
+            .map(|left| left.min(u64::from(u32::MAX)) as u32),
+        reset: core.get("reset").and_then(|at| at.as_i64()),
+        limited: false,
+    })
+}
+
 /// One workflow run's detail in the shape the Pipelines pane draws for an
-/// Azure run: the head facts, one card per job (a GitHub run has no stages, so
-/// the job is the card and its steps are the rows) and the tail of what the
-/// failed steps logged.
+/// Azure run: the head facts, the run's own state, one card per job (a GitHub
+/// run has no stages, so the job is the card and its steps are the rows) and
+/// the tail of what the failed steps logged.
+///
+/// `with_log` is the follow loop's switch: a run that is still going has no
+/// failed steps to read, so the follow polls skip the second call and the last
+/// one — after the run reports finished — asks for it.
 pub async fn run_detail(
     folder: &Path,
     gh_exe: &str,
     run_id: u64,
+    with_log: bool,
 ) -> Option<crate::activity::RunDetail> {
     let id = run_id.to_string();
     let view_args = ["run", "view", &id, "--json", RUN_VIEW_FIELDS];
     let log_args = ["run", "view", &id, "--log-failed"];
-    let (view, log) = tokio::join!(
-        run_gh(gh_exe, folder, &view_args),
-        run_gh(gh_exe, folder, &log_args)
-    );
+    let (view, log) = if with_log {
+        let (view, log) = tokio::join!(
+            run_gh(gh_exe, folder, &view_args),
+            run_gh(gh_exe, folder, &log_args)
+        );
+        (view, log)
+    } else {
+        (run_gh(gh_exe, folder, &view_args).await, None)
+    };
     let value: serde_json::Value = serde_json::from_str(&view?).ok()?;
     Some(crate::activity::RunDetail {
         sha: text(&value, "headSha"),
         trigger: text(&value, "event"),
         start: text(&value, "startedAt"),
         finish: text(&value, "updatedAt"),
+        state: Some(crate::activity::github_state(
+            text(&value, "status").as_deref(),
+            text(&value, "conclusion").as_deref(),
+        )),
         stages: parse_jobs(&value),
         log: log
             .map(|text| crate::activity::log_tail(&text, RUN_LOG_CAP))

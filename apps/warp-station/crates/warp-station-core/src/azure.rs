@@ -434,6 +434,37 @@ pub async fn refresh(folder: &Path, pat: &str, custom_base: &str) -> AzureSnapsh
     }
 }
 
+/// The project's recent builds for this repository, the one call the Pipelines
+/// follow loop repeats. The activity pass resolves the repository id first and
+/// filters by it; this reads the name the remote already carries, so a lively
+/// tab costs one request a minute rather than the whole pass.
+pub async fn pipeline_runs(
+    folder: &Path,
+    pat: &str,
+    custom_base: &str,
+) -> (Option<Vec<PipelineRun>>, crate::rate::RateBudget) {
+    let Some(remote) = remote_for(folder, custom_base) else {
+        return (None, crate::rate::RateBudget::default());
+    };
+    let client = Client::new(pat);
+    let payload = client
+        .get_json::<serde_json::Value>(&format!(
+            "{}/{}/_apis/build/builds?api-version=7.1&$top={BUILD_FETCH_LIMIT}&queryOrder=queueTimeDescending",
+            remote.base_url, remote.project
+        ))
+        .await;
+    let Some(payload) = payload else {
+        return (None, client.budget());
+    };
+    (
+        Some(builds_for_repository(
+            &payload,
+            &percent_decode(&remote.repository),
+        )),
+        client.budget(),
+    )
+}
+
 /// The closed pull requests or work items, for the tab that shows them.
 /// `None` is a failed call — the tab offers Retry rather than an empty list
 /// that would read as "nothing here".
@@ -654,16 +685,34 @@ async fn fetch_pipelines(client: &Client, remote: &AzureRemote, repo_id: &str) -
         return Vec::new();
     };
     // builds have no server-side repository filter — client-side by repo id
+    builds_matching(&payload, |b| {
+        b.pointer("/repository/id")
+            .and_then(|r| r.as_str())
+            .is_some_and(|r| r.eq_ignore_ascii_case(repo_id))
+    })
+}
+
+/// The repository's builds out of the project-wide answer, by name: the follow
+/// loop only has the name its remote carries, where the activity pass has the
+/// id it resolved.
+fn builds_for_repository(payload: &serde_json::Value, repository: &str) -> Vec<PipelineRun> {
+    builds_matching(payload, |b| {
+        b.pointer("/repository/name")
+            .and_then(|r| r.as_str())
+            .is_some_and(|name| name.eq_ignore_ascii_case(repository))
+    })
+}
+
+fn builds_matching(
+    payload: &serde_json::Value,
+    keep: impl Fn(&serde_json::Value) -> bool,
+) -> Vec<PipelineRun> {
     payload
         .get("value")
         .and_then(|v| v.as_array())
         .map(|rows| {
             rows.iter()
-                .filter(|b| {
-                    b.pointer("/repository/id")
-                        .and_then(|r| r.as_str())
-                        .is_some_and(|r| r.eq_ignore_ascii_case(repo_id))
-                })
+                .filter(|b| keep(b))
                 .take(PIPELINE_LIMIT)
                 .filter_map(parse_build)
                 .collect()
@@ -1596,15 +1645,22 @@ fn hunks(ops: &[DiffOp], a: &[&str], b: &[&str]) -> String {
 /// The log tail the detail shows: the end of the log is where a failure is.
 const RUN_LOG_CAP: usize = 8000;
 
-/// A run's stages and the tail of its log, in the two calls Azure wants for
-/// it: the timeline for the stage/job records, then the last log entry's text.
+/// A run's stages and the tail of its log, in the calls Azure wants for it:
+/// the build record and the timeline, then the last log entry's text.
+///
+/// `with_log` is the follow loop's switch: while the run is going the log card
+/// has nothing to show, so the follow polls skip both log calls and the last
+/// one — after the run reports finished — reads them.
 pub async fn run_detail(
     folder: &Path,
     pat: &str,
     custom_base: &str,
     build_id: u64,
-) -> Option<RunDetail> {
-    let remote = remote_for(folder, custom_base)?;
+    with_log: bool,
+) -> (Option<RunDetail>, crate::rate::RateBudget) {
+    let Some(remote) = remote_for(folder, custom_base) else {
+        return (None, crate::rate::RateBudget::default());
+    };
     let client = Client::new(pat);
     let base = format!(
         "{}/{}/_apis/build/builds/{build_id}",
@@ -1613,37 +1669,46 @@ pub async fn run_detail(
     let build_url = format!("{base}?api-version=7.1");
     let timeline_url = format!("{base}/timeline?api-version=7.1");
     let logs_url = format!("{base}/logs?api-version=7.1");
-    let (build, timeline, logs) = tokio::join!(
+    let (build, timeline) = tokio::join!(
         client.get_json::<serde_json::Value>(&build_url),
         client.get_json::<serde_json::Value>(&timeline_url),
-        client.get_json::<serde_json::Value>(&logs_url),
     );
     // the detail's head facts: fresher than the row's snapshot, and the only
     // place a GitHub run would have had to carry them
     let record = build.as_ref().and_then(parse_build);
+    let state = record.as_ref().map(crate::activity::azure_state);
     let stages = timeline.as_ref().map(parse_timeline).unwrap_or_default();
     // the last entry is the run's closing words, which is the excerpt worth
     // showing; a log that failed to list leaves the card empty
-    let log = match last_log_url(logs.as_ref()) {
-        Some(url) => client
-            .get_text(&url)
-            .await
-            .map(|text| log_tail(&text, RUN_LOG_CAP))
-            .unwrap_or_default(),
-        None => String::new(),
+    let log = if with_log {
+        let logs = client.get_json::<serde_json::Value>(&logs_url).await;
+        match last_log_url(logs.as_ref()) {
+            Some(url) => client
+                .get_text(&url)
+                .await
+                .map(|text| log_tail(&text, RUN_LOG_CAP))
+                .unwrap_or_default(),
+            None => String::new(),
+        }
+    } else {
+        String::new()
     };
     let (sha, trigger, start, finish) = match record {
         Some(run) => (run.source_version, run.reason, run.start, run.finish),
         None => (None, None, None, None),
     };
-    Some(RunDetail {
-        sha,
-        trigger,
-        start,
-        finish,
-        stages,
-        log,
-    })
+    (
+        Some(RunDetail {
+            sha,
+            trigger,
+            start,
+            finish,
+            state,
+            stages,
+            log,
+        }),
+        client.budget(),
+    )
 }
 
 /// One record of a build's timeline, before it is grouped.
@@ -1762,6 +1827,9 @@ fn last_log_url(logs: Option<&serde_json::Value>) -> Option<String> {
 struct Client {
     http: reqwest::Client,
     auth_header: String,
+    /// What the answers said about the TSTU window: the follow loop parks the
+    /// next poll on it instead of retrying into a 429.
+    budget: std::sync::Mutex<crate::rate::RateBudget>,
 }
 
 impl Client {
@@ -1770,7 +1838,43 @@ impl Client {
             http: reqwest::Client::new(),
             // Basic base64(":" + PAT) — the empty-user form
             auth_header: format!("Basic {}", base64(format!(":{pat}").as_bytes())),
+            budget: std::sync::Mutex::new(crate::rate::RateBudget::default()),
         }
+    }
+
+    /// The window as the answers so far described it.
+    fn budget(&self) -> crate::rate::RateBudget {
+        *self
+            .budget
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    /// Reads Azure's `X-RateLimit-*` headers, and `Retry-After` on a 429, into
+    /// the budget. Missing headers leave what earlier answers said.
+    fn note_rate(&self, response: &reqwest::Response) {
+        let header = |name: &str| {
+            response
+                .headers()
+                .get(name)
+                .and_then(|value| value.to_str().ok())
+                .and_then(|value| value.trim().parse::<i64>().ok())
+        };
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|since| since.as_secs() as i64)
+            .unwrap_or_default();
+        let mut budget = self
+            .budget
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        budget.note(
+            response.status().as_u16(),
+            header("x-ratelimit-remaining").map(|left| left.clamp(0, i64::from(u32::MAX)) as u32),
+            header("x-ratelimit-reset"),
+            header("retry-after"),
+            now,
+        );
     }
 
     async fn get_json<T: for<'de> Deserialize<'de>>(&self, url: &str) -> Option<T> {
@@ -1878,7 +1982,9 @@ impl Client {
                 .header("Content-Type", "application/json")
                 .body(body);
         }
-        request.send().await.ok()
+        let response = request.send().await.ok()?;
+        self.note_rate(&response);
+        Some(response)
     }
 }
 
@@ -2312,5 +2418,45 @@ mod tests {
         );
         assert_eq!(last_log_url(None), None);
         assert_eq!(last_log_url(Some(&serde_json::json!({"value": []}))), None);
+    }
+}
+
+#[cfg(test)]
+mod follow_tests {
+    use super::{builds_for_repository, parse_url, percent_decode};
+
+    /// The follow loop's list call has only the remote's name to filter by:
+    /// the project-wide answer must drop the other repositories' builds and
+    /// match the name case-insensitively, with the remote's URL form decoded
+    /// first.
+    #[test]
+    fn the_follow_list_keeps_only_this_repositorys_builds() {
+        let payload = serde_json::json!({
+            "value": [
+                {"id": 1, "buildNumber": "20261111.1", "repository": {"id": "a", "name": "alpha"}},
+                {"id": 2, "buildNumber": "20261111.2", "repository": {"id": "b", "name": "beta"}},
+                {"id": 3, "buildNumber": "20261111.3", "repository": {"id": "a", "name": "Alpha"}},
+                {"id": 4, "buildNumber": "20261111.4"}
+            ]
+        });
+        let runs = builds_for_repository(&payload, "alpha");
+        assert_eq!(
+            runs.iter().map(|run| run.id).collect::<Vec<_>>(),
+            [1, 3],
+            "other repositories and rows without one are not this repo's"
+        );
+        assert_eq!(percent_decode("my%20repo"), "my repo");
+        let remote = parse_url("https://dev.azure.com/o/p/_git/my%20repo", None).unwrap();
+        assert_eq!(
+            builds_for_repository(
+                &serde_json::json!({
+                    "value": [{"id": 5, "repository": {"name": "my repo"}}]
+                }),
+                &percent_decode(&remote.repository)
+            )
+            .len(),
+            1,
+            "a name with a space still matches its URL form"
+        );
     }
 }

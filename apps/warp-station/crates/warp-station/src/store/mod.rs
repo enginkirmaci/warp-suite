@@ -25,6 +25,36 @@ const ACTIVITY_REFRESH_SECS: u64 = 15 * 60;
 /// How long a repo's GitHub/Azure snapshot stays trusted: opening the repo
 /// or a refresh's eager set re-asks once the snapshot is older.
 const ACTIVITY_TTL: std::time::Duration = std::time::Duration::from_secs(10 * 60);
+/// The Pipelines follow loop: how long after one poll the open run's detail is
+/// read again. The request counts are measured, not guessed: `gh run view
+/// --json` costs 3 core REST calls (gh resolves the repository, the run and
+/// its jobs) and `gh run list` 2; Azure's build record and timeline are one
+/// call each. At 13 s / 20 s with a list read every 90 s, watching one run
+/// costs about 150 GitHub or 67 Azure DevOps requests per ten minutes — some
+/// 18 % of GitHub's 5 000 an hour and 17 % of Azure's 200 TSTUs per five
+/// minutes, which still leaves the activity pass and the user's own opens
+/// room. The cadence is the baseline, not the whole rule: both platforms send
+/// `X-RateLimit-*` (and `Retry-After` on a 429), and an answer that reports the
+/// window down to [RATE_RESERVE] parks the next poll until it refills.
+const FOLLOW_DETAIL_GITHUB: std::time::Duration = std::time::Duration::from_secs(13);
+const FOLLOW_DETAIL_AZURE: std::time::Duration = std::time::Duration::from_secs(20);
+/// The run list behind the open detail, and behind a Pipelines tab whose
+/// latest run is going: one call every 90 s, which keeps the row's word and
+/// the Latest-run chip from waiting out the 15-minute pass.
+const FOLLOW_LIST: std::time::Duration = std::time::Duration::from_secs(90);
+/// A failed poll doubles the wait, up to this, so a rate-limited or broken
+/// source is not hammered.
+const FOLLOW_BACKOFF_MAX: std::time::Duration = std::time::Duration::from_secs(120);
+/// An answer that never comes must not wedge the loop: a poll still out after
+/// this counts as failed and the next one is let through.
+const FOLLOW_ANSWER_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(90);
+/// A run that never reports a finish is followed at most this long.
+const FOLLOW_MAX: std::time::Duration = std::time::Duration::from_secs(60 * 60);
+/// The slice of a platform's window the follow loop leaves untouched: 20 of
+/// Azure's 200 TSTUs per five minutes, and a rounding error of GitHub's 5 000
+/// requests an hour. When the answers say only this much is left, the cadence
+/// parks until the window refills instead of spending the app's last calls.
+const RATE_RESERVE: u32 = 20;
 /// How many wand requests may wait behind the one live run.
 const WAND_QUEUE_CAP: usize = 8;
 
@@ -179,8 +209,11 @@ pub struct Store {
     /// The run open in the Pipelines tab: its lazy detail answers when the
     /// timeline and log array come back.
     pub open_run: Option<OpenRun>,
-    /// Runs whose detail was already asked for, so drawing cannot re-ask.
-    run_detail_requested: std::collections::HashSet<(String, u64)>,
+    /// The live follow of that run, while it can still change.
+    run_follow: Option<RunFollow>,
+    /// The Pipelines tab's run-list cadence: the folder and when the next
+    /// lightweight runs call is due.
+    list_follow: Option<(String, std::time::Instant)>,
     /// The Azure pull request open in the Pipelines tab, when one is.
     pub open_azure_pull: Option<OpenAzurePull>,
     /// Keys already asked for ("detail", "files", "commits", "diff:<path>"),
@@ -425,7 +458,8 @@ impl Store {
             compare_requested: std::collections::HashSet::new(),
             pull_created: false,
             open_run: None,
-            run_detail_requested: std::collections::HashSet::new(),
+            run_follow: None,
+            list_follow: None,
             open_azure_pull: None,
             azure_pull_requested: std::collections::HashSet::new(),
             confirm_azure_abandon: None,
@@ -1155,30 +1189,58 @@ impl Store {
                 folder,
                 run_id,
                 detail,
+                budget,
             } => {
-                if let Some(open) = self.open_run.as_mut().filter(|open| {
-                    open.folder == folder
-                        && open.run.id == run_id
-                        && open.run.source == warp_station_core::activity::ActivitySource::GitHub
-                }) {
-                    open.failed = detail.is_none();
-                    open.detail = detail.map(|detail| *detail);
-                }
-                cx.notify();
+                self.apply_run_detail(
+                    folder,
+                    run_id,
+                    warp_station_core::activity::ActivitySource::GitHub,
+                    detail.map(|detail| *detail),
+                    budget,
+                    cx,
+                );
             }
             UiEvent::AzureRunDetailLoaded {
                 folder,
                 build_id,
                 detail,
+                budget,
             } => {
-                if let Some(open) = self.open_run.as_mut().filter(|open| {
-                    open.folder == folder
-                        && open.run.id == build_id
-                        && open.run.source == warp_station_core::activity::ActivitySource::Azure
-                }) {
-                    open.failed = detail.is_none();
-                    open.detail = detail;
+                self.apply_run_detail(
+                    folder,
+                    build_id,
+                    warp_station_core::activity::ActivitySource::Azure,
+                    detail,
+                    budget,
+                    cx,
+                );
+            }
+            UiEvent::GitHubRunsLoaded {
+                folder,
+                runs,
+                budget,
+            } => {
+                // a failed call leaves the snapshot's list alone rather than
+                // blanking rows the pass already filled
+                if let Some(runs) = runs
+                    && let Some(snapshot) = self.github_by_folder.get_mut(&folder)
+                {
+                    Arc::make_mut(snapshot).runs = runs;
                 }
+                self.park_list_follow(&folder, budget);
+                cx.notify();
+            }
+            UiEvent::AzureRunsLoaded {
+                folder,
+                runs,
+                budget,
+            } => {
+                if let Some(runs) = runs
+                    && let Some(snapshot) = self.azure_by_folder.get_mut(&folder)
+                {
+                    Arc::make_mut(snapshot).pipelines = runs;
+                }
+                self.park_list_follow(&folder, budget);
                 cx.notify();
             }
             UiEvent::AzurePullLoaded {
@@ -2830,7 +2892,7 @@ impl Store {
         self.pull_created = false;
         self.new_pull_requested = false;
         self.open_run = None;
-        self.run_detail_requested.clear();
+        self.run_follow = None;
         self.open_azure_pull = None;
         self.azure_pull_requested.clear();
         self.confirm_azure_abandon = None;
@@ -3005,66 +3067,348 @@ impl Store {
             detail: None,
             failed: false,
         });
+        self.run_follow = None;
         self.load_run_detail(cx);
+        self.arm_run_follow();
         cx.notify();
     }
 
     /// Back, and the narrow pane's Escape. Returns whether a run was open.
     pub fn close_run(&mut self, cx: &mut Context<Self>) -> bool {
         let open = self.open_run.take().is_some();
+        self.run_follow = None;
         if open {
             cx.notify();
         }
         open
     }
 
-    /// The selected run's detail, asked for once per run: the timeline and log
-    /// for an Azure pipeline, `gh run view` and the failed log for an Actions
-    /// run.
+    /// The selected run's detail: the timeline and log for an Azure pipeline,
+    /// `gh run view` and the failed log for an Actions run. A run the row says
+    /// is still going is read without its log — the follow loop asks for that
+    /// once the run finishes.
     pub fn load_run_detail(&mut self, cx: &mut Context<Self>) {
+        let with_log = self.open_run.as_ref().is_some_and(|open| {
+            !followable(&open.run) && wants_log(open.run.source, Some(open.run.state))
+        });
+        self.ask_run_detail(with_log, cx);
+    }
+
+    /// One detail request for the open run. Credentials that do not resolve
+    /// are a failed answer, not a silent no-op: the pane says so.
+    fn ask_run_detail(&mut self, with_log: bool, cx: &mut Context<Self>) -> bool {
         use warp_station_core::activity::ActivitySource;
         let Some(open) = self.open_run.as_ref() else {
-            return;
+            return false;
         };
-        let key = (open.folder.clone(), open.run.id);
-        if open.detail.is_some() || open.failed || self.run_detail_requested.contains(&key) {
-            return;
-        }
         let folder = std::path::PathBuf::from(&open.folder);
         let run_id = open.run.id;
         let command = match open.run.source {
-            ActivitySource::GitHub => {
-                let Some(gh_exe) = self.gh_exe() else {
-                    if let Some(open) = self.open_run.as_mut() {
-                        open.failed = true;
-                    }
-                    cx.notify();
-                    return;
-                };
-                NetCommand::GitHubRunDetail {
-                    folder,
-                    gh_exe,
-                    run_id,
-                }
-            }
+            ActivitySource::GitHub => self.gh_exe().map(|gh_exe| NetCommand::GitHubRunDetail {
+                folder,
+                gh_exe,
+                run_id,
+                with_log,
+            }),
             ActivitySource::Azure => {
-                let Some((pat, custom_base)) = self.azure_auth() else {
-                    if let Some(open) = self.open_run.as_mut() {
-                        open.failed = true;
-                    }
-                    cx.notify();
-                    return;
-                };
-                NetCommand::AzureRunDetail {
-                    folder,
-                    pat,
-                    custom_base,
-                    build_id: run_id,
-                }
+                self.azure_auth()
+                    .map(|(pat, custom_base)| NetCommand::AzureRunDetail {
+                        folder,
+                        pat,
+                        custom_base,
+                        build_id: run_id,
+                        with_log,
+                    })
             }
         };
-        self.run_detail_requested.insert(key);
-        let _ = self.net.send_blocking(command);
+        match command {
+            Some(command) => {
+                let _ = self.net.send_blocking(command);
+                true
+            }
+            None => {
+                if let Some(open) = self.open_run.as_mut() {
+                    open.failed = true;
+                }
+                self.run_follow = None;
+                cx.notify();
+                false
+            }
+        }
+    }
+
+    /// Arms the follow for the open run when the row says it can still change.
+    /// The open's own detail request counts as the first poll: its answer
+    /// clock starts here, and `want_log` remembers the log has yet to come.
+    fn arm_run_follow(&mut self) {
+        let now = std::time::Instant::now();
+        let Some(open) = self.open_run.as_ref() else {
+            self.run_follow = None;
+            return;
+        };
+        if !followable(&open.run) {
+            self.run_follow = None;
+            return;
+        }
+        self.run_follow = Some(RunFollow {
+            folder: open.folder.clone(),
+            source: open.run.source,
+            id: open.run.id,
+            next_poll: now + follow_detail_interval(open.run.source),
+            asked_at: Some(now),
+            asked_with_log: false,
+            want_log: true,
+            failures: 0,
+            since: now,
+        });
+    }
+
+    /// Whether the run in the pane is being followed: the strip's word, and
+    /// the probes' handle on the loop.
+    pub fn following_run(
+        &self,
+        source: warp_station_core::activity::ActivitySource,
+        id: u64,
+    ) -> bool {
+        self.run_follow
+            .as_ref()
+            .is_some_and(|follow| follow.source == source && follow.id == id)
+    }
+
+    /// The once-a-second beat's follow step: re-reads the open run's detail
+    /// while it can still change, and the run list behind it. Only while the
+    /// Pipelines tab is the one on screen — a hidden pane spends no requests.
+    pub fn check_run_follow(&mut self, now: std::time::Instant, cx: &mut Context<Self>) {
+        if self.active_detail_tab() != WorkspaceTab::Pipelines {
+            return;
+        }
+        self.check_run_list_follow(now, cx);
+        let Some(mut follow) = self.run_follow.clone() else {
+            return;
+        };
+        let matches = self.open_run.as_ref().is_some_and(|open| {
+            open.folder == follow.folder
+                && open.run.id == follow.id
+                && open.run.source == follow.source
+        });
+        if !matches {
+            self.run_follow = None;
+            return;
+        }
+        if now.duration_since(follow.since) >= FOLLOW_MAX {
+            self.run_follow = None;
+            return;
+        }
+        if let Some(asked) = follow.asked_at {
+            if now.duration_since(asked) < FOLLOW_ANSWER_TIMEOUT {
+                return;
+            }
+            // an answer that never came is a failure like any other: the poll
+            // count backs off and the next one is let through
+            follow.asked_at = None;
+            follow.failures = follow.failures.saturating_add(1);
+            follow.next_poll = now + follow_backoff(follow.source, follow.failures);
+        }
+        if now < follow.next_poll {
+            self.run_follow = Some(follow);
+            return;
+        }
+        if self.ask_run_detail(false, cx) {
+            follow.asked_at = Some(now);
+            follow.asked_with_log = false;
+            follow.next_poll = now + follow_detail_interval(follow.source);
+            self.run_follow = Some(follow);
+        }
+    }
+
+    /// The list's own follow: one lightweight runs call a minute while a run
+    /// is going, so rows and the Latest-run chip do not wait out the pass.
+    fn check_run_list_follow(&mut self, now: std::time::Instant, cx: &mut Context<Self>) {
+        let Some(folder) = self.selected_repo.clone() else {
+            self.list_follow = None;
+            return;
+        };
+        let detail_going = self
+            .run_follow
+            .as_ref()
+            .is_some_and(|follow| follow.folder == folder);
+        if !detail_going && !self.run_list_going(&folder) {
+            self.list_follow = None;
+            return;
+        }
+        if self
+            .list_follow
+            .as_ref()
+            .is_some_and(|(tracked, due)| tracked == &folder && now < *due)
+        {
+            return;
+        }
+        self.follow_runs(&folder, now);
+        cx.notify();
+    }
+
+    /// Whether a snapshot carries a run that is going right now: the list's
+    /// only reason to keep asking. A queued run is left to the detail's own
+    /// follow, so a build waiting hours for an agent costs no list calls.
+    fn run_list_going(&self, folder: &str) -> bool {
+        let azure = self
+            .azure_by_folder
+            .get(folder)
+            .is_some_and(|snapshot| snapshot.pipelines.iter().any(|run| run.is_running()));
+        let github = self.github_by_folder.get(folder).is_some_and(|snapshot| {
+            snapshot
+                .runs
+                .iter()
+                .any(|run| run.status.as_deref() == Some("in_progress"))
+        });
+        azure || github
+    }
+
+    /// Pushes the list's next check out when the platform says its window is
+    /// down to the reserve. An answer for another folder leaves the schedule
+    /// alone.
+    fn park_list_follow(&mut self, folder: &str, budget: warp_station_core::rate::RateBudget) {
+        let Some(wait) = budget.wait(RATE_RESERVE) else {
+            return;
+        };
+        if let Some((tracked, due)) = self.list_follow.as_mut()
+            && tracked == folder
+        {
+            *due = (*due).max(std::time::Instant::now() + wait);
+        }
+    }
+
+    /// One runs call per enabled source that resolved this repo, and the next
+    /// list check is due a cadence later.
+    fn follow_runs(&mut self, folder: &str, now: std::time::Instant) {
+        use warp_station_core::activity::ActivitySource;
+        let path = std::path::PathBuf::from(folder);
+        if self.source_shown(folder, ActivitySource::GitHub)
+            && let Some(gh_exe) = self.gh_exe()
+        {
+            let _ = self.net.send_blocking(NetCommand::GitHubRuns {
+                folder: path.clone(),
+                gh_exe,
+            });
+        }
+        if self.source_shown(folder, ActivitySource::Azure)
+            && let Some((pat, custom_base)) = self.azure_auth()
+        {
+            let _ = self.net.send_blocking(NetCommand::AzureRuns {
+                folder: path,
+                pat,
+                custom_base,
+            });
+        }
+        self.list_follow = Some((folder.to_string(), now + FOLLOW_LIST));
+    }
+
+    /// One run detail answer: the pane takes it, and the follow loop decides
+    /// from the run's own state whether it is done, still owes the log, or
+    /// waits out the source's cadence. A failed poll keeps the detail already
+    /// on screen — a rate-limited source must not blank the run.
+    fn apply_run_detail(
+        &mut self,
+        folder: String,
+        run_id: u64,
+        source: warp_station_core::activity::ActivitySource,
+        detail: Option<warp_station_core::activity::RunDetail>,
+        budget: warp_station_core::rate::RateBudget,
+        cx: &mut Context<Self>,
+    ) {
+        let now = std::time::Instant::now();
+        let answered = detail.is_some();
+        let matches = self.open_run.as_ref().is_some_and(|open| {
+            open.folder == folder && open.run.id == run_id && open.run.source == source
+        });
+        if matches {
+            match detail {
+                Some(mut detail) => {
+                    if let Some(open) = self.open_run.as_mut() {
+                        // a follow poll skips the log; the one already in hand
+                        // is still the last the source sent
+                        if detail.log.is_empty()
+                            && let Some(previous) = open.detail.take()
+                        {
+                            detail.log = previous.log;
+                        }
+                        if let Some(state) = detail.state {
+                            open.run.state = state;
+                        }
+                        open.detail = Some(detail);
+                        open.failed = false;
+                    }
+                }
+                None => {
+                    if let Some(open) = self.open_run.as_mut()
+                        && open.detail.is_none()
+                    {
+                        open.failed = true;
+                    }
+                }
+            }
+        }
+        let Some(mut follow) = self.run_follow.take() else {
+            cx.notify();
+            return;
+        };
+        if follow.folder != folder || follow.id != run_id || follow.source != source {
+            self.run_follow = Some(follow);
+            cx.notify();
+            return;
+        }
+        let answered_with_log = follow.asked_with_log;
+        follow.asked_with_log = false;
+        follow.asked_at = None;
+        if answered_with_log {
+            follow.want_log = false;
+        }
+        // the platform's own window, when it says only the reserve is left:
+        // the steady cadence waits for the refill, the one closing call does
+        // not (the reserve exists so it fits)
+        let floor = now + budget.wait(RATE_RESERVE).unwrap_or_default();
+        if !answered {
+            follow.failures = follow.failures.saturating_add(1);
+            follow.next_poll = (now + follow_backoff(follow.source, follow.failures)).max(floor);
+            self.run_follow = Some(follow);
+            cx.notify();
+            return;
+        }
+        let finished_state = self
+            .open_run
+            .as_ref()
+            .and_then(|open| open.detail.as_ref())
+            .and_then(|detail| detail.state);
+        let still_going = finished_state.is_none_or(|state| {
+            !matches!(
+                state,
+                warp_station_core::activity::RunState::Succeeded
+                    | warp_station_core::activity::RunState::Failed
+                    | warp_station_core::activity::RunState::Skipped
+            )
+        });
+        if !still_going {
+            // the run is over: the log first (a failure's reason is worth one
+            // more call), then the list's last word
+            if follow.want_log
+                && wants_log(follow.source, finished_state)
+                && self.ask_run_detail(true, cx)
+            {
+                follow.asked_at = Some(now);
+                follow.asked_with_log = true;
+                self.run_follow = Some(follow);
+                cx.notify();
+                return;
+            }
+            self.run_follow = None;
+            self.follow_runs(&folder, now);
+            cx.notify();
+            return;
+        }
+        follow.failures = 0;
+        follow.next_poll = (now + follow_detail_interval(follow.source)).max(floor);
+        self.run_follow = Some(follow);
+        cx.notify();
     }
 
     // ---- the Pipelines tab's Azure pull request ------------------------------
@@ -3080,6 +3424,7 @@ impl Store {
             return;
         };
         self.open_run = None;
+        self.run_follow = None;
         self.open_azure_pull = Some(OpenAzurePull {
             folder,
             item,
@@ -3830,6 +4175,10 @@ impl Store {
         self.github_details = None;
         self.open_pull = None;
         self.open_issue = None;
+        // the run detail belongs to the repository it was opened in
+        self.open_run = None;
+        self.run_follow = None;
+        self.list_follow = None;
         self.pull_diff.clear();
         self.pull_diff_requested.clear();
         self.pull_commit_files.clear();
@@ -4072,6 +4421,12 @@ impl Store {
         self.closed.retain(|(key, _, _), _| key != &folder);
         self.kick_github_pass(std::slice::from_ref(&path));
         self.reload_open_pull();
+        // the open run's read is part of the panel's refresh, and the follow
+        // clock restarts with it
+        if self.open_run.is_some() {
+            self.load_run_detail(cx);
+            self.arm_run_follow();
+        }
         if !self.history.is_empty() {
             self.start_history_pass();
             let _ = self
@@ -4485,6 +4840,80 @@ pub struct OpenRun {
     pub failed: bool,
 }
 
+/// The live follow of an open run in the Pipelines tab. While the run can
+/// still change, the beat re-reads its detail on the source's cadence, and the
+/// list behind it once a minute; a finished run clears the follow and one last
+/// list call flips the row.
+#[derive(Clone, Debug)]
+pub struct RunFollow {
+    folder: String,
+    source: warp_station_core::activity::ActivitySource,
+    id: u64,
+    /// When the next detail poll is due.
+    next_poll: std::time::Instant,
+    /// The poll still waiting for an answer, if one is out.
+    asked_at: Option<std::time::Instant>,
+    /// That poll asked for the log: its answer closes the follow.
+    asked_with_log: bool,
+    /// No log has landed yet. The poll after the finish asks for it, so a run
+    /// that failed while the pane watched still shows its reason.
+    want_log: bool,
+    /// Consecutive failed polls, for the backoff.
+    failures: u32,
+    /// When the follow began, for [FOLLOW_MAX].
+    since: std::time::Instant,
+}
+
+/// How often one source's detail is re-read while the run is going.
+fn follow_detail_interval(
+    source: warp_station_core::activity::ActivitySource,
+) -> std::time::Duration {
+    match source {
+        warp_station_core::activity::ActivitySource::GitHub => FOLLOW_DETAIL_GITHUB,
+        warp_station_core::activity::ActivitySource::Azure => FOLLOW_DETAIL_AZURE,
+    }
+}
+
+/// Whether the row says the run can still change: running, or waiting to
+/// start. A skipped row is over like a succeeded one.
+fn followable(run: &warp_station_core::activity::ActivityRun) -> bool {
+    matches!(
+        run.state,
+        warp_station_core::activity::RunState::Queued
+            | warp_station_core::activity::RunState::Running
+    )
+}
+
+/// Whether a run's log is worth a call once it is over. An Actions run's log
+/// call reads only the failed steps, so a passing run has none; an Azure
+/// build's card shows the tail of its last log entry whether it passed or
+/// failed.
+fn wants_log(
+    source: warp_station_core::activity::ActivitySource,
+    state: Option<warp_station_core::activity::RunState>,
+) -> bool {
+    match source {
+        warp_station_core::activity::ActivitySource::GitHub => !matches!(
+            state,
+            Some(
+                warp_station_core::activity::RunState::Succeeded
+                    | warp_station_core::activity::RunState::Skipped
+            )
+        ),
+        warp_station_core::activity::ActivitySource::Azure => true,
+    }
+}
+
+/// The wait after `failures` failed polls: the source's cadence, doubled per
+/// failure and capped.
+fn follow_backoff(
+    source: warp_station_core::activity::ActivitySource,
+    failures: u32,
+) -> std::time::Duration {
+    let factor = 1u32 << failures.min(4);
+    (follow_detail_interval(source) * factor).min(FOLLOW_BACKOFF_MAX)
+}
+
 /// A repository opened in a tab of its own, and the detail tab it was left on.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RepoTab {
@@ -4654,6 +5083,54 @@ mod tests {
         );
 
         let _ = std::fs::remove_file(&scratch);
+    }
+
+    /// A finished run's log is a call of its own, and only a failure has one
+    /// on Actions: a passing workflow skips it, while an Azure build's card
+    /// shows its last log entry whether it passed or failed.
+    #[test]
+    fn a_passing_actions_run_skips_the_log_call() {
+        use warp_station_core::activity::ActivitySource::{Azure, GitHub};
+        use warp_station_core::activity::RunState;
+        assert!(
+            wants_log(GitHub, None),
+            "an unread state may still be a failure"
+        );
+        assert!(wants_log(GitHub, Some(RunState::Queued)));
+        assert!(wants_log(GitHub, Some(RunState::Failed)));
+        assert!(!wants_log(GitHub, Some(RunState::Succeeded)));
+        assert!(!wants_log(GitHub, Some(RunState::Skipped)));
+        assert!(
+            wants_log(Azure, Some(RunState::Succeeded)),
+            "the build's closing log entry is worth reading either way"
+        );
+    }
+
+    /// The follow cadence is per source and bounded: GitHub's one-request
+    /// poll can run faster than Azure's two-request one, a failed poll doubles
+    /// the wait per source, and the cap keeps a rate-limited source from
+    /// being hammered.
+    #[test]
+    fn the_follow_cadence_is_per_source_and_backs_off() {
+        use warp_station_core::activity::ActivitySource::{Azure, GitHub};
+        assert_eq!(follow_detail_interval(GitHub), FOLLOW_DETAIL_GITHUB);
+        assert_eq!(follow_detail_interval(Azure), FOLLOW_DETAIL_AZURE);
+        assert!(
+            FOLLOW_DETAIL_GITHUB < FOLLOW_DETAIL_AZURE,
+            "the two-request Azure poll waits longer than the one-request GitHub one"
+        );
+        assert_eq!(follow_backoff(GitHub, 0), FOLLOW_DETAIL_GITHUB);
+        assert_eq!(follow_backoff(Azure, 1), FOLLOW_DETAIL_AZURE * 2);
+        assert_eq!(follow_backoff(Azure, 2), FOLLOW_DETAIL_AZURE * 4);
+        assert_eq!(
+            follow_backoff(Azure, 9),
+            FOLLOW_BACKOFF_MAX,
+            "the backoff stops at the cap"
+        );
+        assert!(
+            FOLLOW_LIST > FOLLOW_DETAIL_AZURE,
+            "the list behind the detail is asked for less often than the detail"
+        );
     }
 
     #[test]

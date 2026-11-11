@@ -12,6 +12,7 @@ use std::path::PathBuf;
 use warp_station::net::{NetCommand, UiEvent};
 use warp_station::store::Store;
 use warp_station::ui::window::MainWindow;
+use warp_station_core::activity::RunState;
 use warp_station_core::azure::{
     AzureComment, AzureFile, AzureItem, AzurePolicy, AzurePull, AzurePullDetail, AzureSnapshot,
     AzureThread, PipelineRun, RunDetail, RunJob, RunStage,
@@ -283,11 +284,13 @@ fn an_actions_run_opens_its_detail_and_asks_once(cx: &mut TestAppContext) {
             UiEvent::GitHubRunDetailLoaded {
                 folder: "/probe/alpha".into(),
                 run_id: 31,
+                budget: Default::default(),
                 detail: Some(Box::new(RunDetail {
                     sha: Some("9f2c1ab7c0ffee".into()),
                     trigger: Some("pull_request".into()),
                     start: Some("2026-11-02T09:30:05Z".into()),
                     finish: Some("2026-11-02T09:36:40Z".into()),
+                    state: Some(RunState::Failed),
                     stages: vec![
                         RunStage {
                             name: "build".into(),
@@ -424,11 +427,13 @@ fn the_pipelines_workbench_shows_the_selected_run(cx: &mut TestAppContext) {
             UiEvent::AzureRunDetailLoaded {
                 folder: "/probe/alpha".into(),
                 build_id: 9,
+                budget: Default::default(),
                 detail: Some(RunDetail {
                     sha: Some("abcdef1234567890".into()),
                     trigger: Some("individualCI".into()),
                     start: Some("2026-11-02T09:00:00Z".into()),
                     finish: Some("2026-11-02T09:04:00Z".into()),
+                    state: Some(RunState::Failed),
                     stages: vec![
                         RunStage {
                             name: "Build".into(),

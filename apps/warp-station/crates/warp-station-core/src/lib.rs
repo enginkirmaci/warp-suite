@@ -20,6 +20,7 @@ pub mod nuget;
 pub mod opencode;
 pub mod paths;
 pub mod process;
+pub mod rate;
 pub mod refresh;
 pub mod rel_time;
 pub mod repo_store;

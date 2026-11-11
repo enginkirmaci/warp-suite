@@ -581,7 +581,8 @@ impl AzureView {
             .child(title_row)
             .child(sub);
 
-        let strip = run_strip(&run);
+        let following = store.following_run(run.source, run.id);
+        let strip = run_strip(&run, following);
 
         let body = div()
             .id("run-body")
@@ -694,9 +695,10 @@ fn run_glyph_element(ix: usize, glyph: &'static str, color: Rgba) -> AnyElement 
     icon(glyph, px(theme::icon_medium()), color).into_any_element()
 }
 
-/// The 44 status strip: the state, when it started, how long it took and what
-/// started it — the facts the head has no room for.
-fn run_strip(run: &ActivityRun) -> AnyElement {
+/// The 44 status strip: the state, when it started, how long it took, what
+/// started it, and whether the pane is following it — the facts the head has
+/// no room for.
+fn run_strip(run: &ActivityRun, following: bool) -> AnyElement {
     let (glyph, color) = run_glyph(run);
     let mut facts = div()
         .flex()
@@ -741,6 +743,19 @@ fn run_strip(run: &ActivityRun) -> AnyElement {
     }
     if let Some(trigger) = run.trigger_word() {
         facts = facts.child(format!("Trigger {trigger}"));
+    }
+    if following {
+        // the word says why the cards move on their own; the spinner above is
+        // the run's, so this one stays a fact
+        facts = facts.child(
+            div()
+                .id("run-following")
+                .debug_selector(|| "run-following".into())
+                .role(gpui::Role::Status)
+                .aria_label("Following this run")
+                .text_color(theme::text_muted())
+                .child("Following"),
+        );
     }
     div()
         .debug_selector(|| "run-status".into())

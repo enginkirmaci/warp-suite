@@ -80,6 +80,23 @@ Keep this order; several steps depend on the previous one:
   the SnapIt settings at `~/.warp/snapit` and the notes content at `~/notes`.
 - **Settings.** Repo tags live in `settings.json` (`repos.repo_tags`), not in
   the cache. The contract is `../../docs/agents/settings-schema.md`.
+- **Pipelines follow.** While the Pipelines tab is on screen and its run can
+  still change, `Store::check_run_follow` (the once-a-second beat) re-reads the
+  open run's detail — every 13 s on GitHub, 20 s on Azure — and asks the run
+  list every 90 s. A finished run costs one last log call (GitHub only when it
+  failed) and one list call, then the loop stops; a failed poll doubles the
+  wait up to two minutes and keeps the detail already on screen.
+  The request counts are measured, not one per poll: `gh run view --json` is 3
+  core REST calls and `gh run list` 2; Azure's build record and timeline are
+  one call each. Watching one run therefore costs about 150 GitHub or 67 Azure
+  requests per ten minutes — roughly 18 % of GitHub's 5 000 an hour and 17 % of
+  Azure DevOps' 200 TSTUs per five minutes. The cadence is the baseline: both
+  platforms report `X-RateLimit-*`, and an answer that says the window is down
+  to `RATE_RESERVE` parks the next poll until it refills (a 429's
+  `Retry-After` included; Azure's are read straight off the response, GitHub's
+  through the free `gh api rate_limit` probe when a call fails). Do not tighten
+  the cadence or poll while the tab is hidden without redoing that budget;
+  `follow_probe` drives the loop headlessly.
 - **Keyboard and titles.** List keys belong to the focused pane (repo list,
   Changes files, History commits, PR/Issues); the window delegates only while
   it owns the focus itself. The OS title carries `Store::activity()` next to

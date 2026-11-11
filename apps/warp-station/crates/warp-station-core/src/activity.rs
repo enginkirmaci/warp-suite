@@ -505,7 +505,7 @@ pub fn sort_newest_first(runs: &mut [ActivityRun]) {
 
 /// GitHub's pair of words (`status`, `conclusion`) as one state. A run that
 /// has not finished is running or waiting, whatever its conclusion says.
-fn github_state(status: Option<&str>, conclusion: Option<&str>) -> RunState {
+pub(crate) fn github_state(status: Option<&str>, conclusion: Option<&str>) -> RunState {
     match status {
         Some("completed") => match conclusion {
             Some("success" | "neutral") => RunState::Succeeded,
@@ -522,7 +522,7 @@ fn github_state(status: Option<&str>, conclusion: Option<&str>) -> RunState {
 }
 
 /// Azure's `result`/`status` pair as one state.
-fn azure_state(run: &crate::azure::PipelineRun) -> RunState {
+pub(crate) fn azure_state(run: &crate::azure::PipelineRun) -> RunState {
     if run.is_running() {
         RunState::Running
     } else if run.is_failed() {
@@ -591,16 +591,33 @@ impl RunStage {
     }
 }
 
-/// One run's detail: the head facts the list payload does not carry, the stage
-/// cards and the tail of the log.
+/// One run's detail: the head facts the list payload does not carry, the state
+/// the platform reports for the run itself, the stage cards and the tail of
+/// the log.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct RunDetail {
     pub sha: Option<String>,
     pub trigger: Option<String>,
     pub start: Option<String>,
     pub finish: Option<String>,
+    /// What the platform says the run itself is doing. The Pipelines pane's
+    /// follow loop reads it to know when to stop asking, and the head takes it
+    /// over the row's older word while the run is open.
+    pub state: Option<RunState>,
     pub stages: Vec<RunStage>,
     pub log: String,
+}
+
+impl RunDetail {
+    /// Whether the run can still change: queued, running, or a payload that
+    /// left the state out. The follow loop keeps its cadence while this holds
+    /// and stops on the first answer that says otherwise.
+    pub fn still_going(&self) -> bool {
+        !matches!(
+            self.state,
+            Some(RunState::Succeeded | RunState::Failed | RunState::Skipped)
+        )
+    }
 }
 
 /// A run's length in the short units the strip prints: `12s`, `4m 05s`,
@@ -995,5 +1012,54 @@ mod tests {
         let counts = ActivityCounts::of(&items);
         assert_eq!(counts.pulls, 2);
         assert_eq!(counts.issues, 2);
+    }
+}
+
+#[cfg(test)]
+mod follow_tests {
+    use super::{RunDetail, RunState};
+
+    /// The follow loop's stop rule: only a finished run's own state ends it,
+    /// and an answer that leaves the state out keeps the loop alive rather
+    /// than freezing a run that is visibly going.
+    #[test]
+    fn a_run_detail_knows_when_the_run_is_over() {
+        let going = |state| {
+            RunDetail {
+                state: Some(state),
+                ..Default::default()
+            }
+            .still_going()
+        };
+        assert!(going(RunState::Running));
+        assert!(going(RunState::Queued));
+        assert!(!going(RunState::Succeeded));
+        assert!(!going(RunState::Failed));
+        assert!(!going(RunState::Skipped));
+        assert!(
+            RunDetail::default().still_going(),
+            "a payload without the state is not proof of a finish"
+        );
+    }
+
+    /// GitHub's own pair maps a completed run with its conclusion, and an
+    /// unfinished one to running or the queue whatever the conclusion says.
+    #[test]
+    fn the_github_pair_reads_as_the_run_state() {
+        use super::github_state;
+        assert_eq!(github_state(Some("in_progress"), None), RunState::Running);
+        assert_eq!(github_state(Some("queued"), None), RunState::Queued);
+        assert_eq!(
+            github_state(Some("completed"), Some("failure")),
+            RunState::Failed
+        );
+        assert_eq!(
+            github_state(Some("completed"), Some("success")),
+            RunState::Succeeded
+        );
+        assert_eq!(
+            github_state(Some("completed"), Some("skipped")),
+            RunState::Skipped
+        );
     }
 }
