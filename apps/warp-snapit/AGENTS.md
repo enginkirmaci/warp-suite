@@ -78,12 +78,8 @@ change: update Warp Station in the same commit. The schema contract is
   `SnapManager.MoveWindow`.
 - A drag, a hover change and a drop each write one line to
   `~/.warp/snapit/snapit.log`; that file is the field diagnostic for "the
-  window did not move" reports. A running .NET companion is logged at startup
-  because two snap companions fight over the same drags.
-- The process holds the mutex `Local\DevTools.SnapIt.Rust`. The .NET companion
-  holds a bare GUID mutex of its own (`{FF1FFB1E-5D42-4B8F-B42A-52DA1A1964B7}`),
-  which the startup check opens to warn about a double run; it cannot read the
-  native files, so its old files are importer input, not a live format.
+  window did not move" reports.
+- The process holds the mutex `Local\DevTools.SnapIt.Rust`.
 - DPI awareness is per-monitor v2; the startup path also handles
   `SetConsoleCtrlHandler` and the parent watcher.
 
