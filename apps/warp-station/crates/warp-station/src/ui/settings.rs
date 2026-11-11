@@ -15,6 +15,7 @@ use gpui::{App, Context, Entity, FontWeight, SharedString, Window, div, px, rela
 use gpui_kit::component::input::{Editor, EditorState, InputEvent, InputState, TextareaState};
 use std::cell::RefCell;
 use std::rc::Rc;
+use warp_station_core::paths;
 use warp_station_core::settings::AppSettings;
 use warpui_kit_core::settings as kit_settings;
 use warpui_kit_markdown::{LIVE_LANGUAGE, live_highlighter_factory};
@@ -105,6 +106,12 @@ pub struct SettingsPage {
     notify_fetch: bool,
     // Scanning
     scan_folders: Entity<TextareaState>,
+    /// The scan roots the folders area was seeded with. A save compares the
+    /// area against this to tell a user edit from a list another surface
+    /// changed: the Add-Repositories, Clone and Remove actions persist roots
+    /// while this page is alive, and writing the stale area back would erase
+    /// them.
+    scan_folders_seed: Vec<String>,
     excluded_folders: Entity<TextareaState>,
     git_folder_pattern: Entity<InputState>,
     solution_file_pattern: Entity<InputState>,
@@ -207,6 +214,47 @@ fn save_effects(before: &AppSettings, after: &AppSettings) -> SaveEffects {
     }
 }
 
+/// A folder-list area's lines: trimmed, blank lines dropped.
+fn text_lines(text: &str) -> Vec<String> {
+    text.lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+/// Fold the folders area's edits into the live scan roots.
+///
+/// The Settings page is built once and its Scan folders area is a snapshot;
+/// the Add-Repositories, Clone and Remove actions persist roots while it is
+/// alive. A save therefore applies only what the user changed in the area: a
+/// seeded root they deleted leaves, a root they typed joins, and roots
+/// another surface added meanwhile stay.
+fn merge_scan_folder_edits(seed: &[String], live: &[String], edited: &[String]) -> Vec<String> {
+    if edited == seed {
+        return live.to_vec();
+    }
+    let kept = |root: &String| {
+        edited
+            .iter()
+            .any(|text| paths::same_folder_text(text, root))
+    };
+    let mut merged: Vec<String> = live
+        .iter()
+        .filter(|root| !seed.iter().any(|text| paths::same_folder_text(text, root)) || kept(root))
+        .cloned()
+        .collect();
+    for root in edited {
+        if !merged
+            .iter()
+            .any(|live| paths::same_folder_text(live, root))
+        {
+            merged.push(root.clone());
+        }
+    }
+    merged
+}
+
 impl SettingsPage {
     pub fn new(store: Entity<Store>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let settings = store.read(cx).settings();
@@ -270,6 +318,7 @@ impl SettingsPage {
         let model_picker = model_picker(&harness_scope, &model, &variant, &store, window, cx);
         let variant_picker = variant_picker(&harness_scope, &model, &variant, &store, window, cx);
         let selected_harness = settings.warp_agent.selected_harness().to_string();
+        let scan_folders_text = line_list(&repos.repo_scan_folders);
 
         let page = Self {
             store: store.clone(),
@@ -290,7 +339,8 @@ impl SettingsPage {
             notify_errors: settings.notifications.errors,
             notify_actions: settings.notifications.action_confirmations,
             notify_fetch: settings.notifications.fetch_summaries,
-            scan_folders: area(window, cx, &line_list(&repos.repo_scan_folders)),
+            scan_folders: area(window, cx, &scan_folders_text),
+            scan_folders_seed: text_lines(&scan_folders_text),
             excluded_folders: area(window, cx, &line_list(&repos.excluded_folders)),
             git_folder_pattern: field(window, cx, &repos.git_folder_pattern),
             solution_file_pattern: field(window, cx, &repos.solution_file_pattern),
@@ -405,7 +455,20 @@ impl SettingsPage {
     }
 
     fn save(&mut self, cx: &mut Context<Self>) {
-        let scan_folders = Self::lines(&self.scan_folders, cx);
+        // the folders area is a snapshot from page construction; fold only
+        // its edits into the live roots so an Add/Clone/Remove that persisted
+        // a root meanwhile survives this save
+        let edited_roots = Self::lines(&self.scan_folders, cx);
+        let live_roots = self
+            .store
+            .read(cx)
+            .settings()
+            .repos
+            .repo_scan_folders
+            .clone()
+            .unwrap_or_default();
+        let scan_folders =
+            merge_scan_folder_edits(&self.scan_folders_seed, &live_roots, &edited_roots);
         let excluded = Self::lines(&self.excluded_folders, cx);
         let max_scan_depth = Self::value(&self.max_scan_depth, cx)
             .trim()
@@ -563,6 +626,10 @@ impl SettingsPage {
             }
             cx.notify();
         });
+        // the area's text is the baseline for the next save: a root another
+        // surface added meanwhile is not in it, and must not read as a user
+        // deletion on the next keystroke
+        self.scan_folders_seed = edited_roots;
         // a tool installed or moved while the app runs resolves right away
         warp_station_core::exe::invalidate();
         // the boot registration follows the saved flag, but only a change to
@@ -2087,5 +2154,43 @@ mod tests {
         let effects = save_effects(&before, &after);
         assert!(effects.scan);
         assert!(!effects.github && !effects.azure && !effects.models && !effects.autostart);
+    }
+
+    /// An untouched folders area writes nothing over the live roots: the Add
+    /// dialog (and Clone/Remove) persisted its root after this page was built.
+    #[test]
+    fn an_untouched_folders_area_keeps_roots_added_elsewhere() {
+        let seed = vec!["/roots/a".to_string()];
+        let live = vec!["/roots/a".to_string(), "/roots/added".to_string()];
+        assert_eq!(merge_scan_folder_edits(&seed, &live, &seed), live);
+    }
+
+    /// A typed root joins the live list, and a seeded root deleted from the
+    /// area still leaves it.
+    #[test]
+    fn folders_area_edits_apply_on_top_of_live_roots() {
+        let seed = vec!["/roots/a".to_string()];
+        let live = vec!["/roots/a".to_string(), "/roots/added".to_string()];
+        let edited = vec!["/roots/a".to_string(), "/roots/typed".to_string()];
+        assert_eq!(
+            merge_scan_folder_edits(&seed, &live, &edited),
+            vec![
+                "/roots/a".to_string(),
+                "/roots/added".to_string(),
+                "/roots/typed".to_string()
+            ]
+        );
+
+        let seed = vec!["/roots/a".to_string(), "/roots/b".to_string()];
+        let live = vec![
+            "/roots/a".to_string(),
+            "/roots/b".to_string(),
+            "/roots/added".to_string(),
+        ];
+        let edited = vec!["/roots/b".to_string()];
+        assert_eq!(
+            merge_scan_folder_edits(&seed, &live, &edited),
+            vec!["/roots/b".to_string(), "/roots/added".to_string()]
+        );
     }
 }

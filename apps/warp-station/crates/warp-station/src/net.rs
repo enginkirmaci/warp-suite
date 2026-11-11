@@ -40,6 +40,8 @@ pub enum NetCommand {
         url: String,
         parent_dir: String,
         name: String,
+        /// The dialog's stop request; the clone has no wall-clock timeout.
+        cancel: Option<warp_station_core::process::CancelFlag>,
     },
     /// The Changes tab's shared load: status snapshot + branches + history in
     /// one pass, settled together so the tab paints complete.
@@ -1417,12 +1419,17 @@ async fn net_main(cmd_rx: Receiver<NetCommand>, evt_tx: Sender<UiEvent>) {
                 url,
                 parent_dir,
                 name,
+                cancel,
             } => {
                 let evt_tx = evt_tx.clone();
                 tokio::spawn(async move {
-                    let result =
-                        warp_station_core::git::cli::clone(&url, Path::new(&parent_dir), &name)
-                            .await;
+                    let result = warp_station_core::git::cli::clone_with_cancel(
+                        &url,
+                        Path::new(&parent_dir),
+                        &name,
+                        cancel,
+                    )
+                    .await;
                     let _ = evt_tx.send_blocking(UiEvent::CloneSettled {
                         url,
                         parent_dir,

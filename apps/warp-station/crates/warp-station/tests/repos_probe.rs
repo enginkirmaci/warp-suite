@@ -2400,3 +2400,176 @@ fn selection_persists_once_after_the_debounce(cx: &mut TestAppContext) {
         "only the row the burst landed on is persisted"
     );
 }
+
+/// Cancel during a clone is a real stop, not just a dismissed dialog: the
+/// flag the net command carries flips, a busy clone cannot be sent twice by
+/// Enter, and the settle closes the dialog with a toast.
+#[gpui::test]
+fn clone_cancel_stops_the_running_clone(cx: &mut TestAppContext) {
+    use warp_station::net::NetCommand;
+
+    cx.update(gpui_kit::init);
+    scratch_home();
+    cx.update(warp_station::theme::apply_kit_theme);
+
+    let (net_tx, net_rx) = async_channel::unbounded();
+    let store = cx.new(|cx| Store::new(cx, net_tx));
+    let store_handle = store.clone();
+    let (_window_handle, cx) =
+        cx.add_window_view(|window, cx| MainWindow::new(store_handle.clone(), window, cx));
+    cx.run_until_parked();
+    dialog_draw(cx);
+
+    dialog_click(cx, "clone-button");
+    dialog_click(cx, "clone-url-input");
+    cx.simulate_input("https://github.com/owner/dt-probe-clone.git");
+    cx.run_until_parked();
+    dialog_draw(cx);
+    dialog_click(cx, "clone-dest-input");
+    let dest = std::env::temp_dir().to_string_lossy().into_owned();
+    cx.simulate_input(&dest);
+    cx.run_until_parked();
+    dialog_draw(cx);
+    dialog_click(cx, "btn-accent-Clone");
+    assert!(
+        cx.debug_bounds("btn-accent-Cloning…").is_some(),
+        "the clone went out and the button is busy"
+    );
+
+    // the command carries the dialog's stop request
+    let mut cancel = None;
+    while let Ok(command) = net_rx.try_recv() {
+        if let NetCommand::Clone { cancel: flag, .. } = command {
+            cancel = flag;
+        }
+    }
+    let cancel = cancel.expect("the clone carries a cancel flag");
+    assert!(!cancel.is_cancelled());
+
+    // Enter in the URL field lands on commit_clone too; busy must swallow it
+    dialog_click(cx, "clone-url-input");
+    cx.simulate_keystrokes("enter");
+    cx.run_until_parked();
+    let mut sent_again = false;
+    while let Ok(command) = net_rx.try_recv() {
+        sent_again |= matches!(command, NetCommand::Clone { .. });
+    }
+    assert!(!sent_again, "a second clone must not start while one runs");
+
+    // Cancel flips the flag and holds the dialog for the settle
+    dialog_click(cx, "btn-Cancel");
+    assert!(cancel.is_cancelled(), "Cancel stops the transfer");
+    assert!(
+        cx.debug_bounds("clone-overlay").is_some(),
+        "the dialog stays until the killed clone settles"
+    );
+    assert!(
+        cx.debug_bounds("btn-accent-Cancelling…").is_some(),
+        "the button says what it is doing"
+    );
+
+    // the settle closes the dialog and confirms the stop
+    cx.update_entity(&store, |s: &mut Store, cx| {
+        s.clone_result = Some((
+            dest,
+            "dt-probe-clone".into(),
+            warp_station_core::model::GitSyncResult::cancelled(),
+        ));
+        cx.notify();
+    });
+    cx.run_until_parked();
+    dialog_draw(cx);
+    assert!(
+        cx.debug_bounds("clone-overlay").is_none(),
+        "the cancelled clone closes its dialog"
+    );
+    assert!(
+        cx.debug_bounds("toast-0").is_some(),
+        "the stop is confirmed as a toast"
+    );
+}
+
+/// The Add dialog's enabled Add button really commits: the checked row joins
+/// the list and its folder becomes a persisted scan root — the "it did not
+/// save" report. The store takes an explicit settings file so a sibling probe
+/// swapping the process HOME cannot move the assertions.
+#[gpui::test]
+fn add_dialog_commit_persists_the_checked_repo(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+    scratch_home();
+    cx.update(warp_station::theme::apply_kit_theme);
+
+    let scratch =
+        std::env::temp_dir().join(format!("warp-station-add-save-{}.json", std::process::id()));
+    let _ = std::fs::remove_file(&scratch);
+    std::fs::write(&scratch, "{}").expect("scratch settings");
+    let (net_tx, _net_rx) = async_channel::unbounded();
+    let store = cx.new(|_cx| {
+        let mut store = Store::with_settings(
+            net_tx,
+            std::sync::Arc::new(warp_station_core::settings::SettingsService::at(
+                scratch.clone(),
+            )),
+        );
+        store.group_by_root = false;
+        store.replace_repos(vec![entry("alpha", "/probe/alpha", &[])]);
+        store
+    });
+    let store_handle = store.clone();
+    let (_window_handle, cx) =
+        cx.add_window_view(|window, cx| MainWindow::new(store_handle.clone(), window, cx));
+    cx.run_until_parked();
+    dialog_draw(cx);
+
+    dialog_click(cx, "add-repo-button");
+    cx.update_entity(&store, |s: &mut Store, cx| {
+        s.deep_scan_result = Some(vec![scanned("repo-x", "/probe/scan/repo-x")]);
+        cx.notify();
+    });
+    cx.run_until_parked();
+    dialog_draw(cx);
+    assert!(
+        cx.debug_bounds("btn-accent-Add 1").is_some(),
+        "the scanned row starts checked and Add is armed"
+    );
+
+    dialog_click(cx, "btn-accent-Add 1");
+    assert!(
+        cx.debug_bounds("add-repo-overlay").is_none(),
+        "a committed add closes the dialog"
+    );
+    let (list_has, roots_have) = cx.read_entity(&store, |s, _| {
+        (
+            s.repos.iter().any(|r| r.name == "repo-x"),
+            s.settings()
+                .repos
+                .repo_scan_folders
+                .iter()
+                .flatten()
+                .any(|root| root == "/probe/scan/repo-x"),
+        )
+    });
+    assert!(list_has, "the added repo joins the live list");
+    assert!(roots_have, "the added folder becomes a scan root");
+
+    // a fresh read of the same file finds the root the add wrote: the next
+    // launch's scan is what rebuilds the list from
+    let saved = std::fs::read_to_string(&scratch).unwrap_or_default();
+    assert!(
+        saved.contains("/probe/scan/repo-x"),
+        "the root is persisted: {saved}"
+    );
+    let reopened = warp_station_core::settings::SettingsService::at_readonly(scratch.clone());
+    assert!(
+        reopened
+            .get()
+            .repos
+            .repo_scan_folders
+            .iter()
+            .flatten()
+            .any(|root| root == "/probe/scan/repo-x"),
+        "the next launch reads the root back"
+    );
+
+    let _ = std::fs::remove_file(&scratch);
+}

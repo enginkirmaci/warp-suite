@@ -681,6 +681,11 @@ pub struct CloneDialog {
     pub name: Entity<InputState>,
     pub destination: Entity<InputState>,
     pub busy: bool,
+    /// The running clone's stop request; None while idle.
+    pub cancel: Option<warp_station_core::process::CancelFlag>,
+    /// Cancel was pressed and the clone is being killed; the settle closes
+    /// the dialog.
+    pub cancelling: bool,
     pub error: Option<String>,
 }
 
@@ -724,6 +729,8 @@ impl CloneDialog {
             name,
             destination,
             busy: false,
+            cancel: None,
+            cancelling: false,
             error: None,
         }
     }
@@ -743,6 +750,7 @@ impl CloneDialog {
         let name = self.folder_name(cx);
         let error = self.error.clone();
         let busy = self.busy;
+        let cancelling = self.cancelling;
         let raw_url = self.url.read(cx).value().to_string();
         let dest = self.destination.read(cx).value().to_string();
         // Each field checks itself, beside itself; only the backend's failure
@@ -781,6 +789,13 @@ impl CloneDialog {
             "icons/icon-cloud-download.svg",
             "clone-dialog-close",
             cx.listener(|this: &mut ReposPage, _, _, cx| {
+                // no invisible clone left behind: the X stops the transfer
+                if let Some(Dialog::Clone(dialog)) = &mut this.dialog
+                    && dialog.busy
+                    && let Some(cancel) = &dialog.cancel
+                {
+                    cancel.cancel();
+                }
                 this.dialog = None;
                 cx.notify();
             }),
@@ -826,12 +841,30 @@ impl CloneDialog {
                     "Cancel",
                     true,
                     cx.listener(|this: &mut ReposPage, _, _, cx| {
-                        this.dialog = None;
+                        if let Some(Dialog::Clone(dialog)) = &mut this.dialog
+                            && dialog.busy
+                        {
+                            // a clone has no wall-clock cap, so this is the
+                            // only way to stop a slow transfer: kill the tree
+                            // and wait for the settle to close the dialog
+                            if let Some(cancel) = &dialog.cancel {
+                                cancel.cancel();
+                            }
+                            dialog.cancelling = true;
+                        } else {
+                            this.dialog = None;
+                        }
                         cx.notify();
                     }),
                 ))
                 .child(primary_button(
-                    if busy { "Cloning…" } else { "Clone" },
+                    if cancelling {
+                        "Cancelling…"
+                    } else if busy {
+                        "Cloning…"
+                    } else {
+                        "Clone"
+                    },
                     !busy && valid,
                     cx.listener(|this: &mut ReposPage, _, _, cx| this.commit_clone(cx)),
                 )),

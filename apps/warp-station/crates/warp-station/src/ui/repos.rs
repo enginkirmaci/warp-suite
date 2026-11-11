@@ -346,6 +346,11 @@ impl ReposPage {
         let Some(Dialog::Clone(dialog)) = &mut self.dialog else {
             return;
         };
+        // Enter in the URL field lands here too; a clone already running must
+        // not send a second one into the same folder
+        if dialog.busy {
+            return;
+        }
         let mut validation_error: Option<String> = None;
         {
             let url = dialog.url.read(cx).value().to_string();
@@ -376,7 +381,10 @@ impl ReposPage {
         let url = dialog.url.read(cx).value().to_string();
         let name = dialog.folder_name(cx);
         let destination = dialog.destination.read(cx).value().to_string();
+        let cancel = warp_station_core::process::CancelFlag::new();
         dialog.busy = true;
+        dialog.cancelling = false;
+        dialog.cancel = Some(cancel.clone());
         dialog.error = None;
         self.store.update(cx, |s, cx| {
             s.cloning.push(name.clone());
@@ -390,6 +398,7 @@ impl ReposPage {
                 url: url.trim().to_string(),
                 parent_dir: destination,
                 name,
+                cancel: Some(cancel),
             });
         cx.notify();
     }
@@ -434,8 +443,18 @@ impl Render for ReposPage {
                 self.store
                     .update(cx, |store, cx| store.adopt_clone(&parent_dir, &name, cx));
                 self.dialog = None;
+            } else if result.cancelled {
+                // either footer Cancel (dialog open) or the X (closed): the
+                // partial folder is already gone, so a retry starts clean
+                self.dialog = None;
+                self.store.update(cx, |store, cx| {
+                    store.notify_info(format!("Clone of \"{name}\" cancelled"));
+                    cx.notify();
+                });
             } else if let Some(Dialog::Clone(dialog)) = &mut self.dialog {
                 dialog.busy = false;
+                dialog.cancelling = false;
+                dialog.cancel = None;
                 dialog.error = result.error.or_else(|| Some("clone failed".into()));
             }
         }

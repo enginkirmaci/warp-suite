@@ -1149,3 +1149,106 @@ fn notifications_section_rows_persist(cx: &mut TestAppContext) {
 
     let _ = std::fs::remove_dir_all(&home);
 }
+
+/// The Repositories card seeds its Scan-folders area once, when the page is
+/// built, and a text edit commits the whole page. A repository added from the
+/// Add-Repositories dialog after that lives in the settings file and the live
+/// store but not in that stale area — the save must keep it instead of
+/// writing the startup list back over the roots the add persisted.
+#[gpui_kit::gpui::test]
+fn settings_save_keeps_scan_roots_added_after_the_page_opened(cx: &mut TestAppContext) {
+    let _home_guard = HOME_ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    cx.update(gpui_kit::init);
+    cx.update(warp_station::theme::apply_kit_theme);
+
+    let home = std::env::temp_dir().join(format!(
+        "warp-station-scan-root-probe-{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&home);
+    std::fs::create_dir_all(home.join(".warp")).unwrap();
+    // SAFETY: process-global env; serialized against the sibling HOME probes
+    unsafe {
+        std::env::set_var("HOME", &home);
+        #[cfg(windows)]
+        std::env::set_var("USERPROFILE", &home);
+        std::env::set_var("XDG_CONFIG_HOME", home.join(".config"));
+    }
+
+    let scratch = home.join(".warp").join("settings.json");
+    std::fs::write(
+        &scratch,
+        r#"{"schema_version":1,"repos":{"repo_scan_folders":["/roots/alpha"]}}"#,
+    )
+    .expect("scratch settings");
+
+    let (net_tx, _net_rx) = async_channel::unbounded();
+    let store = cx.new(|_cx| {
+        Store::with_settings(
+            net_tx,
+            std::sync::Arc::new(warp_station_core::settings::SettingsService::at(
+                scratch.clone(),
+            )),
+        )
+    });
+    let handle = cx.open_window(
+        gpui::size(gpui::px(1400.), gpui::px(2600.)),
+        |window, cx| SettingsPage::new(store.clone(), window, cx),
+    );
+    let mut wcx = gpui::VisualTestContext::from_window(handle.into(), cx);
+    wcx.run_until_parked();
+    wcx.update(|window, cx| drop(window.draw(cx)));
+
+    // the Add dialog's commit lands after this page was built
+    store.update(&mut wcx, |s, cx| {
+        s.register_repos(
+            &[warp_station_core::scan::ScannedRepo {
+                name: "beta".into(),
+                folder_path: std::path::PathBuf::from("/roots/beta"),
+                solution_path: None,
+                tags: Vec::new(),
+            }],
+            cx,
+        )
+    });
+    let saved = std::fs::read_to_string(&scratch).unwrap_or_default();
+    assert!(
+        saved.contains("/roots/beta"),
+        "the add persists its root: {saved}"
+    );
+
+    // any text edit commits the whole page after 600ms; the Scan-folders
+    // area still shows the list this page was built with
+    click(&mut wcx, "settings-git");
+    click(&mut wcx, "settings-field-Branch name prefix");
+    wcx.simulate_input("x");
+    wcx.run_until_parked();
+    wcx.executor()
+        .advance_clock(std::time::Duration::from_millis(700));
+    wcx.run_until_parked();
+
+    let saved = std::fs::read_to_string(&scratch).unwrap_or_default();
+    assert!(
+        saved.contains("/roots/beta"),
+        "a settings save keeps the root the add persisted: {saved}"
+    );
+    assert!(
+        saved.contains("/roots/alpha"),
+        "the page's own root survives too: {saved}"
+    );
+
+    // the area never showed beta, so a second keystroke must not read the
+    // saved root as a deletion the user made
+    wcx.simulate_input("y");
+    wcx.run_until_parked();
+    wcx.executor()
+        .advance_clock(std::time::Duration::from_millis(700));
+    wcx.run_until_parked();
+    let saved = std::fs::read_to_string(&scratch).unwrap_or_default();
+    assert!(
+        saved.contains("/roots/beta"),
+        "a later save keeps it too: {saved}"
+    );
+
+    let _ = std::fs::remove_dir_all(&home);
+}

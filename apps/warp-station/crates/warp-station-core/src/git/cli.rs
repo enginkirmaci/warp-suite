@@ -15,9 +15,6 @@ use std::time::Duration;
 pub const PROCESS_TIMEOUT: Duration = Duration::from_secs(10);
 /// Upper bound for fetch/pull/push — network transfers grow with the payload.
 pub const SYNC_TIMEOUT: Duration = Duration::from_secs(60);
-/// Upper bound for clone — a full history download can legitimately run for
-/// minutes.
-pub const CLONE_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 
 pub struct GitOutcome {
     pub ok: bool,
@@ -27,7 +24,14 @@ pub struct GitOutcome {
 
 impl GitOutcome {
     fn from(result: &process::ProcessRunResult) -> Self {
-        if result.succeeded() || result.truncated {
+        if result.timed_out {
+            // the timeout path discards stderr, so the generic summarizer
+            // would report "failed" with no reason at all
+            Self {
+                ok: false,
+                error: Some("timed out".into()),
+            }
+        } else if result.succeeded() || result.truncated {
             Self {
                 ok: true,
                 error: None,
@@ -184,6 +188,18 @@ pub async fn delete_branch(folder: &Path, branch: &str) -> GitSyncResult {
 }
 
 pub async fn clone(url: &str, parent_directory: &Path, repo_name: &str) -> GitSyncResult {
+    clone_with_cancel(url, parent_directory, repo_name, None).await
+}
+
+/// [`clone`] with the dialog's stop request attached. Deliberately has no
+/// wall-clock cap: a large history over a slow link can legitimately run past
+/// any fixed bound, and Cancel kills the tree instead.
+pub async fn clone_with_cancel(
+    url: &str,
+    parent_directory: &Path,
+    repo_name: &str,
+    cancel: Option<process::CancelFlag>,
+) -> GitSyncResult {
     // The working directory is the destination's PARENT — the one command that
     // runs outside any existing repo. A cancelled (killed) clone leaves a
     // partial worktree; remove it so a retry finds the slot free.
@@ -196,7 +212,8 @@ pub async fn clone(url: &str, parent_directory: &Path, repo_name: &str) -> GitSy
         file_name: "git",
         args: &args,
         working_dir: Some(parent_directory),
-        timeout: Some(CLONE_TIMEOUT),
+        timeout: None,
+        cancel,
         environment: vec![("GIT_TERMINAL_PROMPT".into(), "0".into())],
         ..Default::default()
     })
@@ -205,6 +222,9 @@ pub async fn clone(url: &str, parent_directory: &Path, repo_name: &str) -> GitSy
         Ok(r) if r.succeeded() => GitSyncResult::ok(),
         Ok(r) => {
             remove_partial_clone(parent_directory.join(repo_name)).await;
+            if r.cancelled {
+                return GitSyncResult::cancelled();
+            }
             // surface git's fatal line like every other mutation — "clone
             // failed" alone can't tell an auth failure from a bad URL or an
             // scp-style remote (host:repo is not a valid Windows folder name)

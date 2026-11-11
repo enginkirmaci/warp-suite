@@ -1,6 +1,7 @@
 //! One-shot CLI runner for every spawned child (git, gh, opencode): spawn
-//! with drained pipes, bound the run with a timeout, kill the
-//! child's whole process tree when the bound expires, and optionally cap the
+//! with drained pipes, bound the run with a timeout, let the UI stop it with a
+//! cancel flag, kill the child's whole process tree when either fires, and
+//! optionally cap the
 //! stdout read (the read task kills the tree once the head is captured, so a
 //! chatty child never materializes megabytes). Spawn failures propagate as
 //! `Err` so callers can keep their per-service "CLI unavailable" handling.
@@ -39,12 +40,35 @@ pub const ELECTRON_RUN_AS_NODE: &str = "ELECTRON_RUN_AS_NODE";
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
+/// A one-way stop request for a running child: the UI flips it, the runner
+/// kills the process tree and reports the run as cancelled. Used by the clone
+/// so a large transfer has no wall-clock cap but can still be stopped.
+#[derive(Clone, Debug, Default)]
+pub struct CancelFlag(std::sync::Arc<std::sync::atomic::AtomicBool>);
+
+impl CancelFlag {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn cancel(&self) {
+        self.0.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        self.0.load(std::sync::atomic::Ordering::Relaxed)
+    }
+}
+
 #[derive(Default)]
 pub struct ProcessRunOptions<'a> {
     pub file_name: &'a str,
     pub args: &'a [String],
     pub working_dir: Option<&'a std::path::Path>,
     pub timeout: Option<Duration>,
+    /// A user stop request: the flag flips, the tree is killed, and the result
+    /// reports `cancelled` instead of a failure.
+    pub cancel: Option<CancelFlag>,
     /// Gives CLIs that read piped stdin an instant EOF instead of a hang.
     pub close_stdin: bool,
     /// Removes ELECTRON_RUN_AS_NODE from the child's environment.
@@ -59,12 +83,14 @@ pub struct ProcessRunOptions<'a> {
 }
 
 pub struct ProcessRunResult {
-    /// The child's exit code; `None` when it never completed (spawn failure or
-    /// timeout).
+    /// The child's exit code; `None` when it never completed (spawn failure,
+    /// timeout or cancel).
     pub exit_code: Option<i32>,
     pub stdout: String,
     pub stderr: String,
     pub timed_out: bool,
+    /// The cancel flag flipped and the tree was killed.
+    pub cancelled: bool,
     pub truncated: bool,
 }
 
@@ -157,23 +183,56 @@ pub async fn run(options: ProcessRunOptions<'_>) -> anyhow::Result<ProcessRunRes
         err
     });
 
+    let deadline = options.timeout;
+    let cancel = options.cancel.clone();
     let mut timed_out = false;
-    let exit = match options.timeout {
-        Some(limit) => match tokio::time::timeout(limit, child.wait()).await {
-            Ok(Ok(status)) => Some(status),
-            Ok(Err(err)) => return Err(err.into()),
-            Err(_) => {
-                kill_tree(pid);
+    let mut cancelled = false;
+    let mut exit = if deadline.is_none() && cancel.is_none() {
+        Some(child.wait().await?)
+    } else {
+        tokio::select! {
+            status = child.wait() => Some(status?),
+            _ = async {
+                match deadline {
+                    Some(limit) => tokio::time::sleep(limit).await,
+                    None => std::future::pending().await,
+                }
+            } => {
                 timed_out = true;
-                // reap the killed child so it does not linger as a zombie
-                let _ = tokio::time::timeout(Duration::from_secs(3), child.wait()).await;
                 None
             }
-        },
-        None => Some(child.wait().await?),
+            _ = async {
+                match &cancel {
+                    // one poll beats a wake-up channel: the UI flips a plain
+                    // atomic and the lag is imperceptible next to a clone
+                    Some(flag) => {
+                        while !flag.is_cancelled() {
+                            tokio::time::sleep(Duration::from_millis(50)).await;
+                        }
+                    }
+                    None => std::future::pending().await,
+                }
+            } => {
+                cancelled = true;
+                None
+            }
+        }
     };
 
-    if timed_out {
+    // A stop that fires in the same tick as the exit must not discard work
+    // that already landed: the child's own status wins over the flag.
+    if (timed_out || cancelled)
+        && let Ok(Some(status)) = child.try_wait()
+    {
+        timed_out = false;
+        cancelled = false;
+        exit = Some(status);
+    }
+
+    if timed_out || cancelled {
+        kill_tree(pid);
+        // reap the killed child so it does not linger as a zombie
+        let _ = tokio::time::timeout(Duration::from_secs(3), child.wait()).await;
         // the tree kill closes the pipes; give the tasks a beat to settle
         let _ = tokio::time::timeout(Duration::from_secs(3), stdout_task).await;
         let _ = tokio::time::timeout(Duration::from_secs(3), stderr_task).await;
@@ -181,7 +240,8 @@ pub async fn run(options: ProcessRunOptions<'_>) -> anyhow::Result<ProcessRunRes
             exit_code: None,
             stdout: String::new(),
             stderr: String::new(),
-            timed_out: true,
+            timed_out,
+            cancelled,
             truncated: false,
         });
     }
@@ -203,6 +263,7 @@ pub async fn run(options: ProcessRunOptions<'_>) -> anyhow::Result<ProcessRunRes
         stdout: String::from_utf8_lossy(&stdout).to_string(),
         stderr: String::from_utf8_lossy(&stderr).to_string(),
         timed_out: false,
+        cancelled: false,
         truncated,
     })
 }
@@ -260,7 +321,40 @@ mod tests {
         .await
         .unwrap();
         assert!(result.timed_out);
+        assert!(!result.cancelled);
         assert!(!result.succeeded());
+    }
+
+    /// The dialog's Cancel is not a failure: the tree dies and the run reports
+    /// `cancelled`, so a clone can tell "the user stopped it" from "git failed".
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn cancel_kills_and_reports_cancelled() {
+        let cancel = CancelFlag::new();
+        let flip = {
+            let cancel = cancel.clone();
+            tokio::spawn(async move {
+                tokio::time::sleep(Duration::from_millis(150)).await;
+                cancel.cancel();
+            })
+        };
+        let started = std::time::Instant::now();
+        let result = run(ProcessRunOptions {
+            file_name: "sleep",
+            args: &["30".to_string()],
+            cancel: Some(cancel),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+        flip.await.unwrap();
+        assert!(result.cancelled);
+        assert!(!result.timed_out);
+        assert!(!result.succeeded());
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "the kill returns promptly"
+        );
     }
 
     /// stderr is capped too, but a chatty stderr must not kill a process that

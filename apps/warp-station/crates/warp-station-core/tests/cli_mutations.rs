@@ -369,3 +369,28 @@ fn a_renamed_file_lists_under_its_new_name() {
     assert_eq!(paths(&snapshot.staged_files), ["new.txt"]);
     assert_eq!(paths(&snapshot.unstaged_files), ["new.txt"]);
 }
+
+/// The Clone dialog's run has no wall-clock cap, so the ordinary path just
+/// has to land the repository and report success with no error attached.
+#[tokio::test]
+async fn clone_copies_a_repository() {
+    let Some(origin) = scratch_repo("clone-origin") else {
+        return;
+    };
+    let parent = std::env::temp_dir().join(format!("dt-clone-parent-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&parent);
+    std::fs::create_dir_all(&parent).unwrap();
+
+    let url = origin.to_string_lossy().to_string();
+    let result = cli::clone(&url, &parent, "copy").await;
+
+    assert!(result.success, "clone failed: {:?}", result.error);
+    assert!(!result.cancelled);
+    assert!(
+        parent.join("copy").join(".git").is_dir(),
+        "the clone lands its own repository"
+    );
+
+    let _ = std::fs::remove_dir_all(&parent);
+    let _ = std::fs::remove_dir_all(&origin);
+}
