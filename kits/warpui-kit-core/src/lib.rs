@@ -12,8 +12,12 @@
 //! - [`shell`] — the one window shape: rail, tab strip, list and detail
 //! - [`motion`] — durations and the spinner
 //! - [`kit`] — maps the palette onto gpui-kit's shadcn-style theme tokens
+//! - [`list_nav`] — the list key map: arrows, Home/End, PageUp/PageDown and
+//!   the row actions every list shares
 //! - [`about`] — the About screen every app carries above Settings: the
 //!   family table, the marks, and the Build/Legal cards
+//! - [`activity`] — the one window-activity line: the titlebar chip and the
+//!   OS title share it
 //! - [`a11y`] — the role/label trait every hand-rolled control passes through
 //! - [`mod@icon`] — tinted svg icon builders (asset path or inline source)
 //! - [`bootstrap`] — the one app startup: kit init, shared scale and palette,
@@ -32,12 +36,14 @@
 
 pub mod a11y;
 pub mod about;
+pub mod activity;
 pub mod bootstrap;
 pub mod controls;
 pub mod field;
 pub mod fonts;
 pub mod icon;
 pub mod kit;
+pub mod list_nav;
 #[cfg(feature = "media")]
 pub mod media;
 pub mod motion;

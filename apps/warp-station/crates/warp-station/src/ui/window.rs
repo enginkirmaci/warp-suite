@@ -3,7 +3,7 @@
 //! Summaries, Tools and Settings. Notes and warp-agent are their own apps, so
 //! the title bar launches them.
 
-use crate::store::{Store, WorkspaceTab};
+use crate::store::Store;
 use crate::theme;
 use crate::ui::A11y;
 use crate::ui::clipboard_password::{ClipboardPasswordDrawer, copy_stored_password};
@@ -83,6 +83,9 @@ pub struct MainWindow {
     /// This window, for the single-instance door's activation request:
     /// `App::activate` is a no-op on Linux, `Window::activate_window` is not.
     window_handle: gpui::AnyWindowHandle,
+    /// The OS title the last frame set, so an unchanged activity string does
+    /// not churn the window manager every repaint.
+    window_title: String,
     /// The read-only text menu's action anchor; rendered once at the root.
     text_menu: Entity<TextMenuAnchor>,
 }
@@ -165,6 +168,7 @@ impl MainWindow {
             wand_queue_open: false,
             focus_handle,
             window_handle,
+            window_title: String::new(),
             text_menu,
         };
         // keep the root focus handle live so Escape / Ctrl+K work before the
@@ -182,6 +186,16 @@ impl MainWindow {
 
 impl Render for MainWindow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl gpui::IntoElement {
+        // the OS title carries the same activity as the titlebar chip; the
+        // store's string changes on the same transition the chip redraws for
+        let title = warpui_kit_core::activity::activity_title(
+            "Warp Station",
+            self.store.read(cx).activity().as_deref(),
+        );
+        if self.window_title != title {
+            window.set_window_title(&title);
+            self.window_title = title;
+        }
         if self.store.read(cx).notes_requested {
             self.store.update(cx, |s, _| s.notes_requested = false);
             self.launch_notes(None, cx);
@@ -310,47 +324,16 @@ impl Render for MainWindow {
                     }
                 }
 
-                // The list's own keymap: ↑↓ move the row selection, S favorites
-                // the focused repo, C opens Changes, ↵ and the letters run its
-                // launchers. Text inputs keep their keys (the Input key context
-                // owns the focus path) and so does anything open on top of the
-                // list: these all act on the rows under it.
-                if this.section == Section::Repos
-                    && !modifiers.modified()
-                    && !this.layer_open(cx)
-                    && !window
-                        .context_stack()
-                        .iter()
-                        .any(|context| context.contains("Input"))
-                {
-                    match key {
-                        "down" | "up" => {
-                            let delta = if key == "down" { 1 } else { -1 };
-                            this.store
-                                .update(cx, |store, cx| store.step_selection(delta, cx));
-                            cx.stop_propagation();
-                        }
-                        // a held key repeats: only stepping through rows wants that
-                        _ if event.is_held => {}
-                        "s" => {
-                            let folder = this.store.read(cx).selected_repo.clone();
-                            if let Some(folder) = folder {
-                                this.store
-                                    .update(cx, |s, cx| s.toggle_favorite(&folder, cx));
-                            }
-                            cx.stop_propagation();
-                        }
-                        "c" => {
-                            this.store.update(cx, |s, cx| {
-                                s.open_detail_tab(WorkspaceTab::Changes, cx);
-                            });
-                            cx.stop_propagation();
-                        }
-                        _ => {
-                            if crate::ui::launchers::run_key(key, &this.store, cx) {
-                                cx.stop_propagation();
-                            }
-                        }
+                // The list's row keymap lives on the list pane; the window
+                // delegates only while it owns the focus itself, so a click
+                // into the detail or the strip takes the row keys away instead
+                // of moving the rail under it.
+                if this.section == Section::Repos && this.focus_handle.is_focused(window) {
+                    let handled = this
+                        .repos_page
+                        .update(cx, |page, cx| page.handle_repo_key(event, window, cx));
+                    if handled {
+                        cx.stop_propagation();
                     }
                 }
             }))
@@ -629,11 +612,6 @@ impl MainWindow {
 }
 
 impl MainWindow {
-    /// Whether something is open over the repo list.
-    fn layer_open(&self, cx: &gpui::App) -> bool {
-        self.repos_page.read(cx).layer_open()
-    }
-
     /// The repo tabs' keys, Ctrl held: T or ↵ opens the selected repo in a tab
     /// (fields keep ↵), W closes the active tab, \ toggles the list, Tab steps
     /// along the strip and the digits jump to a place on it. Returns whether
@@ -1238,6 +1216,7 @@ impl MainWindow {
                         .font_weight(FontWeight::MEDIUM)
                         .text_color(theme::BEHIND)
                         .whitespace_nowrap()
+                        .tooltip(crate::ui::tooltip_text(label.clone()))
                         .child(motion::spinner(
                             "activity-spinner",
                             "icons/icon-spinner.svg",

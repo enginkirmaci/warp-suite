@@ -12,12 +12,16 @@ use crate::theme;
 use crate::ui::diff_controls;
 use crate::ui::{A11y, icon};
 use gpui::prelude::*;
-use gpui::{Context, Entity, FontWeight, SharedString, Window, div, px, uniform_list};
+use gpui::{
+    Context, Entity, FocusHandle, FontWeight, MouseButton, ScrollStrategy, SharedString,
+    UniformListScrollHandle, Window, div, px, uniform_list,
+};
 use gpui_kit::component::input::{InputState, TextareaState};
 use std::cell::RefCell;
 use std::rc::Rc;
 use warp_station_core::model::GitChangedFile;
 use warp_station_core::settings::DiffViewMode;
+use warpui_kit_core::{list_nav, motion};
 use warpui_kit_diff::{DiffScrollHandles, render_diff_with_scroll};
 use warpui_kit_picker::{
     FilteredPicker, OverlayAnchor, PanelChrome, PickerBody, PickerData, PickerIcons, PickerItem,
@@ -149,6 +153,14 @@ pub struct ChangesView {
     /// Precomputed history row labels, keyed by history generation + today.
     history_rows: Vec<HistoryRow>,
     history_cache_key: (u64, chrono::NaiveDate),
+    /// The file list's keyboard focus.
+    file_focus: FocusHandle,
+    /// Keeps the keyboard-selected file row in view.
+    file_scroll: UniformListScrollHandle,
+    /// The history commit list's keyboard focus.
+    history_focus: FocusHandle,
+    /// Keeps the keyboard-selected commit row in view.
+    history_scroll: UniformListScrollHandle,
 }
 
 impl ChangesView {
@@ -195,6 +207,10 @@ impl ChangesView {
             groups_cache: None,
             history_rows: Vec::new(),
             history_cache_key: (0, chrono::NaiveDate::MIN),
+            file_focus: cx.focus_handle(),
+            file_scroll: UniformListScrollHandle::default(),
+            history_focus: cx.focus_handle(),
+            history_scroll: UniformListScrollHandle::default(),
         }
     }
 
@@ -522,6 +538,7 @@ impl Render for ChangesView {
         let body = if clean {
             clean_state(&self.store, cx)
         } else {
+            let file_list = self.render_file_list(&file_groups, cx);
             let mut files = div()
                 .w(px(warpui_kit_core::shell::scaled(FILE_COLUMN_W)))
                 .flex_shrink_0()
@@ -532,7 +549,31 @@ impl Render for ChangesView {
                 .bg(theme::surface())
                 .border_r_1()
                 .border_color(theme::hairline())
-                .child(self.render_file_list(&file_groups, cx));
+                .child(
+                    // the rows take the keys only while this column owns the
+                    // focus; the commit card below is an input and keeps its
+                    // own
+                    div()
+                        .flex_1()
+                        .min_h_0()
+                        .flex()
+                        .flex_col()
+                        .track_focus(&self.file_focus)
+                        .on_key_down(cx.listener(|this, event, window, cx| {
+                            if this.handle_file_key(event, window, cx) {
+                                cx.stop_propagation();
+                            }
+                        }))
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(|this, _, window, cx| {
+                                if !this.file_focus.is_focused(window) {
+                                    window.focus(&this.file_focus, cx);
+                                }
+                            }),
+                        )
+                        .child(file_list),
+                );
             files = if groups.0.is_empty() && !committing {
                 files.child(stage_hint(self.store.clone(), groups.1.len()))
             } else {
@@ -716,6 +757,137 @@ impl ChangesView {
             .into_any_element()
     }
 
+    /// The file list flattened to its fixed-height items, in render order.
+    /// The renderer and the keyboard cursor both read this one order, so a
+    /// collapsed section or a new snapshot moves them together.
+    fn file_items(&self, files: &FileGroups) -> Vec<ChangeListItem> {
+        let (staged, unstaged) = (&files.groups.0, &files.groups.1);
+        let mut items: Vec<ChangeListItem> = Vec::with_capacity(staged.len() + unstaged.len() + 2);
+        if !staged.is_empty() {
+            items.push(ChangeListItem::StagedHeader);
+            if !self.staged_collapsed {
+                items.extend((0..staged.len()).map(ChangeListItem::StagedFile));
+            }
+        }
+        if !unstaged.is_empty() {
+            items.push(ChangeListItem::UnstagedHeader);
+            if !self.unstaged_collapsed {
+                items.extend((0..unstaged.len()).map(ChangeListItem::UnstagedFile));
+            }
+        }
+        items
+    }
+
+    /// The file list's keys, dispatched by the focused list only.
+    fn handle_file_key(
+        &mut self,
+        event: &gpui::KeyDownEvent,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if event.keystroke.modifiers.modified() || self.history_open {
+            return false;
+        }
+        let Some(key) = list_nav::list_key(event) else {
+            return false;
+        };
+        match key {
+            list_nav::ListKey::Up
+            | list_nav::ListKey::Down
+            | list_nav::ListKey::Home
+            | list_nav::ListKey::End
+            | list_nav::ListKey::PageUp
+            | list_nav::ListKey::PageDown => {
+                self.move_file_selection(key, cx);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Steps the selected file through the visible rows: headers are skipped
+    /// and a collapsed section has no rows to land on.
+    fn move_file_selection(&mut self, key: list_nav::ListKey, cx: &mut Context<Self>) {
+        let files = {
+            let Some((_, files)) = &self.groups_cache else {
+                return;
+            };
+            files.clone()
+        };
+        let (staged, unstaged) = (&files.groups.0, &files.groups.1);
+        let mut rows: Vec<(String, bool, usize)> = Vec::new();
+        for (ix, item) in self.file_items(&files).into_iter().enumerate() {
+            match item {
+                ChangeListItem::StagedFile(index) => {
+                    rows.push((staged[index].path.clone(), true, ix));
+                }
+                ChangeListItem::UnstagedFile(index) => {
+                    rows.push((unstaged[index].path.clone(), false, ix));
+                }
+                ChangeListItem::StagedHeader | ChangeListItem::UnstagedHeader => {}
+            }
+        }
+        let current = self.selected_file.as_ref().and_then(|(path, is_staged)| {
+            rows.iter()
+                .position(|(row_path, row_staged, _)| row_path == path && row_staged == is_staged)
+        });
+        let Some(next) = list_nav::step(current, rows.len(), key, list_nav::DEFAULT_PAGE) else {
+            return;
+        };
+        let (path, is_staged, item_ix) = rows[next].clone();
+        self.select_file(&path, is_staged, cx);
+        self.file_scroll
+            .scroll_to_item(item_ix, ScrollStrategy::Nearest);
+    }
+
+    /// The history list's keys, dispatched by the focused list only.
+    fn handle_history_key(
+        &mut self,
+        event: &gpui::KeyDownEvent,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if event.keystroke.modifiers.modified() || !self.history_open {
+            return false;
+        }
+        let Some(key) = list_nav::list_key(event) else {
+            return false;
+        };
+        match key {
+            list_nav::ListKey::Up
+            | list_nav::ListKey::Down
+            | list_nav::ListKey::Home
+            | list_nav::ListKey::End
+            | list_nav::ListKey::PageUp
+            | list_nav::ListKey::PageDown => {
+                self.move_history_selection(key, cx);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Drills the next commit: the drilled row is this list's cursor, and the
+    /// store loads its files and head band as it moves.
+    fn move_history_selection(&mut self, key: list_nav::ListKey, cx: &mut Context<Self>) {
+        let current = self
+            .drilled_commit
+            .as_ref()
+            .and_then(|hash| self.history_rows.iter().position(|row| &row.hash == hash));
+        let Some(next) = list_nav::step(
+            current,
+            self.history_rows.len(),
+            key,
+            list_nav::DEFAULT_PAGE,
+        ) else {
+            return;
+        };
+        let hash = self.history_rows[next].hash.clone();
+        self.drill_commit(&hash, cx);
+        self.history_scroll
+            .scroll_to_item(next, ScrollStrategy::Nearest);
+    }
+
     fn render_file_list(
         &mut self,
         files: &Rc<FileGroups>,
@@ -740,8 +912,15 @@ impl ChangesView {
                         .flex()
                         .items_center()
                         .justify_center()
+                        .gap_2()
                         .text_size(px(theme::font_body()))
                         .text_color(theme::text_dim())
+                        .child(motion::spinner(
+                            "changes-loading",
+                            "icons/icon-spinner.svg",
+                            px(theme::icon_tiny()),
+                            theme::text_dim(),
+                        ))
                         .child("Loading…")
                         .into_any_element()
                 })
@@ -753,20 +932,7 @@ impl ChangesView {
         // tree costs the same per repaint as a 30-file one. The old loop laid
         // out every row — its status letter, its dir/name split, its two
         // hover actions and their listeners — on every frame.
-        let mut items: Vec<ChangeListItem> = Vec::with_capacity(staged.len() + unstaged.len() + 2);
-        if !staged.is_empty() {
-            items.push(ChangeListItem::StagedHeader);
-            if !self.staged_collapsed {
-                items.extend((0..staged.len()).map(ChangeListItem::StagedFile));
-            }
-        }
-        if !unstaged.is_empty() {
-            items.push(ChangeListItem::UnstagedHeader);
-            if !self.unstaged_collapsed {
-                items.extend((0..unstaged.len()).map(ChangeListItem::UnstagedFile));
-            }
-        }
-        let items = Rc::new(items);
+        let items = Rc::new(self.file_items(files));
         let files = files.clone();
         let show_tooltips = self.store.read(cx).settings().general.show_tooltips;
         uniform_list(
@@ -829,6 +995,7 @@ impl ChangesView {
         .flex_1()
         .min_h_0()
         .py_1()
+        .track_scroll(&self.file_scroll)
         .debug_selector(|| "changes-list".into())
         .into_any_element()
     }
@@ -1032,6 +1199,22 @@ impl ChangesView {
                     .bg(theme::surface())
                     .border_r_1()
                     .border_color(theme::hairline())
+                    // the commits take the keys only while this column owns
+                    // the focus; the detail beside it is prose and controls
+                    .track_focus(&self.history_focus)
+                    .on_key_down(cx.listener(|this, event, window, cx| {
+                        if this.handle_history_key(event, window, cx) {
+                            cx.stop_propagation();
+                        }
+                    }))
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|this, _, window, cx| {
+                            if !this.history_focus.is_focused(window) {
+                                window.focus(&this.history_focus, cx);
+                            }
+                        }),
+                    )
                     .child(list),
             )
             .child(
@@ -1100,8 +1283,15 @@ impl ChangesView {
                     .flex()
                     .items_center()
                     .justify_center()
+                    .gap_2()
                     .text_size(px(theme::font_body()))
                     .text_color(theme::text_dim())
+                    .child(motion::spinner(
+                        "history-loading",
+                        "icons/icon-spinner.svg",
+                        px(theme::icon_tiny()),
+                        theme::text_dim(),
+                    ))
                     .child("Loading history…")
                     .into_any_element();
             }
@@ -1152,6 +1342,7 @@ impl ChangesView {
                     .collect()
             }),
         )
+        .track_scroll(&self.history_scroll)
         .debug_selector(|| "history-list".into())
         .size_full()
         .into_any_element()

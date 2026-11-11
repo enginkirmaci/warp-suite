@@ -79,6 +79,11 @@ Keep this order; several steps depend on the previous one:
   the SnapIt settings at `~/.warp/snapit` and the notes content at `~/notes`.
 - **Settings.** Repo tags live in `settings.json` (`repos.repo_tags`), not in
   the cache. The contract is `../../docs/agents/settings-schema.md`.
+- **Keyboard and titles.** List keys belong to the focused pane (repo list,
+  Changes files, History commits, PR/Issues); the window delegates only while
+  it owns the focus itself. The OS title carries `Store::activity()` next to
+  the titlebar chip. The family rules are
+  `../../docs/agents/design-system.md` (`## Keyboard navigation`, `## Motion`).
 
 ## Tests
 

@@ -14,9 +14,13 @@ use crate::ui::new_pull::NewPullView;
 use crate::ui::pull_request::PullRequestView;
 use crate::ui::repos::{segment, segment_row};
 use gpui::prelude::*;
-use gpui::{Context, Entity, FontWeight, SharedString, Window, div, px};
+use gpui::{
+    Context, Entity, FocusHandle, FontWeight, MouseButton, ScrollHandle, SharedString, Window, div,
+    px,
+};
 use gpui_kit::component::input::{InputEvent, InputState};
 use warp_station_core::activity::{ActivityItem, ActivityKind, ActivitySource, IssueSort};
+use warpui_kit_core::list_nav;
 use warpui_kit_core::shell;
 
 /// The workbench's list column, and the pane width under which it and the
@@ -43,6 +47,11 @@ pub struct ItemListView {
     sort_open: bool,
     /// Setting the field needs the window, so this waits for the next render.
     clear_filter: bool,
+    /// The list's keyboard focus and its offset.
+    list_focus: FocusHandle,
+    list_scroll: ScrollHandle,
+    /// The rows the last render laid out, in the order the cursor steps.
+    visible: Vec<ActivityItem>,
 }
 
 impl ItemListView {
@@ -79,6 +88,9 @@ impl ItemListView {
             closed: false,
             sort_open: false,
             clear_filter: false,
+            list_focus: cx.focus_handle(),
+            list_scroll: ScrollHandle::default(),
+            visible: Vec::new(),
         }
     }
 
@@ -638,6 +650,8 @@ impl ItemListView {
         items: &[ActivityItem],
         cx: &mut Context<Self>,
     ) -> gpui::AnyElement {
+        // the cursor steps the same rows this frame draws
+        self.visible = items.to_vec();
         let pane_width = self.store.read(cx).pane_width;
         let stacked = pane_width < STACKED_PANE;
         // the detail column's own width: the rail-stacking rules read it
@@ -672,13 +686,6 @@ impl ItemListView {
         self.issue_detail
             .update(cx, |view, _| view.stacked = stacked);
 
-        let mut rows = div().flex().flex_col();
-        for item in items {
-            rows = rows.child(
-                self.render_activity_row(item, selected == Some(item.number))
-                    .into_any_element(),
-            );
-        }
         let label = if self.closed { "Closed" } else { "Open" };
         let list_selector = if self.pull_requests {
             "pr-list"
@@ -690,6 +697,23 @@ impl ItemListView {
         } else {
             "issue-list-column"
         };
+        // the rows are the scroll container's own children, so the keyboard
+        // cursor can ask it to bring one into view by index
+        let mut list_rows = div()
+            .id(list_selector)
+            .debug_selector(move || list_selector.into())
+            .flex_1()
+            .min_h_0()
+            .overflow_y_scroll()
+            .flex()
+            .flex_col()
+            .track_scroll(&self.list_scroll);
+        for item in items {
+            list_rows = list_rows.child(
+                self.render_activity_row(item, selected == Some(item.number))
+                    .into_any_element(),
+            );
+        }
         let list = div()
             .id(column_selector)
             .debug_selector(move || column_selector.into())
@@ -701,6 +725,20 @@ impl ItemListView {
             .border_r_1()
             .border_color(theme::hairline())
             .bg(theme::surface())
+            .track_focus(&self.list_focus)
+            .on_key_down(cx.listener(|this, event, window, cx| {
+                if this.handle_list_key(event, window, cx) {
+                    cx.stop_propagation();
+                }
+            }))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _, window, cx| {
+                    if !this.list_focus.is_focused(window) {
+                        window.focus(&this.list_focus, cx);
+                    }
+                }),
+            )
             .child(
                 div()
                     .flex_shrink_0()
@@ -719,15 +757,7 @@ impl ItemListView {
                     // a merged one leaves each row's tag to speak for itself
                     .children(single_source_of(items).map(source_tag)),
             )
-            .child(
-                div()
-                    .id(list_selector)
-                    .debug_selector(move || list_selector.into())
-                    .flex_1()
-                    .min_h_0()
-                    .overflow_y_scroll()
-                    .child(rows),
-            );
+            .child(list_rows);
 
         let detail =
             div()
@@ -773,6 +803,38 @@ impl ItemListView {
                 .child(detail)
                 .into_any_element()
         }
+    }
+
+    /// The list's row keys, dispatched by the focused list only.
+    fn handle_list_key(
+        &mut self,
+        event: &gpui::KeyDownEvent,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if event.keystroke.modifiers.modified() {
+            return false;
+        }
+        let Some(key) = list_nav::list_key(event) else {
+            return false;
+        };
+        let current = {
+            let open = self.store.read(cx).open_activity(self.pull_requests);
+            open.and_then(|open| {
+                self.visible
+                    .iter()
+                    .position(|item| item.number == open.number)
+            })
+        };
+        let Some(next) = list_nav::step(current, self.visible.len(), key, list_nav::DEFAULT_PAGE)
+        else {
+            return false;
+        };
+        let item = self.visible[next].clone();
+        self.store
+            .update(cx, |store, cx| store.open_activity_row(item, cx));
+        self.list_scroll.scroll_to_item(next);
+        true
     }
 
     /// A row of either list, whichever platform it came from: 58 high, the

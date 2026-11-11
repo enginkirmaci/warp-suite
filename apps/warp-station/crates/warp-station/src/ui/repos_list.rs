@@ -10,7 +10,7 @@ use crate::ui::A11y;
 use crate::ui::icon;
 use crate::ui::launchers::{self, Launcher};
 use gpui::prelude::*;
-use gpui::{Entity, FontWeight, Rgba, SharedString, div, px};
+use gpui::{Entity, FontWeight, Rgba, ScrollHandle, SharedString, div, px};
 use warp_station_core::azure::AzureSnapshot;
 use warp_station_core::rel_time;
 use warp_station_core::repo_store::RepoEntry;
@@ -75,7 +75,11 @@ fn cloning_row(ix: usize, name: &str) -> impl IntoElement + use<> {
 
 /// The whole list: one quiet header per folder group, then its rows. Rows
 /// select on click, and the detail pane follows.
-pub fn render(store: &Store, store_entity: &Entity<Store>) -> gpui::AnyElement {
+pub fn render(
+    store: &Store,
+    store_entity: &Entity<Store>,
+    scroll: &ScrollHandle,
+) -> gpui::AnyElement {
     if store.projected.is_empty() {
         return empty_list(store);
     }
@@ -86,6 +90,8 @@ pub fn render(store: &Store, store_entity: &Entity<Store>) -> gpui::AnyElement {
         .size_full()
         .min_h_0()
         .overflow_y_scroll()
+        // the page's keyboard cursor scrolls a row into view through this
+        .track_scroll(scroll)
         .pt_1();
     for (ix, name) in store.cloning.iter().enumerate() {
         list = list.child(cloning_row(ix, name));

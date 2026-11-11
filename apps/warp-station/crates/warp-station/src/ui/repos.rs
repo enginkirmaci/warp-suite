@@ -13,12 +13,12 @@ use crate::ui::icon;
 use crate::ui::overview::RepoMenu;
 use gpui::prelude::*;
 use gpui::{
-    App, Context, DragMoveEvent, Entity, FontWeight, MouseButton, ScrollHandle, SharedString,
-    Window, div, px,
+    App, Context, DragMoveEvent, Entity, FocusHandle, FontWeight, MouseButton, ScrollHandle,
+    SharedString, Window, div, px,
 };
 use gpui_kit::component::input::{InputEvent, InputState};
 use warp_station_core::settings::RepoSortMode;
-use warpui_kit_core::{motion, shell};
+use warpui_kit_core::{list_nav, motion, shell};
 
 /// The pane head's running totals over the live (non-archived) list.
 #[derive(Default)]
@@ -59,12 +59,18 @@ pub struct ReposPage {
     strip_active: Option<usize>,
     /// The store's list version the page last ran `ensure_row_selected` for.
     list_version: u64,
+    /// The list's keyboard focus: the row keys move the selection only while
+    /// this pane owns the keys.
+    repo_focus: FocusHandle,
+    /// Keeps the keyboard-selected row in view.
+    repo_scroll: ScrollHandle,
 }
 
 impl ReposPage {
     pub fn new(store: Entity<Store>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let views = DetailViews::new(&store, window, cx);
         let list_version = store.read(cx).list_version;
+        let repo_focus = cx.focus_handle();
         cx.observe(&store, |this, store, cx| {
             // only a list change needs the O(n) ensure pass; a toast or a
             // status probe must not rescan every repo's tabs and paths (C5)
@@ -102,11 +108,108 @@ impl ReposPage {
             strip_active: None,
             list_in_tab: false,
             list_version,
+            repo_focus,
+            repo_scroll: ScrollHandle::new(),
         }
     }
 }
 
 impl ReposPage {
+    /// The list's row keys, dispatched only while the list owns the focus (or
+    /// the window does and delegates here). Returns whether the key belonged
+    /// to the list, so the caller stops it before it reaches the app.
+    pub fn handle_repo_key(
+        &mut self,
+        event: &gpui::KeyDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if event.keystroke.modifiers.modified() || self.layer_open() {
+            return false;
+        }
+        if window
+            .context_stack()
+            .iter()
+            .any(|context| context.contains("Input"))
+        {
+            return false;
+        }
+        if let Some(key) = list_nav::list_key(event) {
+            match key {
+                list_nav::ListKey::Up
+                | list_nav::ListKey::Down
+                | list_nav::ListKey::Home
+                | list_nav::ListKey::End
+                | list_nav::ListKey::PageUp
+                | list_nav::ListKey::PageDown => {
+                    self.move_selection(key, cx);
+                    return true;
+                }
+                list_nav::ListKey::Enter => {
+                    return crate::ui::launchers::run_key("enter", &self.store, cx);
+                }
+                list_nav::ListKey::Left | list_nav::ListKey::Right | list_nav::ListKey::Menu => {
+                    return false;
+                }
+            }
+        }
+        // a held key repeats the row step; every other list key fires once
+        if event.is_held {
+            return false;
+        }
+        match event.keystroke.key.as_str() {
+            "s" => {
+                if let Some(folder) = self.store.read(cx).selected_repo.clone() {
+                    self.store
+                        .update(cx, |store, cx| store.toggle_favorite(&folder, cx));
+                }
+                true
+            }
+            "c" => {
+                self.store.update(cx, |store, cx| {
+                    store.open_detail_tab(crate::store::WorkspaceTab::Changes, cx);
+                });
+                true
+            }
+            key => crate::ui::launchers::run_key(key, &self.store, cx),
+        }
+    }
+
+    /// Steps the selection through the visible rows. The selection is this
+    /// list's cursor: the detail pane previews the row under it, as it has
+    /// since the split screen's ↑↓ keymap, and the child index the scroll
+    /// handle needs counts the cloning rows before the projection.
+    fn move_selection(&mut self, key: list_nav::ListKey, cx: &mut Context<Self>) {
+        let (rows, current) = {
+            let store = self.store.read(cx);
+            let mut rows: Vec<(String, usize)> = Vec::new();
+            for (pos, row) in store.projected.iter().enumerate() {
+                let Some(ix) = row.repo_index() else {
+                    continue;
+                };
+                let Some(repo) = store.repos.get(ix) else {
+                    continue;
+                };
+                rows.push((
+                    repo.folder_path.to_string_lossy().to_string(),
+                    store.cloning.len() + pos,
+                ));
+            }
+            let current = store
+                .selected_repo
+                .as_deref()
+                .and_then(|folder| rows.iter().position(|(name, _)| name == folder));
+            (rows, current)
+        };
+        let Some(next) = list_nav::step(current, rows.len(), key, list_nav::DEFAULT_PAGE) else {
+            return;
+        };
+        let (folder, child) = rows[next].clone();
+        self.repo_scroll.scroll_to_item(child);
+        self.store
+            .update(cx, |store, cx| store.select_repo(&folder, cx));
+    }
+
     /// The head's "⋯" menu.
     pub fn toggle_repo_menu(&mut self, folder: &str, cx: &mut Context<Self>) {
         self.repo_menu = match self.repo_menu {
@@ -471,11 +574,14 @@ impl Render for ReposPage {
         });
         let strip = self.render_strip(cx);
         let page = cx.entity();
+        let list_rows = {
+            let store = self.store.read(cx);
+            crate::ui::repos_list::render(store, &self.store, &self.repo_scroll)
+        };
         let list = list_visible.then(|| {
             let head = self.render_list_head(cx);
             let sort_menu = self.render_sort_menu(cx);
             let tag_menu = self.render_tag_menu(cx);
-            let store = self.store.read(cx);
             shell::list_pane(list_width)
                 .relative()
                 .debug_selector(|| "repos-list-pane".into())
@@ -485,14 +591,30 @@ impl Render for ReposPage {
                         .flex_1()
                         .min_h_0()
                         .relative()
-                        .child(crate::ui::repos_list::render(store, &self.store))
+                        // the rows' keys belong to this pane; the window only
+                        // delegates here while it owns the focus itself
+                        .track_focus(&self.repo_focus)
+                        .on_key_down(cx.listener(|this, event, window, cx| {
+                            if this.handle_repo_key(event, window, cx) {
+                                cx.stop_propagation();
+                            }
+                        }))
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(|this, _, window, cx| {
+                                if !this.repo_focus.is_focused(window) {
+                                    window.focus(&this.repo_focus, cx);
+                                }
+                            }),
+                        )
+                        .child(list_rows)
                         // last, so they paint over the rows
                         .children(sort_menu)
                         .children(tag_menu),
                 )
                 .child(resize_handle())
         });
-        let detail = {
+        let detail_body = {
             let store = self.store.read(cx);
             crate::ui::detail::render(
                 store,
@@ -520,7 +642,7 @@ impl Render for ReposPage {
                     this.store.read(cx).save_list_width();
                 }))
                 .children(list)
-                .child(detail),
+                .child(detail_body),
         );
         // a dialog is a layer over the page
         if let Some(dialog) = &mut self.dialog {
