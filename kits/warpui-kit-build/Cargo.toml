@@ -1,0 +1,10 @@
+[package]
+name = "warpui-kit-build"
+version.workspace = true
+edition.workspace = true
+description = "Build-script facts (version, build, commit, channel) and Windows resource metadata shared by the warp-suite binaries"
+license = "MIT"
+repository.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+winresource = { workspace = true }

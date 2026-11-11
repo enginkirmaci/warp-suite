@@ -14,9 +14,10 @@ fn the_version_line_carries_the_build() {
     assert_eq!(
         line,
         format!(
-            "warp-snapit {} ({}) · {}",
+            "warp-snapit {} (build {} · {}) · {}",
             env!("CARGO_PKG_VERSION"),
             env!("WARP_SUITE_BUILD"),
+            env!("WARP_SUITE_COMMIT"),
             env!("WARP_SUITE_CHANNEL")
         ),
         "the version line is the build line"

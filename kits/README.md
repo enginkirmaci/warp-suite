@@ -1,6 +1,6 @@
 # kits
 
-The shared component family the suite's apps build on: five `warpui-kit-*`
+The shared component family the suite's apps build on: six `warpui-kit-*`
 crates, extracted from warp-agent and Warp Station. They are members of the
 suite workspace (root `Cargo.toml`), not a workspace of their own; there is no
 `kits/Cargo.lock`.
@@ -12,6 +12,7 @@ suite workspace (root `Cargo.toml`), not a workspace of their own; there is no
 | `warpui-kit-markdown` | the live markdown editor, span parser, highlighter, formatting ops, and the read-only document viewer (`read_only_document`) |
 | `warpui-kit-picker` | `FilteredPicker`: trigger, filter input, virtualized rows, overlay popups |
 | `warpui-kit-platform` | the gpui-free plumbing every app had re-grown: atomic file replace, file logging, the sibling-app launcher; the rust-embed-over-gpui-kit asset source rides behind the `assets` feature |
+| `warpui-kit-build` | build-script only (`[build-dependencies]`, never linked): reads `version.toml` and the `WARP_SUITE_*` env, stamps the About facts and the Windows resource block (file version, strings, icon); see `docs/agents/versioning.md` |
 
 `render_diff_with_scroll` is the full-pane diff: pass a `DiffScrollHandles`
 and the kit owns the vertical viewport, the per-column horizontal viewports
@@ -37,10 +38,11 @@ colours.
 
 ```sh
 cargo test -p warpui-kit-core -p warpui-kit-diff -p warpui-kit-markdown \
-  -p warpui-kit-picker -p warpui-kit-platform
+  -p warpui-kit-picker -p warpui-kit-platform -p warpui-kit-build
 cargo fmt --all --check
 cargo clippy --all-targets -p warpui-kit-core -p warpui-kit-diff \
-  -p warpui-kit-markdown -p warpui-kit-picker -p warpui-kit-platform -- -D warnings
+  -p warpui-kit-markdown -p warpui-kit-picker -p warpui-kit-platform \
+  -p warpui-kit-build -- -D warnings
 ```
 
 These run from `kits/` too: with no manifest here, cargo walks up to the suite

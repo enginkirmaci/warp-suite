@@ -22,6 +22,7 @@
 [workspace]
 resolver = "3"
 members = [
+    "kits/warpui-kit-build",
     "kits/warpui-kit-core",
     "kits/warpui-kit-diff",
     "kits/warpui-kit-markdown",
@@ -39,7 +40,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.1.8"
 edition = "2024"
 # Apps inherit GPL-3.0; every kit overrides this with "MIT" in its own
 # manifest. The publishable kits inherit the suite URL the same way.
@@ -62,6 +63,7 @@ gpui-kit = "0.9"
 
 # the suite's own crates
 warpui-kit-core = { path = "kits/warpui-kit-core" }
+warpui-kit-build = { path = "kits/warpui-kit-build" }
 warpui-kit-diff = { path = "kits/warpui-kit-diff" }
 warpui-kit-markdown = { path = "kits/warpui-kit-markdown" }
 warpui-kit-picker = { path = "kits/warpui-kit-picker" }

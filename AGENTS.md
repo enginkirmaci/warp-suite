@@ -82,7 +82,7 @@ cargo clippy --locked --all-targets -p warp-agent -- -D warnings
 The CI gate is [`.github/workflows/kits.yml`](.github/workflows/kits.yml):
 
 - `cargo fmt --all --check`.
-- Clippy with `-D warnings` on all five kit crates, all app crates and the
+- Clippy with `-D warnings` on all six kit crates, all app crates and the
   Android bridge.
 - `cargo test --locked` on the kit crates, the app crates and the Android
   bridge.
@@ -104,7 +104,7 @@ The clippy selectors are:
 ```sh
 cargo clippy --locked --all-targets \
   -p warpui-kit-core -p warpui-kit-diff -p warpui-kit-markdown \
-  -p warpui-kit-picker -p warpui-kit-platform \
+  -p warpui-kit-picker -p warpui-kit-platform -p warpui-kit-build \
   -p warp-station-core -p warp-station -p warp-agent -p warp-notes -p warp-snapit \
   -p warp-android-scribe-bridge \
   -- -D warnings
@@ -199,13 +199,16 @@ when one side changes, update the other side in the **same commit**.
   additive; a writer must not drop the key it does not own. Writes use a
   sidecar lock and an atomic rename. Reduced motion is per-app, not in this
   file.
-- **About and build facts**: every GPUI app carries About above Settings and
-  draws `warpui_kit_core::about` — the family list plus the selected member's
-  Build and Legal cards. `scripts/build.sh` and `scripts/build.ps1` export
-  `WARP_SUITE_BUILD`, `WARP_SUITE_CHANNEL` and `WARP_SUITE_RELEASED`; each
-  app's `build.rs` turns them into `cargo:rustc-env` and a plain `cargo build`
-  falls back to `dev`. The variable names and the `Copy version` line are a
-  family contract: change the four apps and the release scripts together.
+- **Version and build facts**: `version.toml` is the one source of the suite
+  version and the build counter; `scripts/version.py` is its only writer.
+  `.githooks/pre-commit` bumps PATCH on every commit (never resets) and keeps
+  `Cargo.toml`/`Cargo.lock` in step; `scripts/build.sh` and `scripts/build.ps1`
+  bump build on every run. `kits/warpui-kit-build` stamps `WARP_SUITE_BUILD`,
+  `WARP_SUITE_COMMIT`, `WARP_SUITE_CHANNEL` and `WARP_SUITE_RELEASED` into
+  every binary (About, `--version`, the Windows file version, the bridge's
+  `/health`); the APK derives its version from the same file. The env names and
+  the `Copy version` line are a family contract: change the apps, the bridge,
+  the build scripts and `docs/agents/versioning.md` together.
 - **warp-android-scribe bridge** (`android-apps/warp-android-scribe`): LAN
   `http://<nas-lan>:8787` (UFW `<nas-subnet>`) and public
   `https://<nas-host>` through Cloudflare Tunnel -> Nginx Proxy
@@ -341,10 +344,12 @@ when one side changes, update the other side in the **same commit**.
   without one, `build.ps1` ships a portable zip.
 - Keep the desktop entry's `Exec=__WARP_SUITE_BIN__/...` placeholder; the
   build resolves it at install time.
-- Releases are dispatched with
-  `gh workflow run suite-release.yml -f version=<version>`. One release builds
-  every app at the dispatched commit and records that commit in the release
-  body and in the Linux `REVISIONS.txt`.
+- A release is a tag on a commit whose `version.toml` says that version,
+  dispatched with
+  `gh workflow run suite-release.yml --ref v<version> -f version=<version>`.
+  The workflow refuses a mismatch or a non-tag ref. One release builds every
+  app at that commit and records it in the release body and the Linux
+  `REVISIONS.txt`; see `docs/agents/versioning.md`.
 - `android-apps/` is outside that pipeline. `warp-android-scribe` ships as a
   sideloaded debug APK (`./gradlew assembleDebug`); its bridge is a systemd
   user service on the NAS. Never add the Android app to `apps.toml` to make the
@@ -409,6 +414,8 @@ when one side changes, update the other side in the **same commit**.
   — probes, env hooks and the hidden-window capture recipe.
 - [`docs/agents/settings-schema.md`](docs/agents/settings-schema.md) — the
   versioned snake_case settings/cache contract.
+- [`docs/agents/versioning.md`](docs/agents/versioning.md) — `version.toml`,
+  the PATCH/build rules, the hook, Windows/Android facts and the release flow.
 - [`plans/`](plans/) — working design plans and proposals, one file per topic;
   delete a plan once its work lands.
 - [`kits/README.md`](kits/README.md) — what each kit crate provides and where a

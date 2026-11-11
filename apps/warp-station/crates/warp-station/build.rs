@@ -1,44 +1,16 @@
+//! Build facts and the Windows resource block come from the shared kit; the
+//! icon path is relative to this app's manifest directory. The generated asset
+//! table stays here: it needs the app's own `assets/` tree, not a suite fact.
+
 use std::fmt::Write as _;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// The About screen's build facts. The release scripts (`scripts/build.sh`,
-/// `scripts/build.ps1`) export these three; a plain `cargo build` without a
-/// script still compiles and reports `dev`, never a lie about being a release.
-fn build_info() {
-    let var = |key: &str, fallback: &str| {
-        println!("cargo:rerun-if-env-changed={key}");
-        std::env::var(key).unwrap_or_else(|_| fallback.to_string())
-    };
-    println!(
-        "cargo:rustc-env=WARP_SUITE_BUILD={}",
-        var("WARP_SUITE_BUILD", "dev")
-    );
-    println!(
-        "cargo:rustc-env=WARP_SUITE_CHANNEL={}",
-        var("WARP_SUITE_CHANNEL", "dev")
-    );
-    println!(
-        "cargo:rustc-env=WARP_SUITE_RELEASED={}",
-        var("WARP_SUITE_RELEASED", "unknown")
-    );
-}
-
 fn main() {
-    build_info();
-    // Windows only: embed the app icon so Explorer, shortcuts and the taskbar
-    // show the mark. The winresource build-dep is windows-gated, so this block
-    // must vanish on every other host.
-    #[cfg(target_os = "windows")]
-    {
-        println!("cargo:rerun-if-changed=../../packaging/windows/warp-station.ico");
-        let mut res = winresource::WindowsResource::new();
-        res.set_icon("../../packaging/windows/warp-station.ico");
-        if let Err(err) = res.compile() {
-            panic!("could not embed Windows resources: {err}");
-        }
-    }
-
+    warpui_kit_build::emit(
+        warpui_kit_build::AppInfo::new("Warp Station", "Repository workbench", "warp-station.exe")
+            .with_icon("../../packaging/windows/warp-station.ico"),
+    );
     embed_assets();
 }
 
@@ -78,29 +50,31 @@ fn embed_assets() {
     }
     generated.push_str("];\n");
 
-    let out_dir = PathBuf::from(std::env::var("OUT_DIR").expect("OUT_DIR"));
-    fs::write(out_dir.join("embedded_assets.rs"), generated).expect("write embedded_assets.rs");
+    let out = PathBuf::from(std::env::var("OUT_DIR").expect("OUT_DIR"));
+    let target = out.join("embedded_assets.rs");
+    fs::write(&target, generated).expect("write embedded_assets.rs");
+    println!("cargo:rerun-if-changed={}", target.display());
 }
 
 fn collect(root: &Path, dir: &Path, files: &mut Vec<(String, PathBuf)>) {
-    let mut entries: Vec<_> = fs::read_dir(dir)
-        .unwrap_or_else(|err| panic!("could not read {}: {err}", dir.display()))
-        .filter_map(Result::ok)
-        .collect();
-    entries.sort_by_key(|entry| entry.file_name());
+    let entries = match fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(error) => panic!("read {}: {error}", dir.display()),
+    };
     for entry in entries {
+        let entry = entry.expect("dir entry");
         let path = entry.path();
         if path.is_dir() {
             collect(root, &path, files);
-        } else {
-            // keys are relative to assets/ with forward slashes, matching the
-            // paths the UI passes to AssetSource::load
-            let key = path
-                .strip_prefix(root)
-                .expect("strip assets prefix")
-                .to_string_lossy()
-                .replace('\\', "/");
-            files.push((key, path));
+            continue;
         }
+        let relative = path
+            .strip_prefix(root)
+            .expect("asset under root")
+            .components()
+            .map(|part| part.as_os_str().to_string_lossy().into_owned())
+            .collect::<Vec<_>>()
+            .join("/");
+        files.push((relative, path));
     }
 }

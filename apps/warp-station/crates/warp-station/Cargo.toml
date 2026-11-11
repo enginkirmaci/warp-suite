@@ -45,5 +45,5 @@ gpui-kit = { workspace = true, features = ["test-support"] }
 # the warp watcher cycle test's throwaway endpoint dir
 tempfile = { workspace = true }
 
-[target.'cfg(windows)'.build-dependencies]
-winresource = { workspace = true }
+[build-dependencies]
+warpui-kit-build = { workspace = true }

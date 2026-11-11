@@ -10,19 +10,21 @@
 #     bundle-install.sh    installs the bundle into ~/.local
 #
 # The only Linux build path: local runs and .github/workflows/suite-release.yml
-# both call this script; CI only passes --version.
+# both call this script. --version is a cross-check against version.toml, not
+# an override: the release workflow passes the dispatched tag and a mismatch
+# stops the build.
 #
 # Usage: build.sh [--version V] [--app NAME]... [--no-tar]
 set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 root="$(cd "$here/.." && pwd)"
 
-version=""
+version_arg=""
 selected=()
 make_tar=1
 while [ $# -gt 0 ]; do
     case "$1" in
-        --version) version="${2:?--version needs a value}"; shift 2 ;;
+        --version) version_arg="${2:?--version needs a value}"; shift 2 ;;
         --app) selected+=("${2:?--app needs a value}"); shift 2 ;;
         --no-tar) make_tar=0; shift ;;
         -h|--help) sed -n '2,17p' "$0"; exit 0 ;;
@@ -33,19 +35,33 @@ done
 command -v python3 >/dev/null || { echo "python3 required" >&2; exit 1; }
 command -v jq >/dev/null || { echo "jq required (cargo metadata parsing)" >&2; exit 1; }
 
+json_get() { printf '%s' "$1" | python3 -c 'import json,sys; print(json.load(sys.stdin)[sys.argv[1]])' "$2"; }
+
 known="$(python3 "$here/manifest.py" list)"
 for a in ${selected[@]+"${selected[@]}"}; do
     printf '%s\n' "$known" | grep -qx "$a" || { echo "apps.toml has no [apps.$a]" >&2; exit 1; }
 done
 
-if [ -z "$version" ]; then
-    version="dev"
-    if git -C "$root" rev-parse --git-dir >/dev/null 2>&1; then
-        # --first-parent: the imported app histories would otherwise inflate
-        # the commit count (v0.1.0-551-g... instead of v0.1.0-21-g...).
-        version="$(git -C "$root" describe --tags --always --first-parent 2>/dev/null || echo dev)"
-    fi
+# The suite version, build counter, commit and channel. version.toml is the
+# source; a plain `cargo build` reads it through kits/warpui-kit-build too.
+facts="$(python3 "$here/version.py" show --json)"
+version="$(json_get "$facts" version)"
+if [ -n "$version_arg" ] && [ "$version_arg" != "$version" ]; then
+    echo "version mismatch: --version $version_arg but version.toml says $version" >&2
+    exit 1
 fi
+
+# Every build script run consumes one build number. A CI job passes
+# WARP_SUITE_BUILD so the Linux and Windows artifacts of one tag agree.
+if [ -z "${WARP_SUITE_BUILD:-}" ]; then
+    WARP_SUITE_BUILD="$(python3 "$here/version.py" build bump)"
+fi
+facts="$(python3 "$here/version.py" show --json)"
+WARP_SUITE_VERSION="$version"
+WARP_SUITE_COMMIT="$(json_get "$facts" commit)"
+WARP_SUITE_CHANNEL="$(json_get "$facts" channel)"
+WARP_SUITE_RELEASED="$(json_get "$facts" released)"
+export WARP_SUITE_VERSION WARP_SUITE_BUILD WARP_SUITE_COMMIT WARP_SUITE_CHANNEL WARP_SUITE_RELEASED
 
 if ! pkg-config --exists wayland-client xkbcommon 2>/dev/null; then
     echo "warning: wayland-client/xkbcommon dev packages missing - the build will likely fail" >&2
@@ -67,30 +83,15 @@ if git -C "$root" rev-parse HEAD >/dev/null 2>&1; then
     suite_sha="$(git -C "$root" rev-parse HEAD)"
     # the whole tree, not just apps/ and kits/: the deliverable also depends
     # on scripts/, apps.toml, Cargo.toml and Cargo.lock
-    [ -z "$(git -C "$root" status --porcelain 2>/dev/null)" ] || suite_sha="$suite_sha-dirty"
+    # version.toml carries the uncommitted build counter by design: ignore it
+    dirty="$(git -C "$root" status --porcelain 2>/dev/null | grep -v ' version.toml$' || true)"
+    [ -z "$dirty" ] || suite_sha="$suite_sha-dirty"
 fi
 
-# The build facts every app's About screen shows. Each app's build.rs turns
-# these into `cargo:rustc-env`; a plain `cargo build` without this script
-# still compiles and says `dev`.
-WARP_SUITE_BUILD="dev"
-if [ -n "$suite_sha" ]; then
-    WARP_SUITE_BUILD="$(printf '%s' "${suite_sha%-dirty}" | cut -c1-7)"
-    case "$suite_sha" in *-dirty) WARP_SUITE_BUILD="$WARP_SUITE_BUILD-dirty" ;; esac
-fi
-WARP_SUITE_CHANNEL="dev"
-case "$version" in
-    *-dirty) ;;
-    *)
-        if printf '%s' "$version" | grep -Eq '^v?[0-9]+\.[0-9]+\.[0-9]+$'; then
-            WARP_SUITE_CHANNEL="stable"
-        fi
-        ;;
-esac
-export WARP_SUITE_BUILD WARP_SUITE_CHANNEL
-export WARP_SUITE_RELEASED="$(date -u +%Y-%m-%d)"
-
-: > "$bundle/REVISIONS.txt"
+printf 'suite %s build %s commit %s channel %s released %s\n' \
+    "$WARP_SUITE_VERSION" "$WARP_SUITE_BUILD" "$WARP_SUITE_COMMIT" \
+    "$WARP_SUITE_CHANNEL" "${WARP_SUITE_RELEASED:-not released}" \
+    > "$bundle/REVISIONS.txt"
 built=0
 while read -r app; do
     if [ ${#selected[@]} -gt 0 ]; then

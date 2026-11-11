@@ -1,9 +1,9 @@
 ; Inno Setup 6 script - optional per-user installer for Warp Station, compiled
-; manually with ISCC after build.ps1 has staged out\. The version fallback
-; keeps plain `ISCC warp-station.iss` working too.
+; manually with ISCC after build.ps1 has staged out\. The version is required
+; from version.toml; there is no stale fallback to disagree with About.
 
 #ifndef MyAppVersion
-#define MyAppVersion "0.0.0-dev"
+  #error MyAppVersion is required: pass /DMyAppVersion=<version from version.toml>
 #endif
 
 #define MyAppName "Warp Station"

@@ -11,6 +11,21 @@ use gpui_platform::application;
 use warp_station::{assets, logging, store::Store, theme, ui::window::MainWindow};
 
 fn main() {
+    // The support contract, before the hotkey payload and logging: `--version`
+    // answers with the same line the About screen copies.
+    if std::env::args()
+        .skip(1)
+        .any(|arg| arg == "--version" || arg == "-V")
+    {
+        let build = warpui_kit_core::build_info!();
+        println!(
+            "{}",
+            build.version_line(warpui_kit_core::about::app(
+                warpui_kit_core::about::AppId::Station
+            ))
+        );
+        return;
+    }
     // The Hyprland global-bind payload: ping the running instance's net
     // thread and exit before any logging/GPUI startup.
     #[cfg(target_os = "linux")]

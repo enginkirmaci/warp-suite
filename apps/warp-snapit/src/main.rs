@@ -20,9 +20,10 @@ fn main() -> ExitCode {
             // The same build line the About screen shows: one format for a
             // support report, whatever the user pasted.
             println!(
-                "warp-snapit {} ({}) · {}",
+                "warp-snapit {} (build {} · {}) · {}",
                 env!("CARGO_PKG_VERSION"),
                 env!("WARP_SUITE_BUILD"),
+                env!("WARP_SUITE_COMMIT"),
                 env!("WARP_SUITE_CHANNEL")
             );
             ExitCode::SUCCESS

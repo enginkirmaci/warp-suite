@@ -11,8 +11,8 @@
     <app>-<version>-setup-x64.exe.
 
 .PARAMETER Version
-    Artifact and installer version. Defaults to git describe --tags --always
-    --first-parent, or 'dev' outside a checkout.
+    Cross-check for the version in version.toml. A mismatch stops the build;
+    the file is the source for the artifact and installer version.
 
 .PARAMETER App
     Build only these apps (directory names under apps\). Repeatable.
@@ -35,15 +35,24 @@ $here = $PSScriptRoot
 $root = Split-Path -Parent $here
 $dist = Join-Path $root 'dist\windows'
 
-if (-not $Version) {
-    $Version = 'dev'
-    if (Test-Path (Join-Path $root '.git')) {
-        try {
-            $described = & git -C $root describe --tags --always --first-parent 2>$null
-            if ($LASTEXITCODE -eq 0 -and $described) { $Version = "$described".Trim() }
-        } catch { }
-    }
+$versionPy = Join-Path $here 'version.py'
+$facts = & python3 $versionPy show --json | ConvertFrom-Json
+if ($LASTEXITCODE -ne 0 -or -not $facts) { throw "version.py show --json failed" }
+if ($Version -and $Version -ne $facts.version) {
+    throw "version mismatch: -Version $Version but version.toml says $($facts.version)"
 }
+$Version = $facts.version
+
+# Every build script run consumes one build number. A CI job passes
+# WARP_SUITE_BUILD so the Linux and Windows artifacts of one tag agree.
+if (-not $env:WARP_SUITE_BUILD) {
+    $env:WARP_SUITE_BUILD = (& python3 $versionPy build bump | Select-Object -Last 1)
+}
+$facts = & python3 $versionPy show --json | ConvertFrom-Json
+$env:WARP_SUITE_VERSION = $Version
+$env:WARP_SUITE_COMMIT = $facts.commit
+$env:WARP_SUITE_CHANNEL = $facts.channel
+$env:WARP_SUITE_RELEASED = $facts.released
 
 # The suite is ONE cargo workspace (root Cargo.toml): apps/ subdirectories are
 # no longer package roots, and apps/warp-station is not even a crate directory
@@ -59,20 +68,19 @@ if ($App) {
 
 $sha = 'unknown'
 if (Test-Path (Join-Path $root '.git')) {
-    try { $sha = (& git -C $root rev-parse HEAD 2>$null) } catch { }
+    try {
+        $sha = (& git -C $root rev-parse HEAD 2>$null)
+        # version.toml carries the uncommitted build counter by design
+        $dirty = (& git -C $root status --porcelain 2>$null) | Where-Object { $_ -notmatch ' version\.toml$' }
+        if ($dirty) { $sha = "$sha-dirty" }
+    } catch { }
 }
 
-# The build facts every app's About screen shows. Each app's build.rs turns
-# these into `cargo:rustc-env`; a plain `cargo build` without this script
-# still compiles and says `dev`.
-$env:WARP_SUITE_BUILD = if ($sha -and $sha -ne 'unknown') {
-    if ($sha.Length -ge 7) { $sha.Substring(0, 7) } else { $sha }
-} else { 'dev' }
-$env:WARP_SUITE_CHANNEL = if ($Version -match '^v?[0-9]+\.[0-9]+\.[0-9]+$') { 'stable' } else { 'dev' }
-$env:WARP_SUITE_RELEASED = (Get-Date).ToUniversalTime().ToString('yyyy-MM-dd')
-
 New-Item -ItemType Directory -Force -Path $dist | Out-Null
-$revisions = @()
+$released = if ($env:WARP_SUITE_RELEASED) { $env:WARP_SUITE_RELEASED } else { 'not released' }
+$revisions = @(
+    "suite $Version build $env:WARP_SUITE_BUILD commit $env:WARP_SUITE_COMMIT channel $env:WARP_SUITE_CHANNEL released $released"
+)
 
 foreach ($name in $appNames) {
     $dir = Get-Item (Join-Path (Join-Path $root 'apps') $name)

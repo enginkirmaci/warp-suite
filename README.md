@@ -22,8 +22,12 @@ See [Adding an app](#adding-an-app).
 ## Deploy
 
 ```sh
-# GitHub → warp-suite → Actions → suite-release → Run workflow (version: 1.2.0)
-gh workflow run suite-release.yml -f version=1.2.0
+# Tag the commit that carries the version first; the workflow refuses a
+# version that does not match version.toml or a dispatch that is not from it.
+V=$(python3 scripts/version.py show --json | python3 -c 'import json,sys; print(json.load(sys.stdin)["version"])')
+git tag -a "v$V" -m "warp-suite $V"
+git push origin "v$V"
+gh workflow run suite-release.yml --ref "v$V" -f version=$V
 ```
 
 The run builds every app under `apps/` at the dispatched commit and publishes
@@ -179,14 +183,14 @@ together. When one changes, update the other side in the **same** commit.
   and has Local/Remote modes. The APK is sideloaded; the bridge is a systemd
   user service installed from `android-apps/warp-android-scribe/deploy/`.
 
-- **About and build facts**: every GPUI app carries About above Settings and
-  draws the same screen from `warpui_kit_core::about` — the family in the
-  list, the selected member's Build and Legal cards beside it. `scripts/build.sh`
-  and `scripts/build.ps1` export `WARP_SUITE_BUILD`, `WARP_SUITE_CHANNEL` and
-  `WARP_SUITE_RELEASED`; each app's `build.rs` turns them into
-  `cargo:rustc-env` and a plain `cargo build` falls back to `dev`. Those names
-  and the `Copy version` line (`Warp Station 0.1.0 (1b7d006) · dev`) are one
-  contract: the four apps and the release scripts move together.
+- **Version and build facts**: `version.toml` is the one source. A pre-commit
+  hook bumps PATCH on every commit (never resets), `scripts/build.sh` and
+  `scripts/build.ps1` bump the build counter on every run, and
+  `kits/warpui-kit-build` stamps the `WARP_SUITE_*` facts into each binary
+  (About, `--version`, the Windows file version, the bridge's `/health`). The
+  APK reads the same file. One `Copy version` line
+  (`Warp Station 0.1.8 (build 42 · d904edc) · dev`) is the family contract;
+  `docs/agents/versioning.md` is the rulebook.
 
 ## Adding an app
 

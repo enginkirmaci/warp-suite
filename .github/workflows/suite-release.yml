@@ -19,7 +19,6 @@ on:
       version:
         description: 'Suite version (release tag will be v<version>)'
         required: true
-        default: '0.1.0'
       skip_windows:
         description: 'Build Linux only (skips the Windows installers)'
         type: boolean
@@ -43,6 +42,22 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      - name: Check the suite version
+        run: |
+          actual=$(python3 scripts/version.py show --json | python3 -c 'import json,sys; print(json.load(sys.stdin)["version"])')
+          test "$actual" = "${{ inputs.version }}" || {
+            echo "::error::version.toml says $actual, the dispatch says ${{ inputs.version }}"
+            exit 1
+          }
+          test "$GITHUB_REF" = "refs/tags/v${{ inputs.version }}" || {
+            echo "::error::dispatch the release with --ref v${{ inputs.version }}, not $GITHUB_REF"
+            exit 1
+          }
+
+      - name: Read the suite build
+        id: suite
+        run: echo "build=$(python3 scripts/version.py show --json | python3 -c 'import json,sys; print(json.load(sys.stdin)["build"])')" >> "$GITHUB_OUTPUT"
+
       - uses: ./.github/actions/gpui-deps
 
       - name: Read the pinned channel
@@ -65,6 +80,8 @@ jobs:
           cache-on-failure: true
 
       - name: Build Linux bundle
+        env:
+          WARP_SUITE_BUILD: ${{ steps.suite.outputs.build }}
         run: scripts/build.sh --version "${{ inputs.version }}"
 
       - uses: actions/upload-artifact@v7
@@ -85,6 +102,24 @@ jobs:
         shell: pwsh
     steps:
       - uses: actions/checkout@v6
+
+      - name: Check the suite version
+        shell: bash
+        run: |
+          actual=$(python scripts/version.py show --json | python -c 'import json,sys; print(json.load(sys.stdin)["version"])')
+          test "$actual" = "${{ inputs.version }}" || {
+            echo "::error::version.toml says $actual, the dispatch says ${{ inputs.version }}"
+            exit 1
+          }
+          test "$GITHUB_REF" = "refs/tags/v${{ inputs.version }}" || {
+            echo "::error::dispatch the release with --ref v${{ inputs.version }}, not $GITHUB_REF"
+            exit 1
+          }
+
+      - name: Read the suite build
+        id: suite
+        shell: bash
+        run: echo "build=$(python scripts/version.py show --json | python -c 'import json,sys; print(json.load(sys.stdin)["build"])')" >> "$GITHUB_OUTPUT"
 
       - name: Read the pinned channel
         shell: bash
@@ -109,6 +144,8 @@ jobs:
           }
 
       - name: Build Windows deliverables
+        env:
+          WARP_SUITE_BUILD: ${{ steps.suite.outputs.build }}
         run: scripts/build.ps1 -Version "${{ inputs.version }}"
 
       - uses: actions/upload-artifact@v7
@@ -136,6 +173,15 @@ jobs:
         with:
           path: artifacts
           merge-multiple: true
+
+      - name: Refuse a second release for this tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "v${{ inputs.version }}" >/dev/null 2>&1; then
+            echo "::error::release v${{ inputs.version }} already exists; bump version.toml instead of reusing its tag"
+            exit 1
+          fi
 
       - uses: softprops/action-gh-release@v3
         with:

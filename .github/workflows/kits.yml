@@ -51,6 +51,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+        with:
+          # `version.py check --history` walks every commit back to the one
+          # that added version.toml.
+          fetch-depth: 0
       - name: Check manifest shape
         run: python3 scripts/check-manifests.py
       - name: Read the pinned channel
@@ -60,6 +64,8 @@ jobs:
         with:
           toolchain: ${{ steps.toolchain.outputs.channel }}
           components: rustfmt
+      - name: Check the suite version
+        run: python3 scripts/version.py check --history
       - name: cargo fmt --check
         run: cargo fmt --all --check
 
@@ -98,7 +104,7 @@ jobs:
           cargo clippy --locked --all-targets \
             -p warpui-kit-core -p warpui-kit-diff \
             -p warpui-kit-markdown -p warpui-kit-picker \
-            -p warpui-kit-platform \
+            -p warpui-kit-platform -p warpui-kit-build \
             -- -D warnings
 
       - name: cargo test
@@ -106,7 +112,7 @@ jobs:
           cargo test --locked \
             -p warpui-kit-core -p warpui-kit-diff \
             -p warpui-kit-markdown -p warpui-kit-picker \
-            -p warpui-kit-platform
+            -p warpui-kit-platform -p warpui-kit-build
 
   # One workspace now covers kits + apps, so this job typechecks the app
   # crates against the kit crates as built - a renamed kit export or a feature
