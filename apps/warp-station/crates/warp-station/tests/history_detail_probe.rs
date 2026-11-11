@@ -130,11 +130,11 @@ fn the_selected_file_diff_stays_selectable(cx: &mut TestAppContext) {
         store
     });
     store.update(cx, |store, _| {
-        store.commit_details = Some(GitCommitDetails {
+        store.commit_details = Some(std::sync::Arc::new(GitCommitDetails {
             hash: HASH.into(),
             files: vec![changed_file(FILE, 1, 1), changed_file(OTHER_FILE, 1, 0)],
             body: Some("The body stays readable too.".into()),
-        });
+        }));
         store.commit_file_patches = vec![(format!("{HASH}|{FILE}"), PATCH.into())];
     });
 
@@ -281,5 +281,55 @@ fn a_repository_with_no_commits_shows_the_empty_state(cx: &mut TestAppContext) {
     assert!(
         vcx.debug_bounds("history-loading").is_none(),
         "nothing is loading once the pass settles"
+    );
+}
+
+/// A commit that touched a thousand files must not lay out every rail row:
+/// the file rail is a `uniform_list`, so only the viewport is built. The first
+/// row exists and the thousandth cannot.
+#[gpui_kit::gpui::test]
+fn a_huge_commit_rail_draws_only_the_viewport(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+    cx.update(warp_station::theme::apply_kit_theme);
+
+    let settings = scratch("rail-10k");
+    let (net_tx, _net_rx) = async_channel::unbounded();
+    let store = cx.new(|cx| {
+        let mut store = Store::with_settings(net_tx, Arc::new(SettingsService::at(settings)));
+        store.replace_repos(vec![repo()]);
+        store.select_repo("/probe/alpha", cx);
+        store.set_history(vec![GitCommitInfo {
+            hash: HASH.into(),
+            subject: "refactor: sweep every file".into(),
+            author: Some("Probe Author".into()),
+            date: chrono::Local::now(),
+        }]);
+        store.open_detail_tab(WorkspaceTab::History, cx);
+        store
+    });
+    store.update(cx, |store, _| {
+        store.commit_details = Some(Arc::new(GitCommitDetails {
+            hash: HASH.into(),
+            files: (0..1000)
+                .map(|ix| changed_file(&format!("src/f{ix:04}.rs"), 1, 0))
+                .collect(),
+            body: None,
+        }));
+    });
+
+    let (_host, vcx) = cx.add_window_view(|window, cx| {
+        let changes = cx.new(|cx| ChangesView::new(store.clone(), window, cx));
+        Host { changes }
+    });
+    draw(vcx);
+    draw(vcx);
+
+    assert!(
+        vcx.debug_bounds("commit-file-0").is_some(),
+        "the first rail row renders"
+    );
+    assert!(
+        vcx.debug_bounds("commit-file-999").is_none(),
+        "the last rail row is off screen and must not be built"
     );
 }

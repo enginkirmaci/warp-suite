@@ -167,7 +167,7 @@ fn history_and_drill_down_draw(cx: &mut TestAppContext) {
     let details = warp_station_core::git::read::commit_details(&here, &head_hash);
     view_handle.update(cx, |view, cx| view.drill_commit(&head_hash, cx));
     store.update(cx, |s: &mut Store, _| {
-        s.commit_details = details;
+        s.commit_details = details.map(std::sync::Arc::new);
     });
     cx.run_until_parked();
     cx.update(|window, cx| drop(window.draw(cx)));
@@ -1398,4 +1398,89 @@ fn a_queued_generation_offers_its_own_cancel(cx: &mut TestAppContext) {
         }
     }
     assert_eq!(cancelled, 1, "the live run was stopped too");
+}
+
+/// A 10k-file tree must not lay out every row: the changes list is a
+/// `uniform_list`, so one draw builds only the rows in the viewport. The last
+/// file of a ten-thousand-row snapshot has no element while the first one does,
+/// which the old full loop could never satisfy.
+#[gpui_kit::gpui::test]
+fn a_ten_thousand_file_tree_draws_only_the_viewport(cx: &mut TestAppContext) {
+    use warp_station::store::Store;
+    use warp_station_core::model::{GitChangeSnapshot, GitChangedFile};
+
+    cx.update(gpui_kit::init);
+    cx.update(warp_station::theme::apply_kit_theme);
+
+    let folder = std::env::temp_dir().join(format!("warp-station-10k-{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&folder);
+    let folder_text = folder.to_string_lossy().to_string();
+
+    let mut snapshot = GitChangeSnapshot::default();
+    for ix in 0..10_000 {
+        let path = format!("file-{ix:05}.txt");
+        let file = GitChangedFile {
+            path,
+            status_code: "M".into(),
+            additions: None,
+            deletions: None,
+        };
+        snapshot.status_files.push(file.clone());
+        snapshot.unstaged_files.push(file);
+    }
+
+    let (net_tx, _net_rx) = async_channel::unbounded();
+    let store = cx.new(|cx| {
+        let mut store = Store::with_settings(net_tx, scratch_service("changes-10k-tree"));
+        store.replace_repos(vec![warp_station_core::repo_store::RepoEntry {
+            name: "big-repo".into(),
+            folder_path: folder.clone(),
+            solution_path: None,
+            tags: vec![],
+            git_branch_name: Some("main".into()),
+            git_modified_count: 10_000,
+            git_to_push_count: 0,
+            git_to_pull_count: 0,
+            git_last_commit_at: None,
+            git_last_fetch_at: None,
+            git_has_remote: true,
+            git_branch_published: true,
+            git_status_loaded: true,
+            github_pr_count: 0,
+            github_issue_count: 0,
+            azure_pull_count: 0,
+            github_web_url: None,
+            azure_work_item_count: 0,
+        }]);
+        store.select_repo(&folder_text, cx);
+        store.set_changes(Some(snapshot));
+        store.changes_loaded_for = Some(folder_text.clone());
+        store.open_detail_tab(warp_station::store::WorkspaceTab::Changes, cx);
+        store
+    });
+
+    let (_window, cx) = cx.add_window_view(|window, cx| MainWindow::new(store.clone(), window, cx));
+    cx.run_until_parked();
+    let started = std::time::Instant::now();
+    cx.update(|window, cx| drop(window.draw(cx)));
+    let draw = started.elapsed();
+
+    assert!(
+        cx.debug_bounds("changes-section-unstaged").is_some(),
+        "the section header renders"
+    );
+    assert!(
+        cx.debug_bounds("u-file-00000.txt").is_some(),
+        "the first row renders"
+    );
+    assert!(
+        cx.debug_bounds("u-file-09999.txt").is_none(),
+        "the last row is off screen and must not be built"
+    );
+    assert!(
+        draw < std::time::Duration::from_secs(2),
+        "one draw of a 10k-file tree took {draw:?}"
+    );
+
+    let _ = std::fs::remove_dir_all(&folder);
 }

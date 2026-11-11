@@ -41,11 +41,29 @@ struct HistoryRow {
 /// The staged/unstaged split produced by `GitChangeSnapshot::change_groups`.
 type GroupedFiles = (Vec<GitChangedFile>, Vec<GitChangedFile>);
 
+/// One snapshot's grouped split plus the flat unstaged path list the header's
+/// discard-all hands to git. Both are built once per generation: a 10k-file
+/// tree must not recollect its paths on every repaint.
+struct FileGroups {
+    groups: GroupedFiles,
+    unstaged_paths: Rc<Vec<String>>,
+}
+
 /// Which of the file list's two sections a header folds.
 #[derive(Clone, Copy)]
 enum FileSection {
     Staged,
     Unstaged,
+}
+
+/// One fixed-height item of the virtualized file list: a section header or a
+/// row on one of the two sides.
+#[derive(Clone, Copy)]
+enum ChangeListItem {
+    StagedHeader,
+    StagedFile(usize),
+    UnstagedHeader,
+    UnstagedFile(usize),
 }
 
 impl FileSection {
@@ -69,6 +87,9 @@ impl FileSection {
 const HISTORY_ROW_HEIGHT: f32 = 58.;
 /// The file list and commit box's width.
 const FILE_COLUMN_W: f32 = 320.;
+/// The file list's row height. Section headers match it, so `uniform_list`
+/// can size the whole tree from one measured item.
+const FILE_ROW_H: f32 = 34.;
 /// The commit list's width.
 const HISTORY_COLUMN_W: f32 = 320.;
 /// The drilled commit's file rail, and the height of its group header and rows.
@@ -124,7 +145,7 @@ pub struct ChangesView {
     loaded_for: Option<String>,
     /// Staged/unstaged groups, rebuilt only when the store's change snapshot
     /// generation moves (any store notify otherwise re-cloned everything).
-    groups_cache: Option<(u64, Rc<GroupedFiles>)>,
+    groups_cache: Option<(u64, Rc<FileGroups>)>,
     /// Precomputed history row labels, keyed by history generation + today.
     history_rows: Vec<HistoryRow>,
     history_cache_key: (u64, chrono::NaiveDate),
@@ -439,14 +460,29 @@ impl Render for ChangesView {
             .as_ref()
             .is_none_or(|(g, _)| *g != generation)
         {
-            let groups = self
-                .store
-                .read(cx)
-                .changes()
-                .cloned()
-                .unwrap_or_default()
-                .change_groups();
-            self.groups_cache = Some((generation, Rc::new(groups)));
+            // the snapshot is cloned into the groups anyway; cloning it once
+            // more first would copy a ten-thousand-file tree for nothing
+            let groups = {
+                let store = self.store.read(cx);
+                store
+                    .changes()
+                    .map(|snapshot| snapshot.change_groups())
+                    .unwrap_or_default()
+            };
+            let unstaged_paths = Rc::new(
+                groups
+                    .1
+                    .iter()
+                    .map(|file| file.path.clone())
+                    .collect::<Vec<_>>(),
+            );
+            self.groups_cache = Some((
+                generation,
+                Rc::new(FileGroups {
+                    groups,
+                    unstaged_paths,
+                }),
+            ));
             // a new snapshot can add or drop files under an armed discard-all,
             // so the arming never outlives the tree it was given for
             self.discard_all_armed = false;
@@ -456,8 +492,9 @@ impl Render for ChangesView {
                 self.select_file(&path, staged, cx);
             }
         }
-        let groups = self.groups_cache.as_ref().expect("groups cached").1.clone();
-        self.ensure_file_selected(&groups, cx);
+        let file_groups = self.groups_cache.as_ref().expect("groups cached").1.clone();
+        let groups = &file_groups.groups;
+        self.ensure_file_selected(groups, cx);
         self.ensure_commit_file_selected(cx);
 
         if self.history_open {
@@ -495,7 +532,7 @@ impl Render for ChangesView {
                 .bg(theme::surface())
                 .border_r_1()
                 .border_color(theme::hairline())
-                .child(self.render_file_list(&groups, cx));
+                .child(self.render_file_list(&file_groups, cx));
             files = if groups.0.is_empty() && !committing {
                 files.child(stage_hint(self.store.clone(), groups.1.len()))
             } else {
@@ -681,99 +718,119 @@ impl ChangesView {
 
     fn render_file_list(
         &mut self,
-        groups: &Rc<GroupedFiles>,
+        files: &Rc<FileGroups>,
         cx: &mut Context<Self>,
     ) -> gpui::AnyElement {
-        let (staged, unstaged) = (&groups.0, &groups.1);
-        let mut list = div()
-            .id("changes-list")
-            .flex_1()
-            .min_h_0()
-            .overflow_y_scroll()
-            .restrict_scroll_to_axis()
-            .flex()
-            .flex_col()
-            .py_1();
+        let (staged, unstaged) = (&files.groups.0, &files.groups.1);
 
         if staged.is_empty() && unstaged.is_empty() {
             let loaded = self.store.read(cx).changes_loaded_for.is_some();
-            list = list.child(if loaded {
-                clean_state(&self.store, cx)
-            } else {
-                div()
-                    .flex_1()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .text_size(px(theme::font_body()))
-                    .text_color(theme::text_dim())
-                    .child("Loading…")
-                    .into_any_element()
-            });
-            return list.into_any_element();
+            return div()
+                .id("changes-list")
+                .flex_1()
+                .min_h_0()
+                .flex()
+                .flex_col()
+                .py_1()
+                .child(if loaded {
+                    clean_state(&self.store, cx)
+                } else {
+                    div()
+                        .flex_1()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .text_size(px(theme::font_body()))
+                        .text_color(theme::text_dim())
+                        .child("Loading…")
+                        .into_any_element()
+                })
+                .into_any_element();
         }
 
-        // order: staged first, then unstaged; headers render only when their
-        // side has rows. Unstaged carries both whole-tree verbs — discard-all
-        // (armed before it fires) and stage-all — while staged only ever
-        // unstages: discarding the index wholesale has no place there. The
-        // verbs are icon buttons; their tooltips carry the names.
-        let show_tooltips = self.store.read(cx).settings().general.show_tooltips;
-        let staged_collapsed = self.staged_collapsed;
-        let unstaged_collapsed = self.unstaged_collapsed;
+        // Headers and rows flatten into one fixed-height item list, and
+        // `uniform_list` builds only the items in the viewport: a 10k-file
+        // tree costs the same per repaint as a 30-file one. The old loop laid
+        // out every row — its status letter, its dir/name split, its two
+        // hover actions and their listeners — on every frame.
+        let mut items: Vec<ChangeListItem> = Vec::with_capacity(staged.len() + unstaged.len() + 2);
         if !staged.is_empty() {
-            list = list.child(section_header(
-                FileSection::Staged,
-                staged.len(),
-                staged_collapsed,
-                cx.entity(),
-                vec![staging_icon(
-                    "stage-all-clear",
-                    "icons/icon-minus.svg",
-                    "Unstage all",
-                    GitAction::UnstageAll,
-                    self.store.clone(),
-                    show_tooltips,
-                )],
-            ));
-            if !staged_collapsed {
-                for file in staged {
-                    list = list.child(self.render_row(file, true, cx));
-                }
+            items.push(ChangeListItem::StagedHeader);
+            if !self.staged_collapsed {
+                items.extend((0..staged.len()).map(ChangeListItem::StagedFile));
             }
         }
         if !unstaged.is_empty() {
-            let trailing = vec![
-                discard_all_button(
-                    self.discard_all_armed,
-                    unstaged.iter().map(|f| f.path.clone()).collect(),
-                    self.store.clone(),
-                    cx.entity(),
-                    show_tooltips,
-                ),
-                staging_icon(
-                    "stage-all",
-                    "icons/icon-plus.svg",
-                    "Stage all",
-                    GitAction::StageAll,
-                    self.store.clone(),
-                    show_tooltips,
-                ),
-            ];
-            list = list.child(section_header(
-                FileSection::Unstaged,
-                unstaged.len(),
-                unstaged_collapsed,
-                cx.entity(),
-                trailing,
-            ));
-            if !unstaged_collapsed {
-                for file in unstaged {
-                    list = list.child(self.render_row(file, false, cx));
-                }
+            items.push(ChangeListItem::UnstagedHeader);
+            if !self.unstaged_collapsed {
+                items.extend((0..unstaged.len()).map(ChangeListItem::UnstagedFile));
             }
         }
-        list.into_any_element()
+        let items = Rc::new(items);
+        let files = files.clone();
+        let show_tooltips = self.store.read(cx).settings().general.show_tooltips;
+        uniform_list(
+            SharedString::from("changes-list"),
+            items.len(),
+            cx.processor(move |this, range: std::ops::Range<usize>, _window, cx| {
+                let entity = cx.entity();
+                let (staged, unstaged) = (&files.groups.0, &files.groups.1);
+                range
+                    .map(|ix| match items[ix] {
+                        ChangeListItem::StagedHeader => section_header(
+                            FileSection::Staged,
+                            staged.len(),
+                            this.staged_collapsed,
+                            entity.clone(),
+                            vec![staging_icon(
+                                "stage-all-clear",
+                                "icons/icon-minus.svg",
+                                "Unstage all",
+                                GitAction::UnstageAll,
+                                this.store.clone(),
+                                show_tooltips,
+                            )],
+                        )
+                        .into_any_element(),
+                        ChangeListItem::StagedFile(index) => {
+                            this.render_row(&staged[index], true, cx)
+                        }
+                        ChangeListItem::UnstagedHeader => section_header(
+                            FileSection::Unstaged,
+                            unstaged.len(),
+                            this.unstaged_collapsed,
+                            entity.clone(),
+                            vec![
+                                discard_all_button(
+                                    this.discard_all_armed,
+                                    files.unstaged_paths.clone(),
+                                    this.store.clone(),
+                                    entity.clone(),
+                                    show_tooltips,
+                                ),
+                                staging_icon(
+                                    "stage-all",
+                                    "icons/icon-plus.svg",
+                                    "Stage all",
+                                    GitAction::StageAll,
+                                    this.store.clone(),
+                                    show_tooltips,
+                                ),
+                            ],
+                        )
+                        .into_any_element(),
+                        ChangeListItem::UnstagedFile(index) => {
+                            this.render_row(&unstaged[index], false, cx)
+                        }
+                    })
+                    .collect()
+            }),
+        )
+        .flex_1()
+        .min_h_0()
+        .py_1()
+        .debug_selector(|| "changes-list".into())
+        .into_any_element()
     }
 
     fn render_row(
@@ -855,7 +912,7 @@ impl ChangesView {
             .group("file-row")
             .relative()
             .flex_shrink_0()
-            .h(px(34.))
+            .h(px(FILE_ROW_H))
             .pl(px(13.))
             .pr_2()
             .flex()
@@ -1272,7 +1329,7 @@ impl ChangesView {
     fn render_commit_detail(
         &mut self,
         hash: String,
-        details: Option<warp_station_core::model::GitCommitDetails>,
+        details: Option<std::sync::Arc<warp_station_core::model::GitCommitDetails>>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> gpui::AnyElement {
@@ -1514,100 +1571,24 @@ impl ChangesView {
             .checked_sub(1)
             .map(|last| self.commit_file.min(last))
             .unwrap_or(0);
-        let mut rows = div()
-            .id("commit-files")
-            .debug_selector(|| "commit-files".into())
-            .flex_1()
-            .min_h_0()
-            .overflow_y_scroll()
-            .restrict_scroll_to_axis()
-            .flex()
-            .flex_col()
-            .py_1();
-        for (index, file) in details.files.iter().enumerate() {
-            let selected = index == selected_file;
-            let (dir, name) = match file.path.rsplit_once('/') {
-                Some((dir, name)) => (format!("{dir}/"), name.to_string()),
-                None => (String::new(), file.path.clone()),
-            };
-            let status = file.display_status_code().to_string();
-            let mut counts = div()
-                .flex_shrink_0()
-                .flex()
-                .flex_row()
-                .items_center()
-                .gap_1()
-                .font_family(gpui::SharedString::from(theme::code_font()))
-                .text_size(px(theme::font_micro()));
-            if let Some(added) = file.additions.filter(|added| *added > 0) {
-                counts = counts.child(
-                    div()
-                        .text_color(theme::SUCCESS_BRIGHT)
-                        .child(format!("+{added}")),
-                );
-            }
-            if let Some(deleted) = file.deletions.filter(|deleted| *deleted > 0) {
-                counts = counts.child(div().text_color(theme::DANGER).child(format!("−{deleted}")));
-            }
-            rows = rows.child(
-                div()
-                    .id(SharedString::from(format!("commit-file-{index}")))
-                    .debug_selector(move || format!("commit-file-{index}"))
-                    .a11y_button(file.path.clone())
-                    .aria_selected(selected)
-                    .cursor_pointer()
-                    .flex_shrink_0()
-                    .h(px(COMMIT_RAIL_ROW_H))
-                    .pl(px(13.))
-                    .pr_2()
-                    .flex()
-                    .flex_row()
-                    .items_center()
-                    .gap_2()
-                    .border_l_3()
-                    .border_color(if selected {
-                        theme::accent()
-                    } else {
-                        theme::surface()
-                    })
-                    .when(selected, |d| d.bg(theme::raised()))
-                    .when(!selected, |d| d.hover(|s| s.bg(theme::panel())))
-                    .on_click(cx.listener(move |this, _, _, cx| this.select_commit_file(index, cx)))
-                    .child(
-                        div()
-                            .w(px(14.))
-                            .flex_shrink_0()
-                            .font_family(gpui::SharedString::from(theme::code_font()))
-                            .text_size(px(theme::font_mono_meta()))
-                            .font_weight(FontWeight::MEDIUM)
-                            .text_color(diff_controls::status_color(&status))
-                            .child(status),
-                    )
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .flex()
-                            .flex_row()
-                            .gap_1p5()
-                            .overflow_hidden()
-                            .whitespace_nowrap()
-                            .text_size(px(theme::font_meta()))
-                            .child(div().flex_shrink_0().text_color(theme::text()).child(name))
-                            .when(!dir.is_empty(), |line| {
-                                line.child(
-                                    div()
-                                        .min_w_0()
-                                        .overflow_hidden()
-                                        .text_ellipsis()
-                                        .text_color(theme::text_muted())
-                                        .child(dir),
-                                )
-                            }),
-                    )
-                    .child(counts),
-            );
-        }
+        // the rail is virtualized too: a ten-thousand-file commit builds only
+        // the rows on screen, and the details are an Arc so this pane does not
+        // clone the whole file list on every repaint
+        let rail_files = details.clone();
+        let rows = uniform_list(
+            SharedString::from("commit-files"),
+            details.files.len(),
+            cx.processor(move |this, range: std::ops::Range<usize>, _window, cx| {
+                range
+                    .map(|index| this.render_commit_file_row(&rail_files, index, selected_file, cx))
+                    .collect()
+            }),
+        )
+        .flex_1()
+        .min_h_0()
+        .py_1()
+        .debug_selector(|| "commit-files".into())
+        .into_any_element();
         let rail = div()
             .w(px(warpui_kit_core::shell::scaled(COMMIT_RAIL_W)))
             .flex_shrink_0()
@@ -1683,6 +1664,100 @@ impl ChangesView {
                     .child(rail)
                     .child(diff),
             )
+            .into_any_element()
+    }
+
+    /// One fixed-height row of the virtualized commit rail: the status
+    /// letter, the dir/name split and the line counts, on the raised surface
+    /// when it is the selected file.
+    fn render_commit_file_row(
+        &mut self,
+        details: &std::sync::Arc<warp_station_core::model::GitCommitDetails>,
+        index: usize,
+        selected_file: usize,
+        cx: &mut Context<Self>,
+    ) -> gpui::AnyElement {
+        let file = &details.files[index];
+        let selected = index == selected_file;
+        let (dir, name) = match file.path.rsplit_once('/') {
+            Some((dir, name)) => (format!("{dir}/"), name.to_string()),
+            None => (String::new(), file.path.clone()),
+        };
+        let status = file.display_status_code().to_string();
+        let mut counts = div()
+            .flex_shrink_0()
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap_1()
+            .font_family(gpui::SharedString::from(theme::code_font()))
+            .text_size(px(theme::font_micro()));
+        if let Some(added) = file.additions.filter(|added| *added > 0) {
+            counts = counts.child(
+                div()
+                    .text_color(theme::SUCCESS_BRIGHT)
+                    .child(format!("+{added}")),
+            );
+        }
+        if let Some(deleted) = file.deletions.filter(|deleted| *deleted > 0) {
+            counts = counts.child(div().text_color(theme::DANGER).child(format!("−{deleted}")));
+        }
+        div()
+            .id(SharedString::from(format!("commit-file-{index}")))
+            .debug_selector(move || format!("commit-file-{index}"))
+            .a11y_button(file.path.clone())
+            .aria_selected(selected)
+            .cursor_pointer()
+            .flex_shrink_0()
+            .h(px(COMMIT_RAIL_ROW_H))
+            .pl(px(13.))
+            .pr_2()
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap_2()
+            .border_l_3()
+            .border_color(if selected {
+                theme::accent()
+            } else {
+                theme::surface()
+            })
+            .when(selected, |d| d.bg(theme::raised()))
+            .when(!selected, |d| d.hover(|s| s.bg(theme::panel())))
+            .on_click(cx.listener(move |this, _, _, cx| this.select_commit_file(index, cx)))
+            .child(
+                div()
+                    .w(px(14.))
+                    .flex_shrink_0()
+                    .font_family(gpui::SharedString::from(theme::code_font()))
+                    .text_size(px(theme::font_mono_meta()))
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(diff_controls::status_color(&status))
+                    .child(status),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .flex()
+                    .flex_row()
+                    .gap_1p5()
+                    .overflow_hidden()
+                    .whitespace_nowrap()
+                    .text_size(px(theme::font_meta()))
+                    .child(div().flex_shrink_0().text_color(theme::text()).child(name))
+                    .when(!dir.is_empty(), |line| {
+                        line.child(
+                            div()
+                                .min_w_0()
+                                .overflow_hidden()
+                                .text_ellipsis()
+                                .text_color(theme::text_muted())
+                                .child(dir),
+                        )
+                    }),
+            )
+            .child(counts)
             .into_any_element()
     }
 
@@ -2217,7 +2292,7 @@ fn section_header(
         .flex_row()
         .items_center()
         .gap_1p5()
-        .py_1p5()
+        .h(px(FILE_ROW_H))
         .px_1()
         .rounded(px(4.))
         .hover(|s| s.bg(theme::panel()))
@@ -2231,7 +2306,7 @@ fn section_header(
 /// change away — the row discards take their confirmation the same way.
 fn discard_all_button(
     armed: bool,
-    files: Vec<String>,
+    files: Rc<Vec<String>>,
     store: Entity<Store>,
     this: Entity<ChangesView>,
     show_tooltips: bool,
@@ -2255,7 +2330,7 @@ fn discard_all_button(
             if armed {
                 this.update(cx, |this, _| this.discard_all_armed = false);
                 store.update(cx, |s, cx| {
-                    s.run_git(GitAction::DiscardUnstaged(files.clone()), cx)
+                    s.run_git(GitAction::DiscardUnstaged((*files).clone()), cx)
                 });
             } else {
                 this.update(cx, |this, cx| {

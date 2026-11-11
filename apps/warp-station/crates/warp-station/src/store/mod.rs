@@ -279,7 +279,9 @@ pub struct Store {
     home_repo: Option<String>,
     home_tab: WorkspaceTab,
     /// Drill-down for the selected history commit, drained by the view.
-    pub commit_details: Option<warp_station_core::model::GitCommitDetails>,
+    /// Shared so the History pane clones a handle per frame, not the file
+    /// list of a ten-thousand-file commit.
+    pub commit_details: Option<std::sync::Arc<warp_station_core::model::GitCommitDetails>>,
     /// One commit's file patches, keyed `hash|path`, drained by the view. A
     /// queue, not a slot: the rail can ask for two files before either lands.
     pub commit_file_patches: Vec<(String, String)>,
@@ -1493,7 +1495,7 @@ impl Store {
             }
             UiEvent::CommitDetailsLoaded { folder, details } => {
                 if self.selected_repo.as_deref() == Some(folder.as_str()) {
-                    self.commit_details = details;
+                    self.commit_details = details.map(std::sync::Arc::new);
                 }
                 cx.notify();
             }

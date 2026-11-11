@@ -1018,15 +1018,16 @@ fn needs_you_section(
 ) -> AnyElement {
     let folder = repo.folder_path.to_string_lossy();
     let loaded = store.changes_loaded_for.as_deref() == Some(folder.as_ref());
-    let groups = if loaded {
-        store.changes().map(|snapshot| snapshot.change_groups())
+    // the card only names the two totals: reading them off the snapshot's
+    // sides keeps a 10k-file tree from cloning every row on each repaint
+    let (unstaged, staged) = if loaded {
+        store
+            .changes()
+            .map(|snapshot| (snapshot.unstaged_files.len(), snapshot.staged_files.len()))
+            .unwrap_or((0, 0))
     } else {
-        None
+        (0, 0)
     };
-    let (unstaged, staged) = groups
-        .as_ref()
-        .map(|(unstaged, staged)| (unstaged.len(), staged.len()))
-        .unwrap_or((0, 0));
     let github = settings.repos.enable_github;
     let snapshot = github
         .then(|| store.github_by_folder.get(folder.as_ref()))
@@ -1052,7 +1053,7 @@ fn needs_you_section(
     };
 
     if repo.git_modified_count > 0 {
-        let sub = if groups.is_some() {
+        let sub = if loaded {
             format!("{staged} staged · {unstaged} unstaged")
         } else {
             "Review the working tree".to_string()

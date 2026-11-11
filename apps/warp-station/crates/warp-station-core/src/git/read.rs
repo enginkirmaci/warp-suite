@@ -205,7 +205,34 @@ pub fn change_snapshot(folder: &Path) -> Option<GitChangeSnapshot> {
         if statuses.is_empty() {
             return Some(snapshot);
         }
+        // Per-side sizes while shaping the rows: each side earns its line
+        // counts on its own (a ten-file index under a 10k-file worktree still
+        // shows gutters), and past the cap the counts are decoration — see
+        // MAX_EAGER_COUNTS. Building the diff is most of it: with untracked
+        // content libgit2 reads every untracked file to count it.
+        let mut index_side = 0usize;
+        let mut worktree_side = 0usize;
         for entry in statuses.iter() {
+            let state = entry.status();
+            if state.intersects(
+                git2::Status::INDEX_NEW
+                    | git2::Status::INDEX_MODIFIED
+                    | git2::Status::INDEX_DELETED
+                    | git2::Status::INDEX_RENAMED
+                    | git2::Status::INDEX_TYPECHANGE,
+            ) {
+                index_side += 1;
+            }
+            if state.intersects(
+                git2::Status::WT_NEW
+                    | git2::Status::WT_MODIFIED
+                    | git2::Status::WT_DELETED
+                    | git2::Status::WT_RENAMED
+                    | git2::Status::WT_TYPECHANGE
+                    | git2::Status::CONFLICTED,
+            ) {
+                worktree_side += 1;
+            }
             describe_status_entry(entry, &mut snapshot);
         }
 
@@ -213,30 +240,40 @@ pub fn change_snapshot(folder: &Path) -> Option<GitChangeSnapshot> {
         // (git diff --cached). Untracked rows join the worktree side so their
         // gutters carry the file's line count, like the staged view's.
         let index = repo.index().ok()?;
-        let mut diff_opts = diff_options(repo);
-        diff_opts
-            .include_untracked(true)
-            .recurse_untracked_dirs(true)
-            .show_untracked_content(true);
-        if let Ok(mut diff) = repo.diff_index_to_workdir(Some(&index), Some(&mut diff_opts))
-            && find_renames(&mut diff).is_ok()
-        {
-            snapshot.worktree_counts = numstat_counts(&diff);
+        if worktree_side <= MAX_EAGER_COUNTS {
+            let mut diff_opts = diff_options(repo);
+            diff_opts
+                .include_untracked(true)
+                .recurse_untracked_dirs(true)
+                .show_untracked_content(true);
+            if let Ok(mut diff) = repo.diff_index_to_workdir(Some(&index), Some(&mut diff_opts)) {
+                let _ = find_renames(&mut diff);
+                snapshot.worktree_counts = numstat_counts(&diff);
+            }
         }
 
-        let head_tree = head_tree(repo);
-        let index = repo.index().ok()?;
-        let mut diff_opts = diff_options(repo);
-        if let Ok(mut diff) =
-            repo.diff_tree_to_index(head_tree.as_ref(), Some(&index), Some(&mut diff_opts))
-            && find_renames(&mut diff).is_ok()
-        {
-            snapshot.cached_counts = numstat_counts(&diff);
+        if index_side <= MAX_EAGER_COUNTS {
+            let head_tree = head_tree(repo);
+            let mut diff_opts = diff_options(repo);
+            if let Ok(mut diff) =
+                repo.diff_tree_to_index(head_tree.as_ref(), Some(&index), Some(&mut diff_opts))
+            {
+                let _ = find_renames(&mut diff);
+                snapshot.cached_counts = numstat_counts(&diff);
+            }
         }
         Some(snapshot)
     })
     .flatten()
 }
+
+/// Above this many changed files on one side the per-file line counts cost
+/// more than they say: generating every patch to count its lines took ~190 ms
+/// for 10k small files (and grows with the changed content), while the +/−
+/// gutter is only read on a handful of rows. Past the cap the rows keep their
+/// status letter and the diff pane still builds one file's patch when it is
+/// picked.
+const MAX_EAGER_COUNTS: usize = 500;
 
 /// Local then remote-tracking branches, each group name-sorted, HEAD aliases
 /// dropped.
@@ -1566,5 +1603,67 @@ mod prompt_path_tests {
             Some("gone.rs".into())
         );
         assert_eq!(delta_prompt_path(None, None), None);
+    }
+}
+
+#[cfg(test)]
+mod snapshot_scale_tests {
+    use super::*;
+
+    /// A tree past [`MAX_EAGER_COUNTS`] skips the per-file patch work on the
+    /// side that big — the status rows are still shaped, and the small staged
+    /// side keeps its line counts.
+    #[test]
+    fn a_huge_worktree_skips_counts_but_keeps_the_rows() {
+        let total = MAX_EAGER_COUNTS + 100;
+        let dir = std::env::temp_dir().join(format!(
+            "warp-station-snapshot-scale-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let repo = git2::Repository::init(&dir).unwrap();
+
+        for ix in 0..total {
+            std::fs::write(dir.join(format!("f{ix:04}.txt")), "a\n").unwrap();
+        }
+        let mut index = repo.index().unwrap();
+        for ix in 0..total {
+            index.add_path(Path::new(&format!("f{ix:04}.txt"))).unwrap();
+        }
+        index.write().unwrap();
+        let tree_id = index.write_tree().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        let signature = git2::Signature::now("T", "t@t").unwrap();
+        repo.commit(Some("HEAD"), &signature, &signature, "base", &tree, &[])
+            .unwrap();
+
+        // every file changes, and two of them are staged: the worktree side is
+        // past the cap, the index side is not
+        for ix in 0..total {
+            std::fs::write(dir.join(format!("f{ix:04}.txt")), "a\nb\n").unwrap();
+        }
+        for ix in 0..2 {
+            index.add_path(Path::new(&format!("f{ix:04}.txt"))).unwrap();
+        }
+        index.write().unwrap();
+
+        let snapshot = change_snapshot(&dir).expect("a snapshot");
+        assert_eq!(snapshot.status_files.len(), total);
+        // the two staged files sit only on the index side
+        assert_eq!(snapshot.staged_files.len(), 2);
+        assert_eq!(snapshot.unstaged_files.len(), total - 2);
+        assert!(
+            snapshot.worktree_counts.is_empty(),
+            "the big side earns no counts"
+        );
+        assert_eq!(
+            snapshot.cached_counts.len(),
+            2,
+            "the small staged side keeps its counts"
+        );
+        assert_eq!(snapshot.merged_files().len(), total);
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
