@@ -103,7 +103,6 @@ pub struct SettingsPage {
     notify_only_unfocused: bool,
     notify_errors: bool,
     notify_actions: bool,
-    notify_fetch: bool,
     // Scanning
     scan_folders: Entity<TextareaState>,
     /// The scan roots the folders area was seeded with. A save compares the
@@ -338,7 +337,6 @@ impl SettingsPage {
             notify_only_unfocused: settings.notifications.only_when_unfocused,
             notify_errors: settings.notifications.errors,
             notify_actions: settings.notifications.action_confirmations,
-            notify_fetch: settings.notifications.fetch_summaries,
             scan_folders: area(window, cx, &scan_folders_text),
             scan_folders_seed: text_lines(&scan_folders_text),
             excluded_folders: area(window, cx, &line_list(&repos.excluded_folders)),
@@ -516,7 +514,6 @@ impl SettingsPage {
             self.notify_only_unfocused,
             self.notify_errors,
             self.notify_actions,
-            self.notify_fetch,
         );
         let snapit_auto_start = self.snapit_auto_start;
         let snapit_exe = Self::value(&self.snapit_executable, cx);
@@ -593,7 +590,6 @@ impl SettingsPage {
                 s.notifications.only_when_unfocused = notifications.1;
                 s.notifications.errors = notifications.2;
                 s.notifications.action_confirmations = notifications.3;
-                s.notifications.fetch_summaries = notifications.4;
             });
             // grouping only reshapes the list: re-project, never rescan —
             // the repos and their folders did not change
@@ -970,19 +966,6 @@ impl SettingsPage {
                     rows.is_empty(),
                     cx.listener(|this, _, _, cx| {
                         this.notify_actions = !this.notify_actions;
-                        this.save(cx);
-                        cx.notify();
-                    }),
-                ));
-                rows.push(kit_settings::switch_row_with_desc(
-                    "set-notify-fetch",
-                    "Fetch summaries",
-                    "settings-row-Fetch summaries".to_string(),
-                    "One aggregate after a background fetch brings repos further behind — desktop only",
-                    self.notify_fetch,
-                    rows.is_empty(),
-                    cx.listener(|this, _, _, cx| {
-                        this.notify_fetch = !this.notify_fetch;
                         this.save(cx);
                         cx.notify();
                     }),

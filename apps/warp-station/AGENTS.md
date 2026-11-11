@@ -100,7 +100,11 @@ Keep this order; several steps depend on the previous one:
 - **Keyboard and titles.** List keys belong to the focused pane (repo list,
   Changes files, History commits, PR/Issues); the window delegates only while
   it owns the focus itself. The OS title carries `Store::activity()` next to
-  the titlebar chip. The family rules are
+  the titlebar chip. That chip also opens the running panel: `Store::running_jobs`
+  lists every live job (scan, per-repo git work, generation, summary, clones)
+  in the order it started, and the panel closes when the last one lands. The
+  Refresh button is a local scan plus the eager activity set; it never runs a
+  `git fetch`. The family rules are
   `../../docs/agents/design-system.md` (`## Keyboard navigation`, `## Motion`).
 
 ## Tests

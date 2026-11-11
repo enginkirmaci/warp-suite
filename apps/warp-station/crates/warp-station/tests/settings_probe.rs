@@ -1116,11 +1116,7 @@ fn notifications_section_rows_persist(cx: &mut TestAppContext) {
             .is_some(),
         "the unfocused gate renders"
     );
-    for row in [
-        "settings-row-Errors",
-        "settings-row-Action confirmations",
-        "settings-row-Fetch summaries",
-    ] {
+    for row in ["settings-row-Errors", "settings-row-Action confirmations"] {
         assert!(
             cx.debug_bounds(row).is_some(),
             "the category rows render ({row})"

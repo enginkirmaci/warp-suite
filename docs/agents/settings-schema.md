@@ -89,7 +89,9 @@ Top level: `schema_version`, `nuget_local`, `repos`, `clipboard_password`,
   (false). The last layout and word-wrap choices from the diff header; global,
   not per repository. An unknown layout string reads unified.
 - `notifications`: `enabled` (true), `only_when_unfocused` (true),
-  `errors` (true), `action_confirmations` (true), `fetch_summaries` (true).
+  `errors` (true), `action_confirmations` (true), and the retired
+  `fetch_summaries` (true; kept so older files parse, no longer shown — the
+  bulk fetch pass it summarized is gone).
 
 ## warp-station cache
 

@@ -41,7 +41,7 @@ pub struct AppSettings {
 /// What a desktop notification may interrupt the desktop with. The section is
 /// new (files before it carry no `Notifications` key at all), so absence reads
 /// as every default: mirroring toasts while Warp Station is unfocused, with
-/// errors, action confirmations and fetch summaries all allowed.
+/// errors, action confirmations and the retired fetch summaries allowed.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case", default, deny_unknown_fields)]
 pub struct NotificationsSettings {
@@ -56,8 +56,9 @@ pub struct NotificationsSettings {
     /// Mirrors confirmation toasts: merges, commits, agent handoffs,
     /// generation drafts, password copies.
     pub action_confirmations: bool,
-    /// A fetch pass's aggregate ("3 repos behind, 1 fetch failed") — the pass
-    /// itself is silent, so this is desktop-only.
+    /// Retired with the bulk fetch pass. Kept in the schema so an existing
+    /// settings file with the key still parses and a save never drops it;
+    /// nothing emits the category any more.
     pub fetch_summaries: bool,
 }
 

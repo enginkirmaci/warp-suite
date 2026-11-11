@@ -490,7 +490,7 @@ impl ReposPage {
         dialog.cancel = Some(cancel.clone());
         dialog.error = None;
         self.store.update(cx, |s, cx| {
-            s.cloning.push(name.clone());
+            s.begin_clone(name.clone());
             cx.notify();
         });
         let _ = self

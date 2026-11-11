@@ -251,10 +251,10 @@ async fn remove_partial_clone(path: std::path::PathBuf) {
 
 pub async fn fetch(folder: &Path) -> GitOutcome {
     // the default remote only, no tags: negotiating every tag and sweeping
-    // every configured remote is the dominant per-repo cost of a fetch pass,
+    // every configured remote is the dominant per-repo cost of a fetch,
     // and the ahead/behind badges track the default remote's refs alone.
     // A folder without a resolvable remote keeps the plain fetch (its outcome
-    // is "git rejected it", which the pass logs either way).
+    // is "git rejected it", which the caller reports either way).
     sync(
         folder,
         &fetch_args(read::default_remote_name(folder).as_deref()),
@@ -262,8 +262,8 @@ pub async fn fetch(folder: &Path) -> GitOutcome {
     .await
 }
 
-/// The background fetch pass's command line. Separated from [`fetch`] so a
-/// unit test can pin the shape a sweep sends without a git fixture.
+/// The Fetch action's command line. Separated from [`fetch`] so a unit test
+/// can pin the shape without a git fixture.
 pub fn fetch_args(remote: Option<&str>) -> Vec<String> {
     match remote {
         Some(remote) => vec![

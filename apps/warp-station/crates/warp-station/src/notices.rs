@@ -121,26 +121,6 @@ impl Notices {
         )
     }
 
-    /// The desktop-only summary of a background pass (a refresh's fetch
-    /// result): no toast, since an unfocused window's stack is not on screen
-    /// and would have expired by the time the window returns. Same gate, same
-    /// dedup.
-    pub fn push_desktop_only(
-        &mut self,
-        text: impl Into<String>,
-        focused: Option<bool>,
-        settings: &NotificationsSettings,
-    ) -> Option<DesktopNotice> {
-        desktop::wants_desktop(
-            Category::FetchSummaries,
-            Severity::Info,
-            &text.into(),
-            focused,
-            settings,
-            &mut self.dedup,
-        )
-    }
-
     /// The toast stack for the window's render pass (newest last).
     pub fn list(&self) -> &[Notice] {
         &self.toasts

@@ -76,6 +76,8 @@ pub struct MainWindow {
     /// The title-bar queue panel is open: the ordered list of wand requests
     /// waiting for the one slot.
     wand_queue_open: bool,
+    /// The title-bar running panel is open: every live job, in start order.
+    running_open: bool,
     /// Window-level focus for the app shortcuts. The window body is not made
     /// of text fields, so without this root handle Escape/Ctrl+K only fire
     /// after an input has been clicked.
@@ -166,6 +168,7 @@ impl MainWindow {
             keep_awake_page: None,
             titlebar_should_move: false,
             wand_queue_open: false,
+            running_open: false,
             focus_handle,
             window_handle,
             window_title: String::new(),
@@ -223,6 +226,10 @@ impl Render for MainWindow {
                 cx.listener(|this, _, _, cx| {
                     gpui_kit::base::GlobalState::suppress_text_selection(cx);
                     this.repos_page.update(cx, |page, cx| page.close_popups(cx));
+                    if this.running_open {
+                        this.running_open = false;
+                        cx.notify();
+                    }
                     if this.wand_queue_open {
                         this.wand_queue_open = false;
                         cx.notify();
@@ -296,6 +303,12 @@ impl Render for MainWindow {
                         cx.stop_propagation();
                         return;
                     }
+                    if this.running_open {
+                        this.running_open = false;
+                        cx.notify();
+                        cx.stop_propagation();
+                        return;
+                    }
                     if this.wand_queue_open {
                         this.wand_queue_open = false;
                         cx.notify();
@@ -356,6 +369,9 @@ impl Render for MainWindow {
         if let Some(popup) = self.render_search_popup(window, cx) {
             root = root.child(popup);
         }
+        if let Some(panel) = self.render_running_panel(cx) {
+            root = root.child(panel);
+        }
         if let Some(panel) = self.render_wand_queue(cx) {
             root = root.child(panel);
         }
@@ -382,6 +398,124 @@ impl Render for MainWindow {
 }
 
 impl MainWindow {
+    /// The running-jobs panel, hanging under the title bar's activity chip:
+    /// every live job, in the order it started, with its repo or folder.
+    /// Closed by a press outside, Escape, or the last job finishing.
+    fn render_running_panel(&mut self, cx: &mut Context<Self>) -> Option<gpui::AnyElement> {
+        if !self.running_open {
+            return None;
+        }
+        let jobs = self.store.read(cx).running_jobs();
+        if jobs.is_empty() {
+            // the last job left while the panel was open: close instead of
+            // flashing an empty card
+            self.running_open = false;
+            return None;
+        }
+        let count = jobs.len();
+        let mut panel = div()
+            .id("running-panel")
+            .debug_selector(|| "running-panel".into())
+            .absolute()
+            .top(px(theme::TITLEBAR_H))
+            .right(px(12.))
+            .w(px(380.))
+            .occlude()
+            .rounded_lg()
+            .border_1()
+            .border_color(theme::hairline())
+            .bg(theme::popup())
+            .shadow_lg()
+            .p_2()
+            .flex()
+            .flex_col()
+            .gap_1()
+            .max_h(px(320.))
+            .overflow_y_scroll()
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .child(
+                        div()
+                            .text_size(px(theme::font_body()))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(theme::text())
+                            .child("Running"),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(theme::font_meta()))
+                            .text_color(theme::text_faint())
+                            .child(if count == 1 {
+                                "1 job".to_string()
+                            } else {
+                                format!("{count} jobs")
+                            }),
+                    ),
+            )
+            .child(
+                div()
+                    .text_size(px(theme::font_meta()))
+                    .text_color(theme::text_faint())
+                    .child("In the order they started."),
+            );
+        for (ix, job) in jobs.into_iter().enumerate() {
+            let key = job.key.clone();
+            panel = panel.child(
+                div()
+                    .id(("running-row", ix))
+                    .debug_selector(move || format!("running-row-{key}"))
+                    .role(gpui::Role::Status)
+                    .aria_label(job.title.clone())
+                    .flex()
+                    .items_start()
+                    .gap_2()
+                    .rounded(px(4.))
+                    .px_1()
+                    .py_1()
+                    .child(motion::spinner(
+                        SharedString::from(format!("running-row-spin-{ix}")),
+                        "icons/icon-spinner.svg",
+                        px(theme::icon_tiny()),
+                        theme::BEHIND,
+                    ))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .flex()
+                            .flex_col()
+                            .gap(px(1.))
+                            .child(
+                                div()
+                                    .text_size(px(theme::font_meta()))
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(theme::text())
+                                    .whitespace_nowrap()
+                                    .overflow_hidden()
+                                    .text_ellipsis()
+                                    .child(job.title),
+                            )
+                            .when_some(job.detail, |col, detail| {
+                                col.child(
+                                    div()
+                                        .text_size(px(theme::font_meta()))
+                                        .text_color(theme::text_faint())
+                                        .whitespace_nowrap()
+                                        .overflow_hidden()
+                                        .text_ellipsis()
+                                        .child(detail),
+                                )
+                            }),
+                    ),
+            );
+        }
+        Some(panel.into_any_element())
+    }
+
     /// The wand queue panel, hanging under the title bar's activity chip: the
     /// requests waiting for the one slot, in the order they will run, each
     /// with its own remove control. Closed by a press outside, Escape, or the
@@ -1202,8 +1336,8 @@ impl MainWindow {
                     div()
                         .id("activity-chip")
                         .debug_selector(|| "activity-chip".into())
-                        .role(gpui::Role::Status)
-                        .aria_label(label.clone())
+                        .a11y_button(format!("{label} — show every running job"))
+                        .cursor_pointer()
                         .min_w_0()
                         .h(px(28.))
                         .px_2p5()
@@ -1216,7 +1350,14 @@ impl MainWindow {
                         .font_weight(FontWeight::MEDIUM)
                         .text_color(theme::BEHIND)
                         .whitespace_nowrap()
-                        .tooltip(crate::ui::tooltip_text(label.clone()))
+                        .hover(|s| s.bg(theme::raised()))
+                        .tooltip(crate::ui::tooltip_text("Show every running job"))
+                        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.running_open = !this.running_open;
+                            this.wand_queue_open = false;
+                            cx.notify();
+                        }))
                         .child(motion::spinner(
                             "activity-spinner",
                             "icons/icon-spinner.svg",
@@ -1247,7 +1388,9 @@ impl MainWindow {
                                     })
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         this.wand_queue_open = !this.wand_queue_open;
+                                        this.running_open = false;
                                         cx.notify();
+                                        cx.stop_propagation();
                                     }))
                                     .child(format!("{queued} queued")),
                             )
@@ -1272,6 +1415,7 @@ impl MainWindow {
                                     })
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         this.store.update(cx, |s, cx| s.cancel_all_wands(cx));
+                                        cx.stop_propagation();
                                     }))
                                     .child("Cancel"),
                             )

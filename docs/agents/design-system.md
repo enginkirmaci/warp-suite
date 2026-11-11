@@ -356,6 +356,10 @@ must agree:
 - **The OS title states, it does not move.** The in-app head may carry the same
   spinner as its row, but the OS window title is a string: it carries the word
   and count, never a frame animation.
+- **The chip is the panel's trigger.** A press on the activity chip lists every
+  live job in the order it started, with the repository, folder or pass it
+  belongs to; the last job landing closes the panel. The panel reads the same
+  list the chip counts (`Store::running_jobs`), so the two cannot disagree.
 - **A title does not invent work.** It repeats a count the app already has
   (`Store::activity`, the tile's `running`) and shows nothing at zero.
 

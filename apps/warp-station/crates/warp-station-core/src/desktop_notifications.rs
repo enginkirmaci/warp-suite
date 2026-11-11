@@ -103,8 +103,6 @@ pub enum Category {
     Errors,
     /// "Merged #12", "Password copied …" — the `ActionConfirmations` toggle.
     ActionConfirmations,
-    /// A fetch pass's aggregate — the `FetchSummaries` toggle.
-    FetchSummaries,
 }
 
 impl Category {
@@ -112,7 +110,6 @@ impl Category {
         match self {
             Category::Errors => settings.errors,
             Category::ActionConfirmations => settings.action_confirmations,
-            Category::FetchSummaries => settings.fetch_summaries,
         }
     }
 }
@@ -323,15 +320,15 @@ mod tests {
         );
 
         // an opt-out category only cuts its own rows
-        let no_fetch = settings_with(|s| s.fetch_summaries = false);
+        let no_actions = settings_with(|s| s.action_confirmations = false);
         let (_s, mut dedup) = gate();
         assert!(
             wants_desktop(
-                Category::FetchSummaries,
+                Category::ActionConfirmations,
                 Severity::Info,
-                "3 repos behind",
+                "Merged #12",
                 Some(true),
-                &no_fetch,
+                &no_actions,
                 &mut dedup,
             )
             .is_none()
@@ -342,7 +339,7 @@ mod tests {
                 Severity::Error,
                 "still loud",
                 Some(false),
-                &no_fetch,
+                &no_actions,
                 &mut dedup,
             )
             .is_some()
@@ -350,34 +347,34 @@ mod tests {
     }
 
     #[test]
-    fn background_summaries_obey_the_gate_like_everything_else() {
+    fn a_focused_window_keeps_a_category_off_the_desktop() {
         let (settings, mut dedup) = gate();
-        // on screen the pass still shows nothing on the desktop
+        // on screen the event still shows nothing on the desktop
         assert!(
             wants_desktop(
-                Category::FetchSummaries,
+                Category::ActionConfirmations,
                 Severity::Info,
-                "3 repos behind",
+                "Merged #12",
                 Some(true),
                 &settings,
                 &mut dedup,
             )
             .is_none()
         );
-        // away from the desk the summary lands
+        // away from the desk the event lands
         let (_s, mut dedup) = gate();
-        let summary = wants_desktop(
-            Category::FetchSummaries,
+        let notice = wants_desktop(
+            Category::ActionConfirmations,
             Severity::Info,
-            "3 repos behind",
+            "Merged #12",
             Some(false),
             &settings,
             &mut dedup,
         );
         assert_eq!(
-            summary.map(|n| (n.severity, n.summary == "Warp Station")),
+            notice.map(|n| (n.severity, n.summary == "Warp Station")),
             Some((Severity::Info, true)),
-            "the aggregate reads as info under the app's own name"
+            "the event reads as info under the app's own name"
         );
     }
 

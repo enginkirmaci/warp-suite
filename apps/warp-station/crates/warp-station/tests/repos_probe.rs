@@ -899,11 +899,10 @@ fn a_generate_and_commit_run_commits_its_repo(cx: &mut TestAppContext) {
     });
 }
 
-/// The Refresh button: a scan first (local), then one fetch pass carrying only
-/// the repos with a remote, so the local refresh never waits for the network.
-/// The button is the only fetch trigger; no timer re-arms behind it.
+/// The Refresh button: one local scan, no `git fetch`. The list updates
+/// without waiting on a remote; fetching is its own repo action.
 #[gpui::test]
-fn refresh_scans_first_and_fetches_second(cx: &mut TestAppContext) {
+fn refresh_scans_without_a_git_fetch(cx: &mut TestAppContext) {
     use warp_station::net::NetCommand;
 
     cx.update(gpui_kit::init);
@@ -935,37 +934,290 @@ fn refresh_scans_first_and_fetches_second(cx: &mut TestAppContext) {
 
     cx.update_entity(&store, |s: &mut Store, cx| s.refresh(cx));
 
-    let mut fetched: Option<Vec<PathBuf>> = None;
-    let mut scan_index: Option<usize> = None;
-    let mut send_index = 0;
+    let mut scanned = false;
+    let mut fetched = false;
     while let Ok(command) = net_rx.try_recv() {
         match command {
-            NetCommand::FetchAll { folders } => fetched = Some(folders),
-            NetCommand::Scan { .. } => scan_index = Some(send_index),
+            NetCommand::Scan { .. } => scanned = true,
+            NetCommand::Git { .. } => fetched = true,
             _ => {}
         }
-        send_index += 1;
     }
-    let scan_index = scan_index.expect("refresh rescans");
-    assert_eq!(
-        fetched.expect("refresh fetches the remote repos"),
-        vec![PathBuf::from("/probe/alpha")],
-        "only the repos with a remote are fetched"
-    );
-    assert_eq!(
-        scan_index, 0,
-        "the scan goes out first: the local refresh never waits for the network"
-    );
+    assert!(scanned, "refresh rescans the configured roots");
+    assert!(!fetched, "refresh never runs a git fetch");
     cx.read_entity(&store, |s, _| {
         assert!(s.scanning, "the toolbar shows Refreshing");
-        assert!(
-            s.fetch_progress.is_none(),
-            "the pass reports its own progress as it streams"
-        );
+        assert_eq!(s.activity(), Some("Refreshing".to_string()));
     });
 
     let _ = std::fs::remove_file(&scratch);
 }
+
+/// The title bar's activity chip opens the running panel: every live job, in
+/// the order it started, with its repo or folder. The last job landing closes
+/// the panel instead of leaving an empty card up.
+#[gpui::test]
+fn the_activity_chip_lists_running_jobs_in_start_order(cx: &mut TestAppContext) {
+    use warp_station::net::{GitAction, UiEvent};
+
+    cx.update(gpui_kit::init);
+    scratch_home();
+    cx.update(warp_station::theme::apply_kit_theme);
+
+    let store = fake_store(cx);
+    cx.update_entity(&store, |s: &mut Store, cx| {
+        s.scanning = false;
+        // alpha starts first, beta second: the panel must preserve that
+        s.selected_repo = Some("/probe/alpha".into());
+        s.run_git(GitAction::Push, cx);
+        s.selected_repo = Some("/probe/beta".into());
+        s.run_git(GitAction::Commit("generated".into()), cx);
+    });
+    assert_eq!(
+        store.read_with(cx, |s, _| s.activity()),
+        Some("2 running".to_string())
+    );
+    cx.read_entity(&store, |s, _| {
+        let jobs = s.running_jobs();
+        assert_eq!(jobs.len(), 2);
+        assert_eq!(jobs[0].title, "Pushing alpha");
+        assert_eq!(jobs[0].detail.as_deref(), Some("/probe/alpha"));
+        assert_eq!(jobs[1].title, "Committing beta");
+    });
+
+    let store_handle = store.clone();
+    let (_window, cx) =
+        cx.add_window_view(|window, cx| MainWindow::new(store_handle.clone(), window, cx));
+    cx.run_until_parked();
+    cx.update(|window, cx| drop(window.draw(cx)));
+
+    let chip = cx
+        .debug_bounds("activity-chip")
+        .expect("the activity chip renders while jobs run");
+    cx.simulate_click(chip.center(), gpui::Modifiers::default());
+    cx.run_until_parked();
+    cx.update(|window, cx| drop(window.draw(cx)));
+    assert!(
+        cx.debug_bounds("running-panel").is_some(),
+        "a press on the chip opens the panel"
+    );
+    let alpha = cx
+        .debug_bounds("running-row-git:/probe/alpha")
+        .expect("alpha's row");
+    let beta = cx
+        .debug_bounds("running-row-git:/probe/beta")
+        .expect("beta's row");
+    assert!(
+        alpha.origin.y < beta.origin.y,
+        "rows follow the order the jobs started"
+    );
+
+    // alpha lands: its row leaves, beta's stays, and the panel stays up
+    cx.update_entity(&store, |s: &mut Store, cx| {
+        s.on_net_event(
+            UiEvent::GitDone {
+                folder: "/probe/alpha".into(),
+                label: "push",
+                error: None,
+                commit_hash: None,
+                detail: None,
+            },
+            cx,
+        );
+    });
+    cx.update(|window, cx| drop(window.draw(cx)));
+    assert!(cx.debug_bounds("running-row-git:/probe/alpha").is_none());
+    assert!(cx.debug_bounds("running-row-git:/probe/beta").is_some());
+    assert!(cx.debug_bounds("running-panel").is_some());
+
+    // beta lands too: the empty panel and the idle chip both go
+    cx.update_entity(&store, |s: &mut Store, cx| {
+        s.on_net_event(
+            UiEvent::GitDone {
+                folder: "/probe/beta".into(),
+                label: "commit",
+                error: None,
+                commit_hash: None,
+                detail: None,
+            },
+            cx,
+        );
+    });
+    cx.update(|window, cx| drop(window.draw(cx)));
+    assert!(
+        cx.debug_bounds("running-panel").is_none(),
+        "the last job takes the panel with it"
+    );
+    assert!(
+        cx.debug_bounds("activity-chip").is_none(),
+        "and the chip rests"
+    );
+}
+
+/// A Refresh press that lands while the scan runs is remembered and runs when
+/// that scan settles: the first click is never swallowed.
+#[gpui::test]
+fn a_refresh_during_a_scan_runs_when_it_settles(cx: &mut TestAppContext) {
+    use warp_station::net::{NetCommand, UiEvent};
+
+    cx.update(gpui_kit::init);
+    scratch_home();
+
+    let scratch = std::env::temp_dir().join(format!(
+        "warp-station-refresh-pending-{}.json",
+        std::process::id()
+    ));
+    std::fs::write(&scratch, "{}").expect("scratch settings");
+
+    let (net_tx, net_rx) = async_channel::unbounded();
+    let store = cx.new(|_cx| {
+        Store::with_settings(
+            net_tx,
+            std::sync::Arc::new(warp_station_core::settings::SettingsService::at(
+                scratch.clone(),
+            )),
+        )
+    });
+    while net_rx.try_recv().is_ok() {}
+
+    // a scan is already in flight (the launch or the settings save kicked it)
+    cx.update_entity(&store, |s: &mut Store, cx| {
+        let settings = s.settings();
+        s.kick_scan(&settings);
+        s.refresh(cx);
+    });
+    let mut scans = 0;
+    while let Ok(command) = net_rx.try_recv() {
+        if matches!(command, NetCommand::Scan { .. }) {
+            scans += 1;
+        }
+    }
+    assert_eq!(scans, 1, "the press during the scan queues nothing yet");
+    cx.read_entity(&store, |s, _| {
+        assert!(s.scanning);
+        assert_eq!(s.activity(), Some("Refreshing".to_string()));
+    });
+
+    // the scan settles: the remembered press goes out as its own scan
+    cx.update_entity(&store, |s: &mut Store, cx| {
+        s.on_net_event(
+            UiEvent::ScanSettled {
+                scanned: Vec::new(),
+            },
+            cx,
+        );
+    });
+    let mut scans = 0;
+    while let Ok(command) = net_rx.try_recv() {
+        if matches!(command, NetCommand::Scan { .. }) {
+            scans += 1;
+        }
+    }
+    assert_eq!(
+        scans, 1,
+        "the settle runs the press that arrived while the first scan ran"
+    );
+    cx.read_entity(&store, |s, _| {
+        assert!(s.scanning, "the follow-up scan owns the busy state");
+        assert_eq!(s.activity(), Some("Refreshing".to_string()));
+    });
+
+    // its own settle ends the refresh with nothing left running
+    cx.update_entity(&store, |s: &mut Store, cx| {
+        s.on_net_event(
+            UiEvent::ScanSettled {
+                scanned: Vec::new(),
+            },
+            cx,
+        );
+    });
+    cx.read_entity(&store, |s, _| {
+        assert!(!s.scanning);
+        assert_eq!(s.activity(), None);
+    });
+
+    let _ = std::fs::remove_file(&scratch);
+}
+
+/// One press on the toolbar's Refresh button starts the scan; the button is
+/// not dead while it shows its busy state, and the press is not lost when the
+/// store is already scanning.
+#[gpui::test]
+fn one_press_on_refresh_starts_the_scan(cx: &mut TestAppContext) {
+    use warp_station::net::{NetCommand, UiEvent};
+
+    cx.update(gpui_kit::init);
+    scratch_home();
+    cx.update(warp_station::theme::apply_kit_theme);
+
+    let scratch = std::env::temp_dir().join(format!(
+        "warp-station-refresh-click-{}.json",
+        std::process::id()
+    ));
+    std::fs::write(&scratch, "{}").expect("scratch settings");
+
+    let (net_tx, net_rx) = async_channel::unbounded();
+    let store = cx.new(|_cx| {
+        let mut store = Store::with_settings(
+            net_tx,
+            std::sync::Arc::new(warp_station_core::settings::SettingsService::at(
+                scratch.clone(),
+            )),
+        );
+        store.replace_repos(vec![entry("alpha", "/probe/alpha", &[])]);
+        store.scanning = false;
+        store
+    });
+    while net_rx.try_recv().is_ok() {}
+
+    let store_handle = store.clone();
+    let (_window, cx) =
+        cx.add_window_view(|window, cx| MainWindow::new(store_handle.clone(), window, cx));
+    cx.run_until_parked();
+    cx.update(|window, cx| drop(window.draw(cx)));
+
+    let button = cx
+        .debug_bounds("refresh-button")
+        .expect("the toolbar carries the Refresh button");
+    cx.simulate_click(button.center(), gpui::Modifiers::default());
+    cx.run_until_parked();
+    let mut scans = 0;
+    while let Ok(command) = net_rx.try_recv() {
+        if matches!(command, NetCommand::Scan { .. }) {
+            scans += 1;
+        }
+    }
+    assert_eq!(scans, 1, "one press starts one scan");
+    cx.read_entity(&store, |s, _| {
+        assert!(s.scanning, "the button shows its busy state");
+    });
+
+    // a press during the scan is kept: its settle starts the follow-up scan
+    let button = cx
+        .debug_bounds("refresh-button")
+        .expect("the busy button still takes the press");
+    cx.simulate_click(button.center(), gpui::Modifiers::default());
+    cx.run_until_parked();
+    while net_rx.try_recv().is_ok() {}
+    cx.update_entity(&store, |s: &mut Store, cx| {
+        s.on_net_event(
+            UiEvent::ScanSettled {
+                scanned: Vec::new(),
+            },
+            cx,
+        );
+    });
+    let mut scans = 0;
+    while let Ok(command) = net_rx.try_recv() {
+        if matches!(command, NetCommand::Scan { .. }) {
+            scans += 1;
+        }
+    }
+    assert_eq!(scans, 1, "the busy-state press is not dropped");
+
+    let _ = std::fs::remove_file(&scratch);
+}
+
 /// A scan that settles after a status probe and a GitHub snapshot landed must
 /// keep their counts: the merge runs against the live list, not against the
 /// snapshot the scan was queued with (the launch queues its activity pass
@@ -1000,8 +1252,6 @@ fn a_settling_scan_keeps_counts_that_landed_while_it_waited(cx: &mut TestAppCont
                     modified_count: 10,
                     ..Default::default()
                 }],
-                after_fetch: false,
-                progress: None,
             },
             cx,
         );
@@ -1300,8 +1550,6 @@ fn an_unprobed_row_says_checking_instead_of_clean(cx: &mut TestAppContext) {
                     modified_count: 0,
                     ..Default::default()
                 }],
-                after_fetch: false,
-                progress: None,
             },
             cx,
         );
@@ -1521,176 +1769,6 @@ fn refresh_kicks_the_eager_github_and_azure_set_only(cx: &mut TestAppContext) {
 
     let _ = std::fs::remove_file(&scratch);
     let _ = std::fs::remove_file(&gh);
-}
-
-/// The fetch pass streams: each per-repo settle applies its probe the moment
-/// it lands and drives the toolbar's Fetching k/n stage, which clears when
-/// the pass's last repo lands.
-#[gpui::test]
-fn fetch_pass_reports_progress_per_repo(cx: &mut TestAppContext) {
-    use warp_station::net::UiEvent;
-
-    cx.update(gpui_kit::init);
-    scratch_home();
-
-    let scratch = std::env::temp_dir().join(format!(
-        "warp-station-progress-probe-{}.json",
-        std::process::id()
-    ));
-    std::fs::write(&scratch, r#"{"Notifications": {"Enabled": false}}"#).expect("scratch settings");
-
-    let (net_tx, net_rx) = async_channel::unbounded();
-    let store = cx.new(|_cx| {
-        let mut store = Store::with_settings(
-            net_tx,
-            std::sync::Arc::new(warp_station_core::settings::SettingsService::at(
-                scratch.clone(),
-            )),
-        );
-        store.replace_repos(vec![
-            entry("alpha", "/probe/alpha", &[]),
-            entry("beta", "/probe/beta", &[]),
-        ]);
-        store
-    });
-    while net_rx.try_recv().is_ok() {}
-    // the constructor's startup scan is still "in flight" (the store shows
-    // Refreshing): a refresh while it runs coalesces away, so clear it first
-    cx.update_entity(&store, |s: &mut Store, _| s.scanning = false);
-    cx.update_entity(&store, |s: &mut Store, cx| s.refresh(cx));
-    // drain the scan + fetch queue before the settled events arrive
-    while net_rx.try_recv().is_ok() {}
-
-    let probe = |folder: &str| warp_station_core::repo_store::StatusProbe {
-        folder_path: folder.to_string(),
-        ..Default::default()
-    };
-    cx.update_entity(&store, |s: &mut Store, cx| {
-        s.on_net_event(
-            UiEvent::StatusSettled {
-                probes: vec![probe("/probe/alpha")],
-                after_fetch: true,
-                progress: Some((1, 2)),
-            },
-            cx,
-        );
-    });
-    cx.read_entity(&store, |s, _| {
-        assert_eq!(
-            s.fetch_progress,
-            Some((1, 2)),
-            "the button stage shows the settled repo's k/n"
-        );
-    });
-
-    cx.update_entity(&store, |s: &mut Store, cx| {
-        s.on_net_event(
-            UiEvent::StatusSettled {
-                probes: vec![probe("/probe/beta")],
-                after_fetch: true,
-                progress: Some((2, 2)),
-            },
-            cx,
-        );
-    });
-    cx.read_entity(&store, |s, _| {
-        assert_eq!(
-            s.fetch_progress, None,
-            "the stage clears once the pass's last repo lands"
-        );
-    });
-
-    let _ = std::fs::remove_file(&scratch);
-}
-
-/// Drains the store's net channel for LoadChanges requests.
-fn load_changes_folders(
-    net_rx: &async_channel::Receiver<warp_station::net::NetCommand>,
-) -> Vec<String> {
-    let mut folders = Vec::new();
-    while let Ok(command) = net_rx.try_recv() {
-        if let warp_station::net::NetCommand::LoadChanges { folder } = command {
-            folders.push(folder.to_string_lossy().to_string());
-        }
-    }
-    folders
-}
-
-/// A fetch pass's settled probes re-load the selected repo's workspace (the
-/// bar's file list, branches and unpushed) without a manual reselect; plain
-/// probe passes and passes not covering the selection leave it alone.
-#[gpui::test]
-fn fetch_settled_reloads_the_selected_workspace(cx: &mut TestAppContext) {
-    use warp_station_core::repo_store::StatusProbe;
-
-    // like every probe here: the scratch HOME must be in place before the
-    // store reads settings, whatever order the parallel tests start in
-    scratch_home();
-    let (net_tx, net_rx) = async_channel::unbounded();
-    let store = cx.new(|cx| {
-        let mut store = Store::new(cx, net_tx);
-        store.replace_repos(vec![entry("alpha", "/probe/alpha", &[])]);
-        store
-    });
-    cx.update_entity(&store, |s: &mut Store, _| {
-        s.selected_repo = Some("/probe/alpha".into());
-    });
-    // drain the construction kicks
-    assert!(load_changes_folders(&net_rx).is_empty());
-
-    let probe = |folder: &str| StatusProbe {
-        folder_path: folder.to_string(),
-        ..Default::default()
-    };
-
-    // the fetch pass covering the selection reloads the open workspace
-    cx.update_entity(&store, |s: &mut Store, cx| {
-        s.on_net_event(
-            warp_station::net::UiEvent::StatusSettled {
-                probes: vec![probe("/probe/alpha")],
-                after_fetch: true,
-                progress: None,
-            },
-            cx,
-        );
-    });
-    assert_eq!(
-        load_changes_folders(&net_rx),
-        vec!["/probe/alpha".to_string()],
-        "the fetch pass re-loads the selected repo's workspace"
-    );
-
-    // a plain probe pass (launch, scan settle) does not
-    cx.update_entity(&store, |s: &mut Store, cx| {
-        s.on_net_event(
-            warp_station::net::UiEvent::StatusSettled {
-                probes: vec![probe("/probe/alpha")],
-                after_fetch: false,
-                progress: None,
-            },
-            cx,
-        );
-    });
-    assert!(
-        load_changes_folders(&net_rx).is_empty(),
-        "a non-fetch pass must not re-load the workspace"
-    );
-
-    // a fetch pass that skipped the selection (busy exclusion) does not either
-    cx.update_entity(&store, |s: &mut Store, cx| {
-        s.on_net_event(
-            warp_station::net::UiEvent::StatusSettled {
-                probes: vec![probe("/probe/other")],
-                after_fetch: true,
-                progress: None,
-            },
-            cx,
-        );
-    });
-    assert!(
-        load_changes_folders(&net_rx).is_empty(),
-        "a fetch pass not covering the selection must not re-load the workspace"
-    );
 }
 
 /// Leaks a per-row selector for debug_bounds (which wants 'static).
