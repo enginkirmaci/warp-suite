@@ -372,17 +372,38 @@ pub(crate) fn popup_menu(
     folder: &str,
 ) -> AnyElement {
     let archived = repo.is_archived();
+    let favorite = repo.is_favorite();
     let mut menu = menu_panel("insp-repo-menu");
 
     // every row closes the menu behind its action
-    let item = |id: &'static str, label: &'static str, action: MenuAction| {
-        let close = page.clone();
-        menu_row(id, label).on_click(move |_, _, cx| {
-            action(cx);
-            close.update(cx, |this, cx| this.close_repo_menu(cx));
-        })
-    };
+    let item =
+        |id: &'static str, icon_path: &'static str, label: &'static str, action: MenuAction| {
+            let close = page.clone();
+            menu_row(id, icon_path, label).on_click(move |_, _, cx| {
+                action(cx);
+                close.update(cx, |this, cx| this.close_repo_menu(cx));
+            })
+        };
 
+    {
+        let target = entities.clone();
+        menu = menu.child(item(
+            "insp-menu-refresh",
+            "icons/icon-refresh.svg",
+            "Refresh repository",
+            Box::new(move |cx| target.update(cx, |s, cx| s.refresh_panel(cx))),
+        ));
+    }
+    {
+        let target = entities.clone();
+        let path = folder.to_string();
+        menu = menu.child(item(
+            "insp-menu-copy-path",
+            "icons/icon-copy.svg",
+            "Copy folder path",
+            Box::new(move |cx| copy_with_toast(path.clone(), "Folder path copied", &target, cx)),
+        ));
+    }
     // a GitHub snapshot names the page once `gh` answers; the probe's own
     // `remote.origin.url` read fills the gap a repo without `gh` would
     // otherwise fall into, and it is already on the first frame from the cache
@@ -391,9 +412,18 @@ pub(crate) fn popup_menu(
         .or_else(|| repo.github_web_url.clone())
     {
         let target = entities.clone();
-        let page_url = url.clone();
+        let copy_url = url.clone();
+        menu = menu.child(item(
+            "insp-menu-copy-url",
+            "icons/icon-copy.svg",
+            "Copy GitHub URL",
+            Box::new(move |cx| copy_with_toast(copy_url.clone(), "GitHub URL copied", &target, cx)),
+        ));
+        let target = entities.clone();
+        let page_url = url;
         menu = menu.child(item(
             "insp-menu-github",
+            "icons/icon-open-in-new.svg",
             "Open in GitHub",
             Box::new(move |cx| {
                 if let Err(err) = terminal::open_url(&page_url) {
@@ -401,28 +431,20 @@ pub(crate) fn popup_menu(
                 }
             }),
         ));
-        let target = entities.clone();
-        menu = menu.child(item(
-            "insp-menu-copy-url",
-            "Copy GitHub URL",
-            Box::new(move |cx| copy_with_toast(url.clone(), "GitHub URL copied", &target, cx)),
-        ));
     }
+    menu = menu.child(div().h(px(1.)).mx(px(4.)).my(px(2.)).bg(theme::hairline()));
     {
         let target = entities.clone();
         let path = folder.to_string();
         menu = menu.child(item(
-            "insp-menu-copy-path",
-            "Copy folder path",
-            Box::new(move |cx| copy_with_toast(path.clone(), "Folder path copied", &target, cx)),
-        ));
-    }
-    {
-        let target = entities.clone();
-        menu = menu.child(item(
-            "insp-menu-refresh",
-            "Refresh repository",
-            Box::new(move |cx| target.update(cx, |s, cx| s.refresh_panel(cx))),
+            "insp-menu-favorite",
+            "icons/icon-star.svg",
+            if favorite {
+                "Remove from favorites"
+            } else {
+                "Add to favorites"
+            },
+            Box::new(move |cx| target.update(cx, |s, cx| s.toggle_favorite(&path, cx))),
         ));
     }
     {
@@ -431,6 +453,7 @@ pub(crate) fn popup_menu(
         let name = repo.name.clone();
         menu = menu.child(item(
             "insp-menu-archive",
+            "icons/icon-package.svg",
             if archived { "Restore" } else { "Archive" },
             Box::new(move |cx| {
                 target.update(cx, |s, cx| {
@@ -445,12 +468,17 @@ pub(crate) fn popup_menu(
             }),
         ));
     }
-    menu.child(div().h(px(1.)).mx(px(4.)).my(px(2.)).bg(theme::hairline()))
-        .child(remove_row(state.remove_armed, entities, page))
+    menu.child(remove_row(state.remove_armed, entities, page))
         .into_any_element()
 }
 
-fn menu_row(id: &'static str, label: &'static str) -> gpui::Stateful<gpui::Div> {
+/// One row of the header menu: the design's 16 px leading glyph, then the
+/// label, on the 8 px gap the kit's own menu rows use.
+fn menu_row(
+    id: &'static str,
+    icon_path: &'static str,
+    label: &'static str,
+) -> gpui::Stateful<gpui::Div> {
     div()
         .id(id)
         .debug_selector(move || id.into())
@@ -461,9 +489,11 @@ fn menu_row(id: &'static str, label: &'static str) -> gpui::Stateful<gpui::Div> 
         .h(px(32.))
         .flex()
         .items_center()
+        .gap_2()
         .text_size(px(theme::font_control()))
         .text_color(theme::text())
         .hover(|d| d.bg(theme::line_strong()))
+        .child(icon(icon_path, px(theme::icon_small()), theme::text_dim()))
         .child(label)
 }
 
@@ -485,19 +515,15 @@ fn remove_row(armed: bool, entities: &Entity<Store>, page: &Entity<ReposPage>) -
         .px_2()
         // the resting row is one 32 px line; the armed one carries its second
         // line and takes its height from the content
-        .when(!armed, |row| row.h(px(32.)).justify_center())
+        .when(!armed, |row| row.h(px(32.)))
         .when(armed, |row| row.py_1p5())
         .flex()
-        .flex_col()
-        .gap_0p5()
+        .items_center()
+        .gap_2()
         .text_size(px(theme::font_control()))
-        .text_color(if armed {
-            theme::DANGER
-        } else {
-            theme::text_dim()
-        })
+        .text_color(theme::DANGER)
         .when(armed, |row| row.bg(theme::tint(theme::DANGER)))
-        .hover(|d| d.bg(theme::tint(theme::DANGER)).text_color(theme::DANGER))
+        .hover(|d| d.bg(theme::tint(theme::DANGER)))
         .on_click(move |_, _, cx| {
             if armed {
                 target.update(cx, |s, cx| s.remove_from_repositories(cx));
@@ -506,18 +532,29 @@ fn remove_row(armed: bool, entities: &Entity<Store>, page: &Entity<ReposPage>) -
                 menu.update(cx, |this, cx| this.arm_repo_remove(cx));
             }
         })
-        .child(if armed {
-            "Remove from repositories?"
-        } else {
-            "Remove from repositories"
-        })
-        .when(armed, |row| {
-            row.child(
-                div()
-                    .text_size(px(theme::font_mono_meta()))
-                    .child("Click again to confirm"),
-            )
-        })
+        .child(icon(
+            "icons/icon-trash.svg",
+            px(theme::icon_small()),
+            theme::DANGER,
+        ))
+        .child(
+            div()
+                .flex()
+                .flex_col()
+                .gap_0p5()
+                .child(if armed {
+                    "Remove from repositories?"
+                } else {
+                    "Remove from repositories"
+                })
+                .when(armed, |row| {
+                    row.child(
+                        div()
+                            .text_size(px(theme::font_mono_meta()))
+                            .child("Click again to confirm"),
+                    )
+                }),
+        )
         .into_any_element()
 }
 

@@ -1285,6 +1285,32 @@ fn the_head_refreshes_the_repo(cx: &mut TestAppContext) {
     );
 }
 
+/// The ⋯ menu carries the favorite toggle too, in the design's order: one row,
+/// both directions, closing behind itself like every other verb.
+#[gpui::test]
+fn the_repo_menu_toggles_the_favorite(cx: &mut TestAppContext) {
+    let (store, _net_rx) = scratch_store(cx, "menu-favorite", vec![entry("alpha", "/probe/alpha")]);
+    let cx = open_window(&store, cx);
+
+    click(cx, "insp-more");
+    click(cx, "insp-menu-favorite");
+    assert!(
+        cx.read_entity(&store, |s, _| s.repos[0].is_favorite()),
+        "the row marks the repo"
+    );
+    assert!(
+        cx.debug_bounds("insp-repo-menu").is_none(),
+        "the row closes the menu behind its action"
+    );
+
+    click(cx, "insp-more");
+    click(cx, "insp-menu-favorite");
+    assert!(
+        !cx.read_entity(&store, |s, _| s.repos[0].is_favorite()),
+        "and the second press takes the mark back off"
+    );
+}
+
 /// Nothing links to GitHub before a pass has named the repo's page, and either
 /// pass can be the first to answer.
 #[gpui::test]
