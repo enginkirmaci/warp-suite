@@ -84,10 +84,9 @@ Notes:
 
 ## 2. lib.rs and main.rs — bootstrap order
 
-`lib.rs` is the module list; probes depend on it. `apps/warp-notes` and
-`apps/warp-station/crates/warp-station` have the boundary; `apps/warp-agent` is
-binary-only and its one probe targets the markdown kit rather than the app's
-views, so prefer the lib boundary for a new app:
+`lib.rs` is the module list; probes depend on it. All three GPUI apps have the
+boundary now, `apps/warp-agent` included. Its `run()` owns startup and
+`main.rs` is a thin launcher; a new app should follow the same split:
 
 ```rust
 //! MyApp — one-line purpose. The library boundary exists so the headless

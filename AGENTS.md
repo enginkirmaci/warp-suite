@@ -280,8 +280,8 @@ when one side changes, update the other side in the **same commit**.
   tasks. Poll on a `background_executor().timer(..)` or drain on a timer where
   that matters.
 - Prefer a `lib.rs` boundary so headless probes can build the real views. The
-  binary stays a thin bootstrap. `warp-agent` is the current exception: it is
-  binary-only and its probe targets the markdown kit.
+  binary stays a thin launcher; all three GPUI apps follow that split now,
+  `warp-agent` included.
 
 ## Testing and captures
 
