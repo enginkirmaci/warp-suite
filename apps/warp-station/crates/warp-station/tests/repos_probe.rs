@@ -1071,12 +1071,15 @@ fn a_refresh_during_a_scan_runs_when_it_settles(cx: &mut TestAppContext) {
 
     let (net_tx, net_rx) = async_channel::unbounded();
     let store = cx.new(|_cx| {
-        Store::with_settings(
+        let mut store = Store::with_settings(
             net_tx,
             std::sync::Arc::new(warp_station_core::settings::SettingsService::at(
                 scratch.clone(),
             )),
-        )
+        );
+        // the constructor's startup scan is not this probe's subject
+        store.scanning = false;
+        store
     });
     while net_rx.try_recv().is_ok() {}
 
@@ -1214,6 +1217,106 @@ fn one_press_on_refresh_starts_the_scan(cx: &mut TestAppContext) {
         }
     }
     assert_eq!(scans, 1, "the busy-state press is not dropped");
+
+    let _ = std::fs::remove_file(&scratch);
+}
+
+/// Automatic refresh follows focus: the first focused tick arms the clock,
+/// the due tick scans once, losing focus parks it, and regaining focus scans
+/// at once when the focus switch is on. An unfocused app never scans.
+#[gpui::test]
+fn auto_refresh_runs_only_while_focused(cx: &mut TestAppContext) {
+    use std::time::{Duration, Instant};
+    use warp_station::net::{NetCommand, UiEvent};
+
+    cx.update(gpui_kit::init);
+    scratch_home();
+
+    let scratch = std::env::temp_dir().join(format!(
+        "warp-station-auto-refresh-{}.json",
+        std::process::id()
+    ));
+    std::fs::write(&scratch, "{}").expect("scratch settings");
+
+    let (net_tx, net_rx) = async_channel::unbounded();
+    let store = cx.new(|_cx| {
+        let mut store = Store::with_settings(
+            net_tx,
+            std::sync::Arc::new(warp_station_core::settings::SettingsService::at(
+                scratch.clone(),
+            )),
+        );
+        // the constructor's startup scan is not this probe's subject
+        store.scanning = false;
+        store
+    });
+    let scans = |net_rx: &async_channel::Receiver<warp_station::net::NetCommand>| {
+        let mut count = 0;
+        while let Ok(command) = net_rx.try_recv() {
+            if matches!(command, NetCommand::Scan { .. }) {
+                count += 1;
+            }
+        }
+        count
+    };
+    while net_rx.try_recv().is_ok() {}
+
+    cx.update_entity(&store, |s: &mut Store, cx| {
+        s.update_settings(|settings| {
+            settings.repos.auto_refresh_on_focus = true;
+            settings.repos.auto_refresh_minutes = Some(1);
+        });
+        // first observation: focused, but not a regain, so it only arms
+        s.record_focus(true, cx);
+    });
+    let due = store
+        .read_with(cx, |s, _| s.auto_refresh_due())
+        .expect("the focused tick arms the periodic clock");
+    assert_eq!(scans(&net_rx), 0, "arming the clock does not scan");
+    assert!(
+        !store.read_with(cx, |s, _| s.scanning),
+        "arming the clock does not start a scan"
+    );
+
+    // before due: nothing
+    cx.update_entity(&store, |s: &mut Store, cx| {
+        s.check_auto_refresh(due - Duration::from_secs(1), cx);
+    });
+    assert_eq!(scans(&net_rx), 0);
+
+    // due: one local scan, and the clock re-arms
+    cx.update_entity(&store, |s: &mut Store, cx| {
+        s.check_auto_refresh(due, cx);
+    });
+    assert_eq!(scans(&net_rx), 1, "the due tick scans once");
+    assert!(
+        store.read_with(cx, |s, _| s.scanning),
+        "the scan owns the busy state"
+    );
+    cx.update_entity(&store, |s: &mut Store, cx| {
+        s.on_net_event(
+            UiEvent::ScanSettled {
+                scanned: Vec::new(),
+            },
+            cx,
+        );
+    });
+
+    // unfocused: the clock parks and a far-future tick scans nothing
+    cx.update_entity(&store, |s: &mut Store, cx| s.record_focus(false, cx));
+    assert!(
+        store.read_with(cx, |s, _| s.auto_refresh_due()).is_none(),
+        "losing focus parks the clock"
+    );
+    cx.update_entity(&store, |s: &mut Store, cx| {
+        s.check_auto_refresh(Instant::now() + Duration::from_secs(3_600), cx);
+    });
+    assert_eq!(scans(&net_rx), 0, "an unfocused app never scans");
+
+    // regaining focus with the switch on scans at once
+    cx.update_entity(&store, |s: &mut Store, cx| s.record_focus(true, cx));
+    assert_eq!(scans(&net_rx), 1, "a regain starts the scan immediately");
+    assert!(store.read_with(cx, |s, _| s.scanning));
 
     let _ = std::fs::remove_file(&scratch);
 }
@@ -2268,11 +2371,11 @@ fn grouped_bands_render_in_folder_order(cx: &mut TestAppContext) {
     )));
 }
 
-/// Depth-level grouping: depth 1 puts the one header on the scan roots'
-/// shared folder (the default), pressing it persists that key, and
-/// set_group_depth(2) live-moves the header one folder up without a rescan.
+/// Depth-level grouping: depth 1 names each repo's parent, pressing a band
+/// persists that key, and set_group_depth(2) live-moves the headers to the
+/// folder the parents share without a rescan.
 #[gpui::test]
-fn depth_one_headers_sit_on_the_shared_folder_and_climb(cx: &mut TestAppContext) {
+fn depth_one_headers_sit_on_the_repos_parent_and_climb(cx: &mut TestAppContext) {
     use warp_station::net::NetCommand;
     cx.update(gpui_kit::init);
     scratch_home();
@@ -2319,28 +2422,42 @@ fn depth_one_headers_sit_on_the_shared_folder_and_climb(cx: &mut TestAppContext)
     });
     assert_eq!(
         sketch,
-        vec!["#/roots/a(3)", "alpha", "beta", "gamma"],
-        "depth 1 folds every repo under the root into one header"
+        vec![
+            "#/roots/a/side(1)",
+            "gamma",
+            "#/roots/a/work(2)",
+            "alpha",
+            "beta"
+        ],
+        "depth 1 names each repo's parent"
     );
     assert!(
         cx.debug_bounds("repo-band-/roots").is_none(),
         "the parent-folder band is not where depth 1 puts it"
     );
     assert!(
-        cx.debug_bounds("repo-band-/roots/a").is_some(),
-        "the shared-folder band renders"
+        cx.debug_bounds("repo-band-/roots/a").is_none(),
+        "the shared-folder band waits for depth 2"
+    );
+    assert!(
+        cx.debug_bounds("repo-band-/roots/a/work").is_some(),
+        "the parent band renders"
+    );
+    assert!(
+        cx.debug_bounds("repo-band-/roots/a/side").is_some(),
+        "the nested parent's band renders too"
     );
 
     let band = cx
-        .debug_bounds("repo-band-/roots/a")
-        .expect("the shared-folder band renders");
+        .debug_bounds("repo-band-/roots/a/work")
+        .expect("the parent band renders");
     cx.simulate_click(band.center(), gpui::Modifiers::default());
     cx.run_until_parked();
     cx.update(|window, cx| drop(window.draw(cx)));
     assert_eq!(
         cx.read_entity(&store, |s, _| s.settings().repos.collapsed_groups.clone()),
-        Some(vec!["/roots/a".to_string()]),
-        "the shared-folder key persists like any group key"
+        Some(vec!["/roots/a/work".to_string()]),
+        "the parent-folder key persists like any group key"
     );
 
     cx.update_entity(&store, |s: &mut Store, _| s.set_group_depth(2));
@@ -2357,8 +2474,8 @@ fn depth_one_headers_sit_on_the_shared_folder_and_climb(cx: &mut TestAppContext)
     });
     assert_eq!(
         sketch,
-        vec!["#/roots(3)", "alpha", "beta", "gamma"],
-        "depth 2 raises the header to the root's parent; the old collapse key stops matching"
+        vec!["#/roots/a(3)", "alpha", "beta", "gamma"],
+        "depth 2 raises the headers to the folder the parents share; the old collapse key stops matching"
     );
 
     let mut scans = 0;

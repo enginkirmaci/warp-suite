@@ -111,6 +111,7 @@ fn main() {
                         store.update(cx, |s, cx| {
                             s.tick_notices(cx);
                             s.check_window_focus(cx);
+                            s.check_auto_refresh(std::time::Instant::now(), cx);
                             s.check_activity_refresh(cx);
                             // the Pipelines pane's live follow: only while the
                             // tab is on screen, on the source's own cadence

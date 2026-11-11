@@ -64,7 +64,9 @@ Top level: `schema_version`, `nuget_local`, `repos`, `clipboard_password`,
   (true), `github_executable` (`gh`), `enable_azure_devops` (true),
   `azure_devops_pat` (""), `azure_devops_url` (""), `excluded_folders` (null),
   `sort_mode` (0), `sort_ascending` (null), `group_repos_by_root` (null),
-  `group_root_depth` (null), `collapsed_groups` (null),
+  `group_root_depth` (null; levels above each repo, 1 = the folder containing
+  it), `auto_refresh_on_focus` (true), `auto_refresh_minutes` (null; 0 or
+  absent = off), `collapsed_groups` (null),
   `enable_code_search` (null), `code_search_executable` (null),
   `max_scan_depth` (3), `branch_name_prefix`, `issue_sort` (null),
   `repo_tabs` (null), `list_width` (null), `show_archived` (null),

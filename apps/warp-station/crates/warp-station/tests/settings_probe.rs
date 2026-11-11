@@ -745,6 +745,115 @@ fn group_repos_switch_toggles_and_persists(cx: &mut TestAppContext) {
     let _ = std::fs::remove_dir_all(&home);
 }
 
+/// The scanning card's automatic refresh rows: the focus switch and the
+/// minutes field render, toggling/typing persists both keys — and neither
+/// write is a scan.
+#[gpui_kit::gpui::test]
+fn auto_refresh_rows_toggle_and_persist(cx: &mut TestAppContext) {
+    use warp_station::net::NetCommand;
+
+    let _home_guard = HOME_ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    cx.update(gpui_kit::init);
+    cx.update(warp_station::theme::apply_kit_theme);
+
+    let home = std::env::temp_dir().join(format!(
+        "warp-station-auto-refresh-rows-{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&home);
+    std::fs::create_dir_all(home.join(".warp")).unwrap();
+    // SAFETY: process-global env; set before the store reads settings;
+    // serialized against the sibling HOME probes by HOME_ENV_LOCK
+    unsafe {
+        std::env::set_var("HOME", &home);
+        #[cfg(windows)]
+        std::env::set_var("USERPROFILE", &home);
+        std::env::set_var("XDG_CONFIG_HOME", home.join(".config"));
+    }
+
+    let scratch = home.join(".warp").join("settings.json");
+    std::fs::write(&scratch, "{}").expect("scratch settings");
+
+    let (net_tx, net_rx) = async_channel::unbounded();
+    let store = cx.new(|_cx| {
+        let mut store = Store::with_settings(
+            net_tx,
+            std::sync::Arc::new(warp_station_core::settings::SettingsService::at(
+                scratch.clone(),
+            )),
+        );
+        // the constructor's startup scan is not this probe's subject
+        store.scanning = false;
+        store
+    });
+    while net_rx.try_recv().is_ok() {}
+    let handle = cx.open_window(
+        gpui::size(gpui::px(1400.), gpui::px(2400.)),
+        |window, cx| SettingsPage::new(store, window, cx),
+    );
+    let wcx = gpui::VisualTestContext::from_window(handle.into(), cx).into_mut();
+    wcx.run_until_parked();
+    wcx.update(|window, cx| drop(window.draw(cx)));
+    click(wcx, "settings-repositories");
+
+    assert!(
+        wcx.debug_bounds("settings-row-Refresh on focus").is_some(),
+        "the focus switch row renders in the scanning card"
+    );
+    assert!(
+        wcx.debug_bounds("settings-row-Auto-refresh every")
+            .is_some(),
+        "the minutes row renders in the scanning card"
+    );
+    assert!(
+        wcx.debug_bounds("settings-field-Auto-refresh every")
+            .is_some(),
+        "the minutes field renders"
+    );
+
+    // the focus switch ends its row: a click near the right edge flips it
+    let row = wcx
+        .debug_bounds("settings-row-Refresh on focus")
+        .expect("focus switch row bounds");
+    wcx.simulate_click(
+        gpui::point(row.right() - gpui::px(20.), row.center().y),
+        gpui::Modifiers::default(),
+    );
+    wcx.run_until_parked();
+    let json = std::fs::read_to_string(&scratch).expect("saved settings");
+    assert!(
+        json.contains("\"auto_refresh_on_focus\": false"),
+        "the focus switch persisted (got {json})"
+    );
+
+    // the field starts empty; select-all + type 15 and let the debounce land
+    let field = wcx
+        .debug_bounds("settings-field-Auto-refresh every")
+        .expect("minutes field bounds");
+    wcx.simulate_click(field.center(), gpui::Modifiers::default());
+    wcx.run_until_parked();
+    wcx.simulate_keystrokes("ctrl-a");
+    wcx.simulate_input("15");
+    wcx.executor()
+        .advance_clock(std::time::Duration::from_millis(700));
+    wcx.run_until_parked();
+    let json = std::fs::read_to_string(&scratch).expect("saved settings");
+    assert!(
+        json.contains("\"auto_refresh_minutes\": 15"),
+        "the minutes field persisted (got {json})"
+    );
+
+    let mut scans = 0;
+    while let Ok(command) = net_rx.try_recv() {
+        if matches!(command, NetCommand::Scan { .. }) {
+            scans += 1;
+        }
+    }
+    assert_eq!(scans, 0, "settings changes never rescan on their own");
+
+    let _ = std::fs::remove_dir_all(&home);
+}
+
 /// The group-depth picker: it renders only while grouping is on, a segment
 /// click selects that depth, and Save persists GroupRootDepth — still
 /// without a rescan, like the grouping toggle.

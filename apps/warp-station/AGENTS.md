@@ -80,6 +80,16 @@ Keep this order; several steps depend on the previous one:
   the SnapIt settings at `~/.warp/snapit` and the notes content at `~/notes`.
 - **Settings.** Repo tags live in `settings.json` (`repos.repo_tags`), not in
   the cache. The contract is `../../docs/agents/settings-schema.md`.
+- **Folder groups.** `repos.group_repos_by_root` groups each repo under the
+  folder `repos.group_root_depth` levels above it (1 = the folder containing
+  it); scan roots only decide membership, never the header. A repo outside
+  every root lands in "Other".
+- **Automatic refresh.** `repos.auto_refresh_on_focus` (default on) rescans
+  the list when the app regains focus; `repos.auto_refresh_minutes` (null/0 =
+  off) rescans every N minutes. Both run only while a Warp Station window is
+  focused, only a local scan (never `git fetch` or the GitHub/Azure eager
+  set), and the once-a-second beat drives them through
+  `Store::record_focus` / `Store::check_auto_refresh`.
 - **Pipelines follow.** While the Pipelines tab is on screen and its run can
   still change, `Store::check_run_follow` (the once-a-second beat) re-reads the
   open run's detail — every 13 s on GitHub, 20 s on Azure — and asks the run

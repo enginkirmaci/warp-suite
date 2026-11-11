@@ -129,10 +129,16 @@ pub struct ReposSettings {
     /// Collapsible folder groups in the repos table; None/false = the flat
     /// list. Absence-meaningful like sort_ascending.
     pub group_repos_by_root: Option<bool>,
-    /// Folder levels the group headers count up from the scan roots' shared
-    /// folder (1 = that folder itself, 2 = its parent); None = 1.
+    /// Folder levels above each repo the group headers count from (1 = the
+    /// folder containing it, 2 = its parent); None = 1.
     /// Absence-meaningful like sort_ascending.
     pub group_root_depth: Option<u8>,
+    /// Rescan the list when the app's window regains focus; absent reads as
+    /// on, the requested default.
+    pub auto_refresh_on_focus: bool,
+    /// Minutes between automatic scans while the window is focused; None = 0
+    /// = off. Absence-meaningful like sort_ascending.
+    pub auto_refresh_minutes: Option<u32>,
     /// Collapsed group keys (folder paths, or "other"); None = all
     /// expanded. Absence-meaningful like sort_ascending.
     pub collapsed_groups: Option<Vec<String>>,
@@ -202,6 +208,8 @@ impl Default for ReposSettings {
             sort_ascending: None,
             group_repos_by_root: None,
             group_root_depth: None,
+            auto_refresh_on_focus: true,
+            auto_refresh_minutes: None,
             collapsed_groups: None,
             enable_code_search: None,
             code_search_executable: None,
@@ -764,7 +772,7 @@ mod tests {
     }
 
     #[test]
-    fn retired_fetch_keys_load_and_are_not_written_back() {
+    fn retired_schedule_keys_load_and_are_not_written_back() {
         let legacy = imported(
             r#"{"Repos": {
                 "AutoFetchMinutes": 15,
@@ -779,11 +787,13 @@ mod tests {
         for key in [
             "auto_fetch_minutes",
             "auto_fetch_only_focused",
-            "auto_refresh_minutes",
             "sync_on_focus",
         ] {
             assert!(!json.contains(key), "{key} must not be written back");
         }
+        // the new snake_case auto-refresh key is live now: it serializes even
+        // when unset, and the retired PascalCase spelling above never feeds it
+        assert!(json.contains("\"auto_refresh_minutes\": null"));
     }
 
     #[test]
@@ -938,6 +948,32 @@ mod tests {
         let json = serde_json::to_string_pretty(&tuned).unwrap();
         assert!(json.contains("\"notifications\""));
         assert!(json.contains("\"only_when_unfocused\": false"));
+    }
+
+    #[test]
+    fn auto_refresh_keys_round_trip_and_absent_means_on() {
+        let legacy: AppSettings = serde_json::from_str("{}").unwrap();
+        assert!(
+            legacy.repos.auto_refresh_on_focus,
+            "an absent focus switch means the requested on default"
+        );
+        assert_eq!(
+            legacy.repos.auto_refresh_minutes, None,
+            "the periodic scan is off until it gets a minute value"
+        );
+
+        let tuned: AppSettings = serde_json::from_str(
+            r#"{"repos": {"auto_refresh_on_focus": false, "auto_refresh_minutes": 15}}"#,
+        )
+        .unwrap();
+        assert!(!tuned.repos.auto_refresh_on_focus);
+        assert_eq!(tuned.repos.auto_refresh_minutes, Some(15));
+
+        let json = serde_json::to_string_pretty(&tuned).unwrap();
+        assert!(json.contains("\"auto_refresh_on_focus\": false"));
+        assert!(json.contains("\"auto_refresh_minutes\": 15"));
+        let back: AppSettings = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.repos.auto_refresh_minutes, Some(15));
     }
 
     #[test]

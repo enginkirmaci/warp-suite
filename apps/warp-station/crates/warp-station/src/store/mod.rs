@@ -108,9 +108,8 @@ pub struct Store {
     /// Collapsible folder groups on/off; seeded from the persisted
     /// setting (or the WARP_STATION_GROUPS E2E hook), flipped by the Settings save.
     pub group_by_root: bool,
-    /// Folder levels the group headers stand at, counting up from the scan
-    /// roots' shared folder (1 = that folder); seeded from the persisted
-    /// setting, flipped by the Settings save.
+    /// Folder levels above each repo (1 = the folder containing it); seeded
+    /// from the persisted setting, flipped by the Settings save.
     pub group_depth: usize,
     /// Collapsed group keys (folder paths, or "other"); mirrored into
     /// `ReposSettings::collapsed_groups` on every toggle.
@@ -340,6 +339,9 @@ pub struct Store {
     /// Last focus state the tick observed, for the notification gate; None
     /// before the first observation reads as visible.
     window_focused: Option<bool>,
+    /// When the next focused auto-refresh scan is due; None = off, unfocused,
+    /// or waiting for the first arm.
+    next_auto_refresh: Option<std::time::Instant>,
     /// A second launch asked this instance to come forward; the window clears
     /// it from its store observer (the single-instance door).
     focus_requested: bool,
@@ -523,6 +525,7 @@ impl Store {
             activity_landed_at: std::collections::HashMap::new(),
             models_refresh_requested: None,
             window_focused: None,
+            next_auto_refresh: None,
             focus_requested: false,
             cache_generation: 0,
             run_id_seq: 0,
@@ -2326,11 +2329,88 @@ impl Store {
     }
 
     /// The tick's focus poll: keeps `window_focused` current for the
-    /// notification gate (desktop toasts only while the app is unfocused).
-    /// Any open Warp Station window counts as focused, so moving between the
-    /// main window and Notes does not look like a focus loss.
-    pub fn check_window_focus(&mut self, cx: &mut App) {
-        self.window_focused = Some(Self::any_window_focused(cx));
+    /// notification gate and the automatic refresh schedule. Any open Warp
+    /// Station window counts as focused, so moving between the main window and
+    /// Notes does not look like a focus loss.
+    pub fn check_window_focus(&mut self, cx: &mut Context<Self>) {
+        let focused = Self::any_window_focused(cx);
+        self.record_focus(focused, cx);
+    }
+
+    /// Records a focus transition. Regaining focus runs the configured scan
+    /// once; losing it parks the periodic clock so an unfocused app never
+    /// scans. The seam is public so a probe can drive a transition without a
+    /// real compositor.
+    pub fn record_focus(&mut self, focused: bool, cx: &mut Context<Self>) {
+        let previous = self.window_focused;
+        self.window_focused = Some(focused);
+        if !focused {
+            self.next_auto_refresh = None;
+            return;
+        }
+        if previous == Some(true) {
+            // steady focus: leave the periodic clock running
+            return;
+        }
+        if previous == Some(false) && self.settings().repos.auto_refresh_on_focus {
+            self.start_auto_refresh(cx);
+        } else {
+            self.arm_auto_refresh();
+        }
+    }
+
+    /// The once-per-second tick's automatic refresh: when focused and the
+    /// configured minutes have elapsed, rescan the list. The clock is armed
+    /// only while focused, so an unfocused app spends nothing.
+    pub fn check_auto_refresh(&mut self, now: std::time::Instant, cx: &mut Context<Self>) {
+        if self.window_focused != Some(true) {
+            return;
+        }
+        let minutes = self.settings().repos.auto_refresh_minutes.unwrap_or(0);
+        if minutes == 0 {
+            self.next_auto_refresh = None;
+            return;
+        }
+        match self.next_auto_refresh {
+            Some(due) if now >= due => self.start_auto_refresh(cx),
+            Some(_) => {}
+            None => self.arm_auto_refresh(),
+        }
+    }
+
+    /// Re-arms the periodic clock from the current settings. The settings save
+    /// calls this when either auto-refresh key changes, so a new interval
+    /// applies without a restart.
+    pub fn refresh_auto_schedule(&mut self) {
+        self.next_auto_refresh = None;
+        self.arm_auto_refresh();
+    }
+
+    /// The next automatic scan's due time, for the settings page's probe and
+    /// the tick (None = parked).
+    pub fn auto_refresh_due(&self) -> Option<std::time::Instant> {
+        self.next_auto_refresh
+    }
+
+    fn arm_auto_refresh(&mut self) {
+        let minutes = self.settings().repos.auto_refresh_minutes.unwrap_or(0);
+        self.next_auto_refresh = (self.window_focused == Some(true) && minutes > 0).then(|| {
+            std::time::Instant::now() + std::time::Duration::from_secs(u64::from(minutes) * 60)
+        });
+    }
+
+    /// One automatic pass: the local scan only. The GitHub/Azure counts stay
+    /// on their own slower cadence, so focus changes and short intervals never
+    /// spend platform rate limits.
+    fn start_auto_refresh(&mut self, cx: &mut Context<Self>) {
+        self.arm_auto_refresh();
+        if self.scanning {
+            // an in-flight scan already answers this pass
+            return;
+        }
+        let settings = self.settings();
+        self.kick_scan(&settings);
+        cx.notify();
     }
 
     // ---- list shaping ------------------------------------------------------

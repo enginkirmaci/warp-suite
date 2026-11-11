@@ -118,6 +118,8 @@ pub struct SettingsPage {
     max_scan_depth: Entity<InputState>,
     group_by_root: bool,
     group_depth: usize,
+    auto_refresh_on_focus: bool,
+    auto_refresh_minutes: Entity<InputState>,
     // Git
     branch_name_prefix: Entity<InputState>,
     // External tools
@@ -184,6 +186,7 @@ struct SaveEffects {
     github: bool,
     azure: bool,
     models: bool,
+    auto_refresh: bool,
     autostart: bool,
 }
 
@@ -204,11 +207,14 @@ fn save_effects(before: &AppSettings, after: &AppSettings) -> SaveEffects {
         || before.warp_agent.harness != after.warp_agent.harness
         || before.opencode.enable_opencode != after.opencode.enable_opencode
         || before.deepseek.enable_deepseek != after.deepseek.enable_deepseek;
+    let auto_refresh = before.repos.auto_refresh_on_focus != after.repos.auto_refresh_on_focus
+        || before.repos.auto_refresh_minutes != after.repos.auto_refresh_minutes;
     SaveEffects {
         scan,
         github,
         azure,
         models,
+        auto_refresh,
         autostart: before.general.start_at_boot != after.general.start_at_boot,
     }
 }
@@ -346,6 +352,15 @@ impl SettingsPage {
             max_scan_depth: field(window, cx, &repos.max_scan_depth.to_string()),
             group_by_root: repos.group_repos_by_root.unwrap_or(false),
             group_depth: repos.group_root_depth.unwrap_or(1).clamp(1, 4) as usize,
+            auto_refresh_on_focus: repos.auto_refresh_on_focus,
+            auto_refresh_minutes: field(
+                window,
+                cx,
+                &repos
+                    .auto_refresh_minutes
+                    .map(|minutes| minutes.to_string())
+                    .unwrap_or_default(),
+            ),
             branch_name_prefix: field(window, cx, &repos.branch_name_prefix),
             vscode_executable: field(window, cx, &repos.vscode_executable),
             vscode_profile: field(window, cx, &repos.vscode_profile),
@@ -401,6 +416,7 @@ impl SettingsPage {
             &page.solution_file_pattern,
             &page.platform_folder_name,
             &page.max_scan_depth,
+            &page.auto_refresh_minutes,
             &page.branch_name_prefix,
             &page.vscode_executable,
             &page.vscode_profile,
@@ -472,6 +488,13 @@ impl SettingsPage {
             .trim()
             .parse::<i32>()
             .unwrap_or(3);
+        let auto_refresh_on_focus = self.auto_refresh_on_focus;
+        let auto_refresh_minutes = Self::value(&self.auto_refresh_minutes, cx)
+            .trim()
+            .parse::<u32>()
+            .ok()
+            .filter(|minutes| *minutes > 0)
+            .map(|minutes| minutes.min(24 * 60));
         let harness = self.harness_scope.read(cx).harness.clone();
         let (notes_path, git_pattern, solution_pattern, platform) = (
             Self::value(&self.notes_store_path, cx),
@@ -556,6 +579,8 @@ impl SettingsPage {
                 s.repos.branch_name_prefix = branch_prefix;
                 s.repos.group_repos_by_root = Some(group_by_root);
                 s.repos.group_root_depth = Some(group_depth as u8);
+                s.repos.auto_refresh_on_focus = auto_refresh_on_focus;
+                s.repos.auto_refresh_minutes = auto_refresh_minutes;
                 // enabled stays absent: absence IS the enabled state, so the
                 // only meaningful write is the opt-out
                 s.repos.enable_code_search = (!code_search_enabled).then_some(false);
@@ -619,6 +644,9 @@ impl SettingsPage {
             }
             if effects.models {
                 store.load_models_for(after.warp_agent.harness.clone(), false, cx);
+            }
+            if effects.auto_refresh {
+                store.refresh_auto_schedule();
             }
             cx.notify();
         });
@@ -1075,6 +1103,20 @@ impl SettingsPage {
                 if self.group_by_root {
                     rows.push(group_depth_row(self, cx, rows.is_empty()));
                 }
+                rows.push(kit_settings::switch_row_with_desc(
+                    "set-auto-refresh-focus",
+                    "Refresh on focus",
+                    "settings-row-Refresh on focus".to_string(),
+                    "Rescan the repo list when the window regains focus",
+                    self.auto_refresh_on_focus,
+                    rows.is_empty(),
+                    cx.listener(|this, _, _, cx| {
+                        this.auto_refresh_on_focus = !this.auto_refresh_on_focus;
+                        this.save(cx);
+                        cx.notify();
+                    }),
+                ));
+                rows.push(auto_refresh_minutes_row(self, window, cx, rows.is_empty()));
             }
             Section::Git => {
                 rows.push(field_row(
@@ -1664,6 +1706,39 @@ fn field_row(
     )
 }
 
+/// The automatic refresh interval: a minutes field under its own description.
+/// 0 or an empty field means off; the save clamps it to a day.
+fn auto_refresh_minutes_row(
+    this: &SettingsPage,
+    window: &Window,
+    cx: &App,
+    first: bool,
+) -> gpui::AnyElement {
+    let control = div()
+        .debug_selector(|| "settings-field-Auto-refresh every".into())
+        .w(px(160.))
+        .min_w_0()
+        .child(warpui_kit_core::field::custom(
+            "settings-field-auto-refresh",
+            &this.auto_refresh_minutes,
+            window,
+            cx,
+            |input| {
+                input
+                    .aria_label("Auto-refresh every (minutes)")
+                    .font_family(SharedString::from(theme::code_font()))
+                    .text_size(px(theme::font_mono_meta()))
+            },
+        ));
+    kit_settings::row_with_desc(
+        "settings-row-Auto-refresh every",
+        "Auto-refresh every",
+        "Minutes between scans while the window is focused; 0 = off",
+        control,
+        first,
+    )
+}
+
 /// The group-depth picker: 1/2/3/4 as the design's segmented control. Only
 /// rendered while grouping is on.
 fn group_depth_row(
@@ -1690,7 +1765,13 @@ fn group_depth_row(
                 cx.notify();
             });
         });
-    kit_settings::row("group-depth-row", "Group depth", control, first)
+    kit_settings::row_with_desc(
+        "group-depth-row",
+        "Group depth",
+        "1 names the folder containing each repo; 2 its parent, and so on",
+        control,
+        first,
+    )
 }
 
 impl SettingsPage {

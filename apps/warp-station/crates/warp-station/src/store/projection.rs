@@ -45,13 +45,12 @@ impl ProjectedRow {
 /// list (repo rows only, no headers).
 pub struct Grouping<'a> {
     pub roots: &'a [String],
-    /// Folder levels the headers sit at, counting up from the scan roots'
-    /// shared folder (1 = that folder itself, 2 = its parent, …). Every
-    /// repo under the roots folds into the header, so a larger level widens
-    /// the group. Roots that resolve to one folder share a header; roots
-    /// sharing no named folder count from their own folder. A volume (a drive
-    /// letter, a UNC server, the filesystem root) is not a folder, so it never
-    /// becomes a header and never counts as a shared one.
+    /// Folder levels above each repo's own folder: 1 = the folder that
+    /// contains it, 2 = that folder's parent, and so on. Every repo under a
+    /// root groups under its own parent at that level, so two siblings fold
+    /// together and two repos with different parents stay apart. A volume (a
+    /// drive letter, a UNC server, the filesystem root) is not a folder, so it
+    /// never becomes a header; ascension stops at the topmost named folder.
     pub depth: usize,
     pub collapsed: &'a std::collections::HashSet<String>,
     /// When set, only this group's repos are projected (the header's
@@ -115,16 +114,21 @@ pub fn project_scoped(
     // OR-tag filter first (as flat), then the solo filter: only the soloed
     // group's repos survive, the rest of the buckets come up empty.
     let solo = grouping.solo;
-    // which roots share a header, and the folder each family counts up from,
-    // does not depend on the repo: resolve it once per projection instead of
-    // canonicalizing every root per row
-    let families = root_families(grouping.roots);
+    // roots that resolve away from their lexical text (a symlink, a mount
+    // alias) mean the repos need the same resolution before their parents
+    // are compared: resolve once per projection, not per row on every list
+    let resolve_aliases = grouping.roots.iter().any(|root| {
+        let lexical = root.trim_end_matches(['/', '\\']);
+        let resolved = canonical_text(root);
+        !same_folder_text(lexical, resolved.trim_end_matches(['/', '\\']))
+    });
     let mut groups: Vec<(String, String, Vec<usize>)> = Vec::new();
     for &ix in &sorted {
         let (key, name) = assign_group(
             &repos[ix].folder_path.to_string_lossy(),
-            &families,
+            grouping.roots,
             grouping.depth,
+            resolve_aliases,
         );
         if solo.is_some_and(|solo| !keys_match(solo, &key)) {
             continue;
@@ -185,22 +189,37 @@ fn push_group(
 }
 
 fn keys_match(a: &str, b: &str) -> bool {
-    a == b
+    // Windows paths are case-insensitive: two spellings of one parent must
+    // land in one bucket, not two headers that differ only by case.
+    same_folder_text(a, b)
 }
 
 /// A repo groups only when some root contains its folder (roots may
 /// themselves be repo folders); no match → the "other" fallback group.
-/// Otherwise the repo joins its root's family and takes that family's header:
-/// the shared folder at depth 1, that folder's parent at depth 2, and so on,
-/// so a deeper level always widens the group instead of subdividing it.
-fn assign_group(folder: &str, families: &[Family], depth: usize) -> (String, String) {
-    let Some(family) = families
-        .iter()
-        .find(|family| family.roots.iter().any(|root| is_under(folder, root)))
-    else {
+/// Otherwise it groups under the folder `depth` levels above its own: depth 1
+/// is the folder containing the repo, 2 that folder's parent, and so on, so
+/// the header always names a real parent rather than a repo folder.
+fn assign_group(
+    folder: &str,
+    roots: &[String],
+    depth: usize,
+    resolve_aliases: bool,
+) -> (String, String) {
+    if !roots.iter().any(|root| is_under(folder, root)) {
         return (OTHER_GROUP_KEY.to_string(), OTHER_GROUP_NAME.to_string());
+    }
+    let base = if resolve_aliases {
+        canonical_text(folder)
+    } else {
+        folder.to_string()
     };
-    let key = ancestor_folder(&family.trunk, depth.saturating_sub(1));
+    let base = base.trim_end_matches(['/', '\\']).to_string();
+    let key = ancestor_folder(&base, depth);
+    // no named folder above the repo itself: there is nothing to name a
+    // group after (a repo at a volume's root lands here)
+    if key == base && depth > 0 {
+        return (OTHER_GROUP_KEY.to_string(), OTHER_GROUP_NAME.to_string());
+    }
     // a header is a folder, never a volume: a `C:\` scan root has no name of
     // its own to group under, so its repos fall back like unreachable ones
     if !has_named_folder(&key) {
@@ -222,127 +241,6 @@ fn ancestor_folder(base: &str, levels: usize) -> String {
         }
     }
     current
-}
-
-/// One family of scan roots: the roots that share a folder, and the folder
-/// their headers count up from. Roots that share nothing but the volume stay
-/// apart, so a drive letter never becomes the one header every repo falls
-/// into — on Windows that also froze the depth picker, since no level can
-/// climb above a bare drive — and one root on another volume cannot collapse
-/// every other tree to one header per repo.
-struct Family {
-    /// The roots as the settings spell them: membership is a lexical match
-    /// against these, not against the canonical text.
-    roots: Vec<String>,
-    /// Canonical text of the deepest folder every member shares.
-    trunk: String,
-}
-
-/// Splits the scan roots into families and resolves each family's trunk once
-/// per projection. Roots are canonicalized first, so a symlink and its target
-/// (or the same tree reached through two mounts) count as one family; a root
-/// that resolves to an already-seen folder is dropped.
-fn root_families(roots: &[String]) -> Vec<Family> {
-    let mut entries: Vec<(String, String)> = Vec::new();
-    for root in roots {
-        let canonical = canonical_text(root);
-        let canonical = canonical.trim_end_matches(['/', '\\']).to_string();
-        if canonical.is_empty()
-            || entries
-                .iter()
-                .any(|(_, seen)| same_folder_text(seen, &canonical))
-        {
-            continue;
-        }
-        entries.push((root.clone(), canonical));
-    }
-
-    // union-find: two roots join one family when they share a named folder
-    let mut parent: Vec<usize> = (0..entries.len()).collect();
-    for (left, entry) in entries.iter().enumerate() {
-        for (right, other) in entries.iter().enumerate().skip(left + 1) {
-            if !shares_named_folder(&entry.1, &other.1) {
-                continue;
-            }
-            let a = find_root(&mut parent, left);
-            let b = find_root(&mut parent, right);
-            if a != b {
-                parent[a] = b;
-            }
-        }
-    }
-
-    let mut members: Vec<Vec<usize>> = Vec::new();
-    let mut slots: Vec<Option<usize>> = vec![None; entries.len()];
-    for ix in 0..entries.len() {
-        let root = find_root(&mut parent, ix);
-        let slot = *slots[root].get_or_insert_with(|| {
-            members.push(Vec::new());
-            members.len() - 1
-        });
-        members[slot].push(ix);
-    }
-
-    members
-        .into_iter()
-        .map(|group| {
-            let trunks: Vec<&str> = group.iter().map(|&ix| entries[ix].1.as_str()).collect();
-            Family {
-                trunk: family_trunk(&trunks),
-                roots: group.iter().map(|&ix| entries[ix].0.clone()).collect(),
-            }
-        })
-        .collect()
-}
-
-/// The root of a union-find node, with path compression.
-fn find_root(parent: &mut [usize], mut ix: usize) -> usize {
-    while parent[ix] != ix {
-        parent[ix] = parent[parent[ix]];
-        ix = parent[ix];
-    }
-    ix
-}
-
-/// The deepest folder every member of one family shares; a single-member
-/// family's trunk is its own root. Members are canonical and trimmed.
-fn family_trunk(members: &[&str]) -> String {
-    let Some(first) = members.first().copied() else {
-        return String::new();
-    };
-    let mut shared = components(first);
-    for other in &members[1..] {
-        let other = components(other);
-        let mut keep = 0;
-        while keep < shared.len()
-            && keep < other.len()
-            && same_folder_text(shared[keep], other[keep])
-        {
-            keep += 1;
-        }
-        shared.truncate(keep);
-    }
-    if shared.is_empty() {
-        return first.to_string();
-    }
-    first[..component_prefix_len(first, shared.len())].to_string()
-}
-
-/// Whether two canonical roots share a folder with a name of its own. The
-/// volume does not count: `C:\Users\x` and `C:\src` share only `C:`, which
-/// nobody wants a header named after (and nothing can be raised above it, so
-/// every depth would show the same band).
-fn shares_named_folder(left: &str, right: &str) -> bool {
-    let left_parts = components(left);
-    let right_parts = components(right);
-    let mut keep = 0;
-    while keep < left_parts.len()
-        && keep < right_parts.len()
-        && same_folder_text(left_parts[keep], right_parts[keep])
-    {
-        keep += 1;
-    }
-    keep > volume_components(left)
 }
 
 /// Path components in order, either separator, empty segments dropped.
@@ -373,29 +271,6 @@ fn volume_components(path: &str) -> usize {
 /// `/` do not, so a header never names itself after one.
 fn has_named_folder(path: &str) -> bool {
     components(path).len() > volume_components(path)
-}
-
-/// Byte length of `path`'s first `count` non-empty components (separators
-/// included), so the trunk is a literal prefix of the root text.
-fn component_prefix_len(path: &str, count: usize) -> usize {
-    if count == 0 {
-        return 0;
-    }
-    let bytes = path.as_bytes();
-    let mut seen = 0usize;
-    let mut start = 0usize;
-    for ix in 0..=bytes.len() {
-        if ix == bytes.len() || bytes[ix] == b'/' || bytes[ix] == b'\\' {
-            if ix > start {
-                seen += 1;
-                if seen == count {
-                    return ix;
-                }
-            }
-            start = ix + 1;
-        }
-    }
-    bytes.len()
 }
 
 /// The folder's text with symlinks resolved, even when the folder itself no
@@ -971,7 +846,7 @@ mod tests {
     }
 
     #[test]
-    fn depth_counts_up_from_the_roots_shared_folder() {
+    fn depth_counts_up_from_each_repos_parent() {
         let all = vec![
             repo("alpha", "/home/u/work/alpha", &[]),
             repo("beta", "/home/u/work/rust/beta", &[]),
@@ -979,6 +854,54 @@ mod tests {
         ];
         let roots = vec!["/home/u/work".to_string(), "/home/u/work/rust".to_string()];
         let collapsed = std::collections::HashSet::new();
+        let sketch_at = |depth| {
+            let rows = project(
+                &all,
+                &[],
+                RepoSortMode::Name,
+                true,
+                false,
+                Some(&grouping_at(&roots, &collapsed, depth)),
+            );
+            sketch(&rows, &all)
+        };
+        assert_eq!(
+            sketch_at(1),
+            vec![
+                "#/home/u/work(1)",
+                "alpha",
+                "#/home/u/work/rust(1)",
+                "beta",
+                "#/home/u/work/rust/deep(1)",
+                "gamma",
+            ],
+            "depth 1 groups each repo under the folder that contains it"
+        );
+        assert_eq!(
+            sketch_at(2),
+            vec![
+                "#/home/u(1)",
+                "alpha",
+                "#/home/u/work(1)",
+                "beta",
+                "#/home/u/work/rust(1)",
+                "gamma",
+            ],
+            "depth 2 raises each header to the parent's parent"
+        );
+        assert_eq!(
+            sketch_at(3),
+            vec![
+                "#/home(1)",
+                "alpha",
+                "#/home/u(1)",
+                "beta",
+                "#/home/u/work(1)",
+                "gamma",
+            ],
+            "depth 3 keeps climbing: the header always names a real folder"
+        );
+
         let rows = project(
             &all,
             &[],
@@ -986,24 +909,6 @@ mod tests {
             true,
             false,
             Some(&grouping_at(&roots, &collapsed, 1)),
-        );
-        assert_eq!(
-            sketch(&rows, &all),
-            vec!["#/home/u/work(3)", "alpha", "beta", "gamma"],
-            "depth 1 folds every repo into the roots' shared folder"
-        );
-        let rows = project(
-            &all,
-            &[],
-            RepoSortMode::Name,
-            true,
-            false,
-            Some(&grouping_at(&roots, &collapsed, 2)),
-        );
-        assert_eq!(
-            sketch(&rows, &all),
-            vec!["#/home/u(3)", "alpha", "beta", "gamma"],
-            "depth 2 raises the one header to the shared folder's parent"
         );
         let ProjectedRow::Group {
             name,
@@ -1014,22 +919,9 @@ mod tests {
         else {
             panic!("expected a group header");
         };
-        assert_eq!(name, "u", "the header names itself after the folder");
-        assert_eq!(*count, 3, "all three repos fold into the level's group");
+        assert_eq!(name, "work", "the header names itself after the parent");
+        assert_eq!(*count, 1, "only the repo directly under it joins");
         assert!(!open, "groups start expanded");
-        let rows = project(
-            &all,
-            &[],
-            RepoSortMode::Name,
-            true,
-            false,
-            Some(&grouping_at(&roots, &collapsed, 3)),
-        );
-        assert_eq!(
-            sketch(&rows, &all),
-            vec!["#/home(3)", "alpha", "beta", "gamma"],
-            "depth 3 raises the header again, still one group"
-        );
     }
 
     #[test]
@@ -1279,7 +1171,8 @@ mod tests {
     #[test]
     fn roots_may_point_at_repo_folders_themselves() {
         // scan roots are repo folders too (the adopt/add flow persists them),
-        // so a root must match its own folder, not only subfolders
+        // so a root must match its own folder, not only subfolders; the
+        // header counts from the repo's parent, never from the repo itself
         let all = vec![repo("alpha", "/repos/alpha", &[])];
         let roots = vec!["/repos/alpha".to_string()];
         let collapsed = std::collections::HashSet::new();
@@ -1291,7 +1184,7 @@ mod tests {
             false,
             Some(&grouping(&roots, &collapsed)),
         );
-        assert_eq!(sketch(&rows, &all), vec!["#/repos/alpha(1)", "alpha"]);
+        assert_eq!(sketch(&rows, &all), vec!["#/repos(1)", "alpha"]);
         let rows = project(
             &all,
             &[],
@@ -1303,7 +1196,7 @@ mod tests {
         assert_eq!(
             sketch(&rows, &all),
             vec!["#/repos(1)", "alpha"],
-            "depth 1 is the root itself for a lone repo; depth 2 is its parent"
+            "depth 1 is the repo's parent; ascending past the topmost named folder keeps it"
         );
         let rows = project(
             &all,
@@ -1321,7 +1214,7 @@ mod tests {
     }
 
     #[test]
-    fn depth_one_folds_into_the_shared_root() {
+    fn depth_one_groups_by_the_repos_parent() {
         let all = vec![
             repo("alpha", "/roots/a/work/alpha", &[]),
             repo("beta", "/roots/a/work/beta", &[]),
@@ -1339,13 +1232,15 @@ mod tests {
         );
         assert_eq!(
             sketch(&rows, &all),
-            vec!["#/roots/a(3)", "alpha", "beta", "gamma"],
-            "depth 1 folds every repo under the root into one header"
+            vec![
+                "#/roots/a/side(1)",
+                "gamma",
+                "#/roots/a/work(2)",
+                "alpha",
+                "beta"
+            ],
+            "depth 1 groups by the repo's own parent, not the scan root"
         );
-        let ProjectedRow::Group { name, .. } = &rows[0] else {
-            panic!("expected a group header");
-        };
-        assert_eq!(name, "a", "the header names itself after the folder");
         let rows = project(
             &all,
             &[],
@@ -1356,9 +1251,13 @@ mod tests {
         );
         assert_eq!(
             sketch(&rows, &all),
-            vec!["#/roots(3)", "alpha", "beta", "gamma"],
-            "depth 2 raises the header to the root's parent"
+            vec!["#/roots/a(3)", "alpha", "beta", "gamma"],
+            "depth 2 raises both parents to the shared folder"
         );
+        let ProjectedRow::Group { name, .. } = &rows[0] else {
+            panic!("expected a group header");
+        };
+        assert_eq!(name, "a", "the header names itself after the folder");
     }
 
     #[test]
@@ -1382,7 +1281,7 @@ mod tests {
     }
 
     #[test]
-    fn depth_levels_count_up_from_the_root() {
+    fn depth_levels_count_up_from_each_repo() {
         let all = vec![
             repo("alpha", "/home/u/work/rust/alpha", &[]),
             repo("beta", "/home/u/work/go/beta", &[]),
@@ -1399,7 +1298,13 @@ mod tests {
         );
         assert_eq!(
             sketch(&rows, &all),
-            vec!["#/home/u/work(2)", "alpha", "beta"]
+            vec![
+                "#/home/u/work/go(1)",
+                "beta",
+                "#/home/u/work/rust(1)",
+                "alpha"
+            ],
+            "depth 1 keeps each repo under its own parent"
         );
         let rows = project(
             &all,
@@ -1411,8 +1316,8 @@ mod tests {
         );
         assert_eq!(
             sketch(&rows, &all),
-            vec!["#/home/u(2)", "alpha", "beta"],
-            "depth 2 raises the header one folder above the root"
+            vec!["#/home/u/work(2)", "alpha", "beta"],
+            "depth 2 raises both parents to the folder they share"
         );
         let rows = project(
             &all,
@@ -1424,15 +1329,29 @@ mod tests {
         );
         assert_eq!(
             sketch(&rows, &all),
-            vec!["#/home(2)", "alpha", "beta"],
+            vec!["#/home/u(2)", "alpha", "beta"],
             "depth 3 keeps climbing, still one group"
+        );
+        let rows = project(
+            &all,
+            &[],
+            RepoSortMode::Name,
+            true,
+            false,
+            Some(&grouping_at(&roots, &collapsed, 4)),
+        );
+        assert_eq!(
+            sketch(&rows, &all),
+            vec!["#/home(2)", "alpha", "beta"],
+            "depth 4 reaches the topmost named folder"
         );
     }
 
     #[test]
-    fn leaf_roots_under_one_parent_merge_into_it_at_depth_one() {
-        // the adopt/add flow seeds one root per repo folder; depth 1 should
-        // hang them all under the folder they share
+    fn leaf_roots_group_under_their_own_parents() {
+        // the adopt/add flow seeds one root per repo folder: depth 1 names
+        // each repo's parent, so a nested repo keeps its own parent's header
+        // instead of folding into the folder all the roots share
         let all = vec![
             repo("alpha", "/home/e/Developments/Warp Station", &[]),
             repo("beta", "/home/e/Developments/lumux", &[]),
@@ -1454,15 +1373,21 @@ mod tests {
         );
         assert_eq!(
             sketch(&rows, &all),
-            vec!["#/home/e/Developments(3)", "alpha", "beta", "gamma"],
-            "one header for every repo under the shared folder, nested repo included"
+            vec![
+                "#/home/e/Developments(2)",
+                "alpha",
+                "beta",
+                "#/home/e/Developments/test(1)",
+                "gamma",
+            ],
+            "depth 1 hangs the sibling roots under Developments and the nested one under test"
         );
         let ProjectedRow::Group { name, .. } = &rows[0] else {
             panic!("expected a group header");
         };
         assert_eq!(
             name, "Developments",
-            "the header keeps the shared folder's own spelling"
+            "the header keeps the parent folder's own spelling"
         );
 
         let rows = project(
@@ -1475,13 +1400,19 @@ mod tests {
         );
         assert_eq!(
             sketch(&rows, &all),
-            vec!["#/home/e(3)", "alpha", "beta", "gamma"],
-            "depth 2 raises the single header to the shared folder's parent"
+            vec![
+                "#/home/e(2)",
+                "alpha",
+                "beta",
+                "#/home/e/Developments(1)",
+                "gamma",
+            ],
+            "depth 2 raises each parent one folder: the roots' shared folder reappears"
         );
     }
 
     #[test]
-    fn disjoint_roots_count_up_from_their_own_folders() {
+    fn disjoint_roots_group_under_their_parents() {
         let all = vec![repo("alpha", "/work/x", &[]), repo("beta", "/mnt/y", &[])];
         let roots = vec!["/work/x".to_string(), "/mnt/y".to_string()];
         let collapsed = std::collections::HashSet::new();
@@ -1495,8 +1426,8 @@ mod tests {
         );
         assert_eq!(
             sketch(&rows, &all),
-            vec!["#/mnt/y(1)", "beta", "#/work/x(1)", "alpha"],
-            "roots sharing no folder keep one header each at depth 1"
+            vec!["#/mnt(1)", "beta", "#/work(1)", "alpha"],
+            "depth 1 names each repo's parent folder"
         );
         let rows = project(
             &all,
@@ -1509,7 +1440,45 @@ mod tests {
         assert_eq!(
             sketch(&rows, &all),
             vec!["#/mnt(1)", "beta", "#/work(1)", "alpha"],
-            "depth 2 raises each disjoint tree's header by one folder"
+            "depth 2 stops at the topmost named folder, not at /"
+        );
+    }
+
+    /// Three repo-folder roots with three different parents render three
+    /// headers, each named after its parent — not two roots folded under a
+    /// shared ancestor and the third under the repo itself.
+    #[test]
+    fn three_repo_roots_with_different_parents_keep_three_headers() {
+        let all = vec![
+            repo("alpha", r"C:\Projects\Alpha\repo-alpha", &[]),
+            repo("beta", r"C:\Projects\Beta\repo-beta", &[]),
+            repo("gamma", r"D:\Personal\Gamma\repo-gamma", &[]),
+        ];
+        let roots = vec![
+            r"C:\Projects\Alpha\repo-alpha".to_string(),
+            r"C:\Projects\Beta\repo-beta".to_string(),
+            r"D:\Personal\Gamma\repo-gamma".to_string(),
+        ];
+        let collapsed = std::collections::HashSet::new();
+        let rows = project(
+            &all,
+            &[],
+            RepoSortMode::Name,
+            true,
+            false,
+            Some(&grouping(&roots, &collapsed)),
+        );
+        assert_eq!(
+            sketch(&rows, &all),
+            vec![
+                r"#C:\Projects\Alpha(1)",
+                "alpha",
+                r"#C:\Projects\Beta(1)",
+                "beta",
+                r"#D:\Personal\Gamma(1)",
+                "gamma",
+            ],
+            "each repo groups under its own parent, never a shared ancestor or itself"
         );
     }
 
@@ -1589,10 +1558,10 @@ mod tests {
         );
     }
 
-    /// One root on another volume must not collapse the whole list into one
-    /// header per repo: the tree that shares a folder keeps sharing it.
+    /// A root on another volume groups under its own parent, not the repo
+    /// folder itself; the tree that shares a folder keeps sharing it.
     #[test]
-    fn a_root_on_another_drive_keeps_the_other_tree_together() {
+    fn a_root_on_another_drive_groups_under_its_parent() {
         let all = vec![
             repo("alpha", r"C:\Users\e\Developments\alpha", &[]),
             repo("beta", r"C:\Users\e\Developments\beta", &[]),
@@ -1618,10 +1587,10 @@ mod tests {
                 r"#C:\Users\e\Developments(2)",
                 "alpha",
                 "beta",
-                r"#D:\repos\gamma(1)",
+                r"#D:\repos(1)",
                 "gamma"
             ],
-            "the two C: roots still share Developments; the lone D: root is its own family"
+            "the two C: roots share Developments; the lone D: repo takes its parent's header"
         );
     }
 
@@ -1653,10 +1622,10 @@ mod tests {
         );
     }
 
-    /// A scan root at the drive itself names nothing to group under; its
-    /// repos fall back to "Other" instead of a `C:` band.
+    /// A scan root at the drive itself still groups its repos under their own
+    /// parent; the drive never becomes a `C:` band.
     #[test]
-    fn a_scan_root_at_the_drive_falls_back_to_other() {
+    fn a_scan_root_at_the_drive_still_groups_by_the_repos_parent() {
         let all = vec![repo("alpha", r"C:\src\alpha", &[])];
         let roots = vec![r"C:\".to_string()];
         let collapsed = std::collections::HashSet::new();
@@ -1668,7 +1637,7 @@ mod tests {
             false,
             Some(&grouping(&roots, &collapsed)),
         );
-        assert_eq!(sketch(&rows, &all), vec!["#other(1)", "alpha"]);
+        assert_eq!(sketch(&rows, &all), vec![r"#C:\src(1)", "alpha"]);
     }
 
     /// Two spellings of one folder (a scan root under a symlink and the same
