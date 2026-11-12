@@ -74,7 +74,7 @@ python3 scripts/meta/version.py build bump      # if this kit release owns a new
 python3 scripts/meta/version.py bump minor      # only when MINOR/MAJOR moves
 git commit -m "chore(kits): release the kit line"
 git tag -a "kits-v<version>" -m "warpui-kits <version>"
-git push origin main "kits-v<version>"           # kits-release.yml publishes it
+git push origin main "kits-v<version>"           # apps consume the tag
 ```
 
 App line:
@@ -93,7 +93,5 @@ release. It downloads the pinned app releases; it never rebuilds app sources.
 
 ## CI
 
-- `kits.yml` runs `version.py check --history` and the kit gate.
-- `kits-release.yml` checks the tag against `version.toml` and publishes the
-  kit artifacts.
+- `kits.yml` runs `version.py check` and the kit gate.
 - Each app's `ci.yml` / `release.yml` do the same for that app's line.

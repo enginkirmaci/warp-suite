@@ -114,7 +114,7 @@ dependencies; do not commit that extension. The app repositories keep
 3. Build an app through `apps/`: it picks the change up immediately, no tag
    needed.
 4. When the change is ready for the apps, cut a kit tag
-   (`kits-v<version>`) and publish it with `kits-release.yml`.
+   (`kits-v<version>`); apps consume the tag directly.
 5. Each app bumps its kit pin in its own PR and runs its CI.
 
 ## App changes

@@ -170,7 +170,7 @@ Windows build is the app repository's `release` workflow.
 
 The apps talk to each other across repositories. These are the interfaces that
 must move together: land both sides in the same change window and let the
-pinned integration gate prove the pair.
+suite pin table and each app's CI carry the pair.
 
 - **warp-agent door** (`~/.warp/agent/ipc.port` + `ipc.token`):
   token-authenticated NDJSON on `127.0.0.1`. Commands: `ping`,
