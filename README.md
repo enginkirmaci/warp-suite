@@ -225,7 +225,7 @@ symlink. Windows compiles an installer only when
   release builds from this repo alone. The suite commit is the kits'
   provenance — no sync step, no
   second copy. Everything resolves from the one committed root
-  `Cargo.lock`, so `cargo --locked` in CI resolves the same versions every
+  `Cargo.lock`, so CI resolves the same versions every
   run; `cargo test` after changing a kit builds the apps against it
   directly.
 

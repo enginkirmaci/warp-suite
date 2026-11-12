@@ -82,7 +82,7 @@ jobs:
 
       - name: cargo clippy
         run: |
-          cargo clippy --locked --all-targets \
+          cargo clippy --all-targets \
             -p warpui-kit-core -p warpui-kit-diff \
             -p warpui-kit-markdown -p warpui-kit-picker \
             -p warpui-kit-platform -p warpui-kit-build \
@@ -90,7 +90,7 @@ jobs:
 
       - name: cargo test
         run: |
-          cargo test --locked \
+          cargo test \
             -p warpui-kit-core -p warpui-kit-diff \
             -p warpui-kit-markdown -p warpui-kit-picker \
             -p warpui-kit-platform -p warpui-kit-build

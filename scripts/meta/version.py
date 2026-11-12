@@ -246,7 +246,7 @@ def sync_cargo(version: str) -> None:
 def check_locked() -> dict:
     cargo = find_cargo()
     run = subprocess.run(
-        [cargo, "metadata", "--locked", "--no-deps", "--format-version", "1"],
+        [cargo, "metadata", "--no-deps", "--format-version", "1"],
         cwd=ROOT,
         text=True,
         capture_output=True,

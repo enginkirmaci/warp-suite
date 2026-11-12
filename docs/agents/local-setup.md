@@ -103,6 +103,9 @@ warpui-kit-core = { path = "kits/warpui-kit-core" }
 So the same app manifest builds two ways: from the tag in the app's own CI,
 and from the local kits when built through `apps/`. The two lockfiles are
 expected to differ (git source vs path source); never copy one over the other.
+Building a linked app also extends warp-suite's `Cargo.lock` with that app's
+dependencies; do not commit that extension. The app repositories keep
+`--locked` on their own lockfiles.
 
 ## Kit changes
 

@@ -64,8 +64,10 @@ symlinked build work.
   2024, `kits/*` as members and an `apps/*` glob that adds whatever app
   checkouts are linked locally. App repositories have their own workspace,
   lockfile and version; do not add their crates as explicit members here.
-- One [`Cargo.lock`](Cargo.lock) serves the kits and the linked apps. CI runs
-  kit-only with `--locked`; keep it committed and do not hand-edit it.
+- One [`Cargo.lock`](Cargo.lock) serves the kits and the linked apps. A linked
+  app build extends it locally with that app's dependencies; do not commit that
+  extension. The suite CI runs without `--locked` because the linked set is
+  machine-local; the app repositories keep `--locked` on their own lockfiles.
 - [`rust-toolchain.toml`](rust-toolchain.toml) pins channel `1.99`. Patch
   releases flow; bump the channel deliberately, in one edit, because CI reads
   it from this file.
@@ -96,14 +98,14 @@ cargo test -p warp-notes
 cargo test -p warp-station -p warp-station-core
 cargo test -p warpui-kit-core
 cargo fmt --all
-cargo clippy --locked --all-targets -p warpui-kit-core -- -D warnings
+cargo clippy --all-targets -p warpui-kit-core -- -D warnings
 ```
 
 The kit CI gate is [`.github/workflows/kits.yml`](.github/workflows/kits.yml):
 
 - `cargo fmt --all --check`.
 - Clippy with `-D warnings` on the six kit crates.
-- `cargo test --locked` on the six kit crates.
+- `cargo test` on the six kit crates.
 
 Each app's own `ci.yml` runs that app's fmt, clippy and tests. The Android
 Gradle project is built in its own repository:
@@ -122,7 +124,7 @@ to fix formatting rather than reporting it.
 The kit clippy selectors are:
 
 ```sh
-cargo clippy --locked --all-targets \
+cargo clippy --all-targets \
   -p warpui-kit-core -p warpui-kit-diff -p warpui-kit-markdown \
   -p warpui-kit-picker -p warpui-kit-platform -p warpui-kit-build \
   -- -D warnings

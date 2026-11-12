@@ -122,8 +122,8 @@ foreach ($name in $appNames) {
 
     Push-Location $root
     try {
-        # --locked: a release ships the committed lockfile's graph
-        & cargo build --release --locked -p $package
+        # No --locked here: a linked app build extends the kit-only lockfile.
+        & cargo build --release -p $package
         if ($LASTEXITCODE -ne 0) { throw "cargo build failed for $package" }
     } finally {
         Pop-Location

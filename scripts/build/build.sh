@@ -116,9 +116,10 @@ while read -r app; do
     # with a package selector; -p also picks the right member when a directory
     # is not a package root (apps/warp-station/crates/...).
     # shellcheck disable=SC2086
-    # --locked: a release ships the committed lockfile's graph; a forgotten
+    # No --locked here: a linked app build extends the kit-only lockfile with
+    # the app's dependencies, and that extension is not committed.
     # lockfile update fails here instead of drifting into the bundle
-    (cd "$root" && cargo build --release --locked -p "$package" $build_args)
+    (cd "$root" && cargo build --release -p "$package" $build_args)
 
     meta="$(cd "$root" && cargo metadata --no-deps --format-version 1)"
     target_dir="$(jq -r '.target_directory' <<<"$meta")"
