@@ -40,7 +40,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.11"
+version = "0.1.12"
 edition = "2024"
 # Apps inherit GPL-3.0; every kit overrides this with "MIT" in its own
 # manifest. The publishable kits inherit the suite URL the same way.
@@ -89,6 +89,18 @@ tracing-appender = "0.2"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 unicode-segmentation = "1"
 winresource = "0.1"
+
+# App repositories pin the kits by git tag. When an app is built through
+# warp-suite/apps/ (the symlinked local workspace), this table swaps the git
+# source for the local kits checkout. The URL must match the one in every app
+# Cargo.toml, because Cargo keys a patch on the source URL, not on the tag.
+[patch."https://github.com/enginkirmaci/warp-suite"]
+warpui-kit-core = { path = "kits/warpui-kit-core" }
+warpui-kit-diff = { path = "kits/warpui-kit-diff" }
+warpui-kit-markdown = { path = "kits/warpui-kit-markdown" }
+warpui-kit-picker = { path = "kits/warpui-kit-picker" }
+warpui-kit-platform = { path = "kits/warpui-kit-platform" }
+warpui-kit-build = { path = "kits/warpui-kit-build" }
 
 # Dev/test profile: line tables only.
 #

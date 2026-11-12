@@ -2,5 +2,5 @@
 # scripts/meta/version.py is the only writer. MINOR/MAJOR move by hand; PATCH moves
 # on every commit (pre-commit hook) and never resets. build moves on every
 # scripts/build/build.sh or scripts/build/build.ps1 run.
-version = "0.1.11"
+version = "0.1.12"
 build = 1
