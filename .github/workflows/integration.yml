@@ -37,6 +37,16 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      - name: Configure git and gh for the private kit source
+        env:
+          SUITE_READ_TOKEN: ${{ secrets.SUITE_READ_TOKEN }}
+        run: |
+          if [ -z "${SUITE_READ_TOKEN:-}" ]; then
+            echo "::error::SUITE_READ_TOKEN is not set; the app repositories are private"
+            exit 1
+          fi
+          git config --global url."https://x-access-token:${SUITE_READ_TOKEN}@github.com/".insteadOf "https://github.com/"
+
       - name: Check out the pinned app tags
         env:
           GH_TOKEN: ${{ secrets.SUITE_READ_TOKEN }}
