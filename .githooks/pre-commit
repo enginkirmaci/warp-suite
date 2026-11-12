@@ -1,6 +1,6 @@
 #!/bin/sh
 # Bump PATCH on every commit and stage the derived Cargo files, so a commit
-# carries the version it ships. scripts/version.py owns the edit; this hook is
+# carries the version it ships. scripts/meta/version.py owns the edit; this hook is
 # only the trigger. WARP_VERSION_SKIP=1 skips it (amend, rebase, emergencies).
 
 set -eu
@@ -23,4 +23,4 @@ if ! "$py" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 11) els
     exit 1
 fi
 
-exec "$py" "$root/scripts/version.py" pre-commit
+exec "$py" "$root/scripts/meta/version.py" pre-commit

@@ -8735,7 +8735,7 @@ dependencies = [
 
 [[package]]
 name = "warp-agent"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "anyhow",
  "async-channel",
@@ -8768,7 +8768,7 @@ dependencies = [
 
 [[package]]
 name = "warp-android-scribe-bridge"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -8789,7 +8789,7 @@ dependencies = [
 
 [[package]]
 name = "warp-notes"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "anyhow",
  "chrono",
@@ -8810,7 +8810,7 @@ dependencies = [
 
 [[package]]
 name = "warp-snapit"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "anyhow",
  "serde",
@@ -8822,7 +8822,7 @@ dependencies = [
 
 [[package]]
 name = "warp-station"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "anyhow",
  "async-channel",
@@ -8850,7 +8850,7 @@ dependencies = [
 
 [[package]]
 name = "warp-station-core"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "anyhow",
  "async-channel",
@@ -8870,14 +8870,14 @@ dependencies = [
 
 [[package]]
 name = "warpui-kit-build"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "winresource",
 ]
 
 [[package]]
 name = "warpui-kit-core"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "async-channel",
  "futures-util",
@@ -8893,7 +8893,7 @@ dependencies = [
 
 [[package]]
 name = "warpui-kit-diff"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "gpui-kit",
  "gpui-pre",
@@ -8904,7 +8904,7 @@ dependencies = [
 
 [[package]]
 name = "warpui-kit-markdown"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "anyhow",
  "gpui-kit",
@@ -8919,7 +8919,7 @@ dependencies = [
 
 [[package]]
 name = "warpui-kit-picker"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "gpui-kit",
  "gpui-pre",
@@ -8928,7 +8928,7 @@ dependencies = [
 
 [[package]]
 name = "warpui-kit-platform"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "anyhow",
  "gpui-kit",

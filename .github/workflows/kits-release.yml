@@ -1,0 +1,112 @@
+name: kits-release
+
+# Publishes the kit line: one tagged source snapshot, one machine-readable
+# kits.toml, and the same gate the kits job runs on every push. App repos pin
+# `kits-v<version>` and fetch the tag; nothing here builds an app.
+#
+# The tag must match version.toml at the tagged commit, and the published
+# build number is the one already in that file, so re-running the workflow for
+# the same tag cannot mint a second number.
+
+on:
+  push:
+    tags:
+      - 'kits-v*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: kits-release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: '0'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # version.py check --history and the tag comparison walk the history.
+          fetch-depth: 0
+
+      - name: Check the tag against version.toml
+        run: |
+          tag="${GITHUB_REF_NAME#kits-v}"
+          actual=$(python3 scripts/meta/version.py show --json | python3 -c 'import json,sys; print(json.load(sys.stdin)["version"])')
+          test "$tag" = "$actual" || {
+            echo "::error::version.toml says $actual, the tag says $tag"
+            exit 1
+          }
+
+      - uses: ./.github/actions/gpui-deps
+
+      - name: Read the pinned channel
+        run: echo "channel=$(sed -n 's/^channel = "\(.*\)"/\1/p' rust-toolchain.toml)" >> "$GITHUB_OUTPUT"
+        id: toolchain
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ steps.toolchain.outputs.channel }}
+          components: clippy, rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: . -> .build/target
+          shared-key: kits-release
+          cache-on-failure: true
+
+      - name: Check version consistency
+        run: python3 scripts/meta/version.py check --history
+
+      - name: cargo fmt --check
+        run: cargo fmt --all --check
+
+      - name: cargo clippy
+        run: |
+          cargo clippy --locked --all-targets \
+            -p warpui-kit-core -p warpui-kit-diff \
+            -p warpui-kit-markdown -p warpui-kit-picker \
+            -p warpui-kit-platform -p warpui-kit-build \
+            -- -D warnings
+
+      - name: cargo test
+        run: |
+          cargo test --locked \
+            -p warpui-kit-core -p warpui-kit-diff \
+            -p warpui-kit-markdown -p warpui-kit-picker \
+            -p warpui-kit-platform -p warpui-kit-build
+
+      - name: Build the kit artifacts
+        run: scripts/build/kit-build.sh --no-bump
+
+      - name: Refuse a second release for this tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "::error::release $GITHUB_REF_NAME already exists; bump version.toml and cut a new kits tag"
+            exit 1
+          fi
+
+      - uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: warpui-kits ${{ github.ref_name }}
+          body: |
+            Kit line `${{ github.ref_name }}` at commit `${{ github.sha }}`.
+
+            App repositories pin this tag in their `Cargo.toml`:
+
+            ```
+            warpui-kit-core = { git = "https://github.com/enginkirmaci/warp-suite", tag = "${{ github.ref_name }}", package = "warpui-kit-core" }
+            ```
+
+            `kits.toml` records the version, build, commit and tag.
+            `warp-suite-kits-*.tar.gz` is the source snapshot of the six crates.
+          files: |
+            dist/kits/*.tar.gz
+            dist/kits/kits.toml
+            dist/kits/SHA256SUMS

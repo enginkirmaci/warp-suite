@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Check that every suite manifest follows the one shape.
 
-Run from anywhere: python3 scripts/check-manifests.py
+Run from anywhere: python3 scripts/meta/check-manifests.py
 
 The rules are the ones in docs/agents/gpui-app-recipe.md: package fields are
 inherited from [workspace.package], shared dependencies and their paths come
@@ -14,7 +14,7 @@ import sys
 import tomllib
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parent.parent.parent
 ROOT_MANIFEST = ROOT / "Cargo.toml"
 
 TABLE_ORDER = [

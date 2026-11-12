@@ -49,7 +49,7 @@ PascalCase layouts are importer input only: they are read once, rewritten
 native, then retired. Keep the value quirks the importer tolerates: numbers may
 be strings, points/sizes are `"x,y"`, colours are `"#AARRGGBB"`, and
 `AreaPadding`/`BorderThickness` may be a number or a thickness string. Missing
-user files are seeded from `<exe dir>\settings\snapit`; `scripts/build.ps1`
+user files are seeded from `<exe dir>\settings\snapit`; `scripts/build/build.ps1`
 stages the default seed next to the exe.
 
 Changing a field, a file name or the settings location is a cross-app contract

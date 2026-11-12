@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Runs INSIDE an extracted warp-suite bundle (the same layout build.sh stages
 # and the release publishes): installs the Linux deliverables into ~/.local
-# and records every path it wrote, so `scripts/deploy.sh --uninstall` removes
+# and records every path it wrote, so `scripts/deploy/deploy.sh --uninstall` removes
 # exactly those files and nothing else.
 #
 #   WARP_SUITE_BIN   install the binaries here (default: ~/.local/bin)

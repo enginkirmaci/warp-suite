@@ -350,9 +350,9 @@ and the notes-store scan is one-shot behind a marker.
 - **The app ships assets only.** `packaging/linux/` (`<app>.desktop`, `icons/`)
   and `packaging/windows/` (`.iss`, `.ico`, `settings/`); there is no
   `install.sh` or `build.ps1` in an app. The suite owns every build and install
-  step: `scripts/build.sh` (Linux bundle + tarball), `scripts/build.ps1`
+  step: `scripts/build/build.sh` (Linux bundle + tarball), `scripts/build/build.ps1`
   (Windows zips + Inno Setup), `scripts/deploy.{sh,ps1}`,
-  `scripts/bundle-install.sh`. `scripts/build.sh` rewrites the desktop entry's
+  `scripts/deploy/bundle-install.sh`. `scripts/build/build.sh` rewrites the desktop entry's
   `Exec=` line with the `__WARP_SUITE_BIN__` placeholder resolved at install
   time, so a `.desktop` file must keep that placeholder.
 - A shipped app lives in `apps/<name>/` and gets an `[apps.<name>]` section in

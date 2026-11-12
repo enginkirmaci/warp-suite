@@ -3,7 +3,7 @@
 
 `version.toml` is the source of truth: `version` (MAJOR.MINOR.PATCH) and
 `build` (a monotonic build counter). Every commit bumps PATCH through the
-pre-commit hook; every run of scripts/build.sh or scripts/build.ps1 bumps
+pre-commit hook; every run of scripts/build/build.sh or scripts/build/build.ps1 bumps
 build. Cargo.toml and Cargo.lock are derived from this file, never edited by
 hand for a version.
 
@@ -29,7 +29,7 @@ import tomllib
 from contextlib import contextmanager
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parent.parent.parent
 VERSION_FILE = ROOT / "version.toml"
 CARGO_FILE = ROOT / "Cargo.toml"
 LOCK_FILE = ROOT / "Cargo.lock"
@@ -345,13 +345,17 @@ def workspace_version_errors(data: dict) -> list[str]:
     packages = [p for p in metadata.get("packages", []) if p.get("id") in members]
     if not packages:
         errors.append("cargo metadata returned no workspace member")
-    for package in packages:
+    # Only the kit crates carry the suite (kit line) version. An app checkout
+    # symlinked into apps/ has its own version.toml and its own counter; the
+    # app repo checks that one.
+    kits = [p for p in packages if str(p.get("name", "")).startswith("warpui-kit-")]
+    for package in kits:
         if package.get("version") != version:
             errors.append(
                 f"{package.get('manifest_path')}: {package.get('name')} "
                 f"is {package.get('version')}, version.toml is {version}"
             )
-    for package in packages:
+    for package in kits:
         manifest = Path(package["manifest_path"])
         text = manifest.read_text(encoding="utf-8")
         if re.search(r"(?m)^version\s*=\s*\"", text):
@@ -364,27 +368,31 @@ def layout_errors() -> list[str]:
 
     errors: list[str] = []
 
-    for iss in sorted((ROOT / "apps").glob("*/packaging/windows/*.iss")):
-        text = iss.read_text(encoding="utf-8")
-        relative = iss.relative_to(ROOT)
-        if re.search(r'#define\s+MyAppVersion\s+"', text):
-            errors.append(f"{relative}: MyAppVersion fallback; require /DMyAppVersion")
-        if "#ifndef MyAppVersion" in text and "#error" not in text:
-            errors.append(f"{relative}: #ifndef MyAppVersion has no #error")
+    apps = ROOT / "apps"
+    if apps.is_dir():
+        for iss in sorted(apps.glob("*/packaging/windows/*.iss")):
+            text = iss.read_text(encoding="utf-8")
+            relative = iss.relative_to(ROOT)
+            if re.search(r'#define\s+MyAppVersion\s+"', text):
+                errors.append(f"{relative}: MyAppVersion fallback; require /DMyAppVersion")
+            if "#ifndef MyAppVersion" in text and "#error" not in text:
+                errors.append(f"{relative}: #ifndef MyAppVersion has no #error")
 
     gradle = ROOT / "android-apps/warp-android-scribe/android/app/build.gradle.kts"
-    gradle_text = gradle.read_text(encoding="utf-8")
-    if "version.toml" not in gradle_text:
-        errors.append(f"{gradle.relative_to(ROOT)}: does not read version.toml")
-    if re.search(r'(?m)^\s*versionName\s*=\s*"', gradle_text):
-        errors.append(f"{gradle.relative_to(ROOT)}: literal versionName")
-    if re.search(r"(?m)^\s*versionCode\s*=\s*\d+\s*$", gradle_text):
-        errors.append(f"{gradle.relative_to(ROOT)}: literal versionCode")
+    if gradle.is_file():
+        gradle_text = gradle.read_text(encoding="utf-8")
+        if "version.toml" not in gradle_text:
+            errors.append(f"{gradle.relative_to(ROOT)}: does not read version.toml")
+        if re.search(r'(?m)^\s*versionName\s*=\s*"', gradle_text):
+            errors.append(f"{gradle.relative_to(ROOT)}: literal versionName")
+        if re.search(r"(?m)^\s*versionCode\s*=\s*\d+\s*$", gradle_text):
+            errors.append(f"{gradle.relative_to(ROOT)}: literal versionCode")
 
     workflow = ROOT / ".github/workflows/suite-release.yml"
-    workflow_text = workflow.read_text(encoding="utf-8")
-    if re.search(r"(?m)^\s*default:\s*'0\.\d+\.\d+'", workflow_text):
-        errors.append(f"{workflow.relative_to(ROOT)}: hardcoded version default")
+    if workflow.is_file():
+        workflow_text = workflow.read_text(encoding="utf-8")
+        if re.search(r"(?m)^\s*default:\s*'0\.\d+\.\d+'", workflow_text):
+            errors.append(f"{workflow.relative_to(ROOT)}: hardcoded version default")
 
     return errors
 

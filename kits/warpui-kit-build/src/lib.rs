@@ -1,6 +1,6 @@
 //! Build-script facts shared by every suite binary.
 //!
-//! `scripts/build.sh` and `scripts/build.ps1` export `WARP_SUITE_*`; a plain
+//! `scripts/build/build.sh` and `scripts/build/build.ps1` export `WARP_SUITE_*`; a plain
 //! `cargo build` has none, so this reads `version.toml` at the repository root
 //! for the build counter and reports `dev` / `unknown` for what only a release
 //! build can know. The version itself is the package version: the pre-commit

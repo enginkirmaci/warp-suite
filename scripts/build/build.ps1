@@ -32,10 +32,10 @@ param(
 $ErrorActionPreference = 'Stop'
 
 $here = $PSScriptRoot
-$root = Split-Path -Parent $here
+$root = Split-Path -Parent (Split-Path -Parent $here)
 $dist = Join-Path $root 'dist\windows'
 
-$versionPy = Join-Path $here 'version.py'
+$versionPy = Join-Path $here '..\meta\version.py'
 $facts = & python3 $versionPy show --json | ConvertFrom-Json
 if ($LASTEXITCODE -ne 0 -or -not $facts) { throw "version.py show --json failed" }
 if ($Version -and $Version -ne $facts.version) {
@@ -58,7 +58,7 @@ $env:WARP_SUITE_RELEASED = $facts.released
 # no longer package roots, and apps/warp-station is not even a crate directory
 # (its crates live in crates/). Drive the loop off apps.toml instead, which
 # carries the cargo package name per app.
-$manifest = Join-Path $here 'manifest.py'
+$manifest = Join-Path $here '..\meta\manifest.py'
 $appNames = @(& python3 $manifest list)
 if ($LASTEXITCODE -ne 0 -or $appNames.Count -eq 0) { throw "manifest.py list failed" }
 if ($App) {

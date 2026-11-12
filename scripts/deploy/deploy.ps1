@@ -4,7 +4,7 @@
     Installs or removes the suite's Windows apps.
 
 .DESCRIPTION
-    -Local installs a portable copy of what scripts\build.ps1 produced
+    -Local installs a portable copy of what scripts\build\build.ps1 produced
     (%LOCALAPPDATA%\Programs\<app> plus a Start Menu shortcut).
 
     -Release installs a published release through its Inno Setup installers,
@@ -25,7 +25,7 @@ param(
 $ErrorActionPreference = 'Stop'
 
 $here = $PSScriptRoot
-$root = Split-Path -Parent $here
+$root = Split-Path -Parent (Split-Path -Parent $here)
 # the GitHub slug releases live under: derived from origin, WARP_SUITE_REPO
 # overrides, and the historical default stands in for anything undecidable
 if ($env:WARP_SUITE_REPO) {
@@ -144,7 +144,7 @@ if ($Local) {
     $buildArgs = @{}
     if ($script:App) { $buildArgs['App'] = $script:App }
     if ($DryRun) { $buildArgs['DryRun'] = $true }
-    & (Join-Path $here 'build.ps1') @buildArgs
+    & (Join-Path $here '..\build\build.ps1') @buildArgs
     if ($DryRun) { Write-Host "+ install $root\dist\windows -> $programs"; return }
     Install-Portable (Join-Path $root 'dist\windows')
 } elseif ($Bundle) {

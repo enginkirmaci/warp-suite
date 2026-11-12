@@ -11,7 +11,7 @@
 #   --dry-run      print what would happen
 set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-root="$(cd "$here/.." && pwd)"
+root="$(cd "$here/../.." && pwd)"
 # the GitHub slug releases live under: derived from origin (github remotes
 # only — anything else is undecidable), WARP_SUITE_REPO overrides, and the
 # historical default stands in last
@@ -93,7 +93,7 @@ fi
 if [ "$mode" = local ]; then
     build_args=()
     for a in ${apps[@]+"${apps[@]}"}; do build_args+=(--app "$a"); done
-    bash "$here/build.sh" ${build_args[@]+"${build_args[@]}"}
+    bash "$here/../build/build.sh" ${build_args[@]+"${build_args[@]}"}
     bundle="$(ls -dt "$root"/dist/linux/warp-suite-*-linux 2>/dev/null | head -1)"
     [ -n "$bundle" ] || { echo "no bundle under $root/dist/linux" >&2; exit 1; }
     install_bundle "$bundle"

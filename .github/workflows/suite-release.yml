@@ -3,8 +3,8 @@ name: suite-release
 # Builds the apps in apps/ at this commit and publishes one combined GitHub
 # Release. Deploy = dispatch this workflow with a version.
 #
-# Both jobs call the same scripts a local build uses - scripts/build.sh on
-# Linux, scripts/build.ps1 on Windows - so CI cannot drift from a local build.
+# Both jobs call the same scripts a local build uses - scripts/build/build.sh on
+# Linux, scripts/build/build.ps1 on Windows - so CI cannot drift from a local build.
 #
 # Cache notes (why this is fast now):
 #   - .cargo/config.toml redirects every workspace to .build/target, so the
@@ -44,7 +44,7 @@ jobs:
 
       - name: Check the suite version
         run: |
-          actual=$(python3 scripts/version.py show --json | python3 -c 'import json,sys; print(json.load(sys.stdin)["version"])')
+          actual=$(python3 scripts/meta/version.py show --json | python3 -c 'import json,sys; print(json.load(sys.stdin)["version"])')
           test "$actual" = "${{ inputs.version }}" || {
             echo "::error::version.toml says $actual, the dispatch says ${{ inputs.version }}"
             exit 1
@@ -56,7 +56,7 @@ jobs:
 
       - name: Read the suite build
         id: suite
-        run: echo "build=$(python3 scripts/version.py show --json | python3 -c 'import json,sys; print(json.load(sys.stdin)["build"])')" >> "$GITHUB_OUTPUT"
+        run: echo "build=$(python3 scripts/meta/version.py show --json | python3 -c 'import json,sys; print(json.load(sys.stdin)["build"])')" >> "$GITHUB_OUTPUT"
 
       - uses: ./.github/actions/gpui-deps
 
@@ -82,7 +82,7 @@ jobs:
       - name: Build Linux bundle
         env:
           WARP_SUITE_BUILD: ${{ steps.suite.outputs.build }}
-        run: scripts/build.sh --version "${{ inputs.version }}"
+        run: scripts/build/build.sh --version "${{ inputs.version }}"
 
       - uses: actions/upload-artifact@v7
         with:
@@ -106,7 +106,7 @@ jobs:
       - name: Check the suite version
         shell: bash
         run: |
-          actual=$(python scripts/version.py show --json | python -c 'import json,sys; print(json.load(sys.stdin)["version"])')
+          actual=$(python scripts/meta/version.py show --json | python -c 'import json,sys; print(json.load(sys.stdin)["version"])')
           test "$actual" = "${{ inputs.version }}" || {
             echo "::error::version.toml says $actual, the dispatch says ${{ inputs.version }}"
             exit 1
@@ -119,7 +119,7 @@ jobs:
       - name: Read the suite build
         id: suite
         shell: bash
-        run: echo "build=$(python scripts/version.py show --json | python -c 'import json,sys; print(json.load(sys.stdin)["build"])')" >> "$GITHUB_OUTPUT"
+        run: echo "build=$(python scripts/meta/version.py show --json | python -c 'import json,sys; print(json.load(sys.stdin)["build"])')" >> "$GITHUB_OUTPUT"
 
       - name: Read the pinned channel
         shell: bash
@@ -146,7 +146,7 @@ jobs:
       - name: Build Windows deliverables
         env:
           WARP_SUITE_BUILD: ${{ steps.suite.outputs.build }}
-        run: scripts/build.ps1 -Version "${{ inputs.version }}"
+        run: scripts/build/build.ps1 -Version "${{ inputs.version }}"
 
       - uses: actions/upload-artifact@v7
         with:
@@ -190,10 +190,10 @@ jobs:
           body: |
             Combined suite release built from this commit: ${{ github.sha }}.
 
-            Linux: scripts/build.sh -> warp-suite-${{ inputs.version }}-linux.tar.gz.
+            Linux: scripts/build/build.sh -> warp-suite-${{ inputs.version }}-linux.tar.gz.
             Extract and run bundle-install.sh, or use ./install.sh.
 
-            Windows: scripts/build.ps1 -> per-app installers (Inno Setup) and
+            Windows: scripts/build/build.ps1 -> per-app installers (Inno Setup) and
             portable zips. warp-snapit is Windows-only and ships portable only.
 
             Libraries: the kits/ workspace at this commit (warpui-kit-*), also

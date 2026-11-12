@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# warp-suite installer - see scripts/deploy.sh.
+# warp-suite installer - see scripts/deploy/deploy.sh.
 #
 #   install.sh                  install the latest published suite release
 #   install.sh --release <tag>  install a specific release
@@ -8,4 +8,4 @@
 set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [ $# -eq 0 ]; then set -- --release latest; fi
-exec bash "$here/scripts/deploy.sh" "$@"
+exec bash "$here/scripts/deploy/deploy.sh" "$@"

@@ -24,7 +24,7 @@ See [Adding an app](#adding-an-app).
 ```sh
 # Tag the commit that carries the version first; the workflow refuses a
 # version that does not match version.toml or a dispatch that is not from it.
-V=$(python3 scripts/version.py show --json | python3 -c 'import json,sys; print(json.load(sys.stdin)["version"])')
+V=$(python3 scripts/meta/version.py show --json | python3 -c 'import json,sys; print(json.load(sys.stdin)["version"])')
 git tag -a "v$V" -m "warp-suite $V"
 git push origin "v$V"
 gh workflow run suite-release.yml --ref "v$V" -f version=$V
@@ -53,10 +53,10 @@ Binaries go to `~/.local/bin`, desktop entries + hicolor icons to
 ## Build and deploy locally
 
 ```sh
-scripts/build.sh                  # Linux: dist/linux/warp-suite-<v>-linux/ + tarball
-scripts/build.sh --app warp-notes # one app, fast loop
-scripts/deploy.sh --local         # build, then install into ~/.local
-scripts/deploy.sh --uninstall     # remove exactly what it installed
+scripts/build/build.sh                  # Linux: dist/linux/warp-suite-<v>-linux/ + tarball
+scripts/build/build.sh --app warp-notes # one app, fast loop
+scripts/deploy/deploy.sh --local         # build, then install into ~/.local
+scripts/deploy/deploy.sh --uninstall     # remove exactly what it installed
 ```
 
 ```powershell
@@ -80,15 +80,15 @@ Both builds default the version to `git describe --tags --always
 | `apps/<name>/AGENTS.md` | app-specific agent instructions |
 | `plans/` | working design plans and proposals, one markdown file per topic |
 | `apps.toml` | per-app build knobs (`linux_build`, `linux_skip`, `icon_prefix`, `scalable_svg`) and contract notes |
-| `scripts/manifest.py` | apps.toml reader shared by the scripts + CI |
-| `.cargo/config.toml` | one cargo target dir for the whole suite: `.build/target` for every app, `kits` and `scripts/build.sh` |
+| `scripts/meta/manifest.py` | apps.toml reader shared by the scripts + CI |
+| `.cargo/config.toml` | one cargo target dir for the whole suite: `.build/target` for every app, `kits` and `scripts/build/build.sh` |
 | `kits/` | the five `warpui-kit-*` crates, members of the suite workspace; their paths live in the root `[workspace.dependencies]` |
-| `scripts/build.sh` | Linux build: `cargo build --release` each app → `dist/linux/warp-suite-<v>-linux/` + tarball |
-| `scripts/build.ps1` | Windows build: `dist/windows/` portable zips + Inno Setup installers |
-| `scripts/deploy.sh` | Linux install/uninstall: local bundle or published release |
-| `scripts/deploy.ps1` | Windows install/uninstall: portable locally, installers from a release |
-| `scripts/bundle-install.sh` | runs inside an extracted bundle; installs into `~/.local` and records what it wrote |
-| `install.sh` | shim over `scripts/deploy.sh` for the documented one-liner |
+| `scripts/build/build.sh` | Linux build: `cargo build --release` each app → `dist/linux/warp-suite-<v>-linux/` + tarball |
+| `scripts/build/build.ps1` | Windows build: `dist/windows/` portable zips + Inno Setup installers |
+| `scripts/deploy/deploy.sh` | Linux install/uninstall: local bundle or published release |
+| `scripts/deploy/deploy.ps1` | Windows install/uninstall: portable locally, installers from a release |
+| `scripts/deploy/bundle-install.sh` | runs inside an extracted bundle; installs into `~/.local` and records what it wrote |
+| `install.sh` | shim over `scripts/deploy/deploy.sh` for the documented one-liner |
 | `.github/workflows/suite-release.yml` | the combined release pipeline |
 | `.github/workflows/kits.yml` | CI gate: kit fmt/clippy/tests + the apps' tests on every push that touches `kits/`, `apps/` or `.cargo/` |
 | `design/v3/` | the committed design contract (DESIGN.md + prototype source); the live source is the OpenDesign project `warp-suite-v3` |
@@ -184,8 +184,8 @@ together. When one changes, update the other side in the **same** commit.
   user service installed from `android-apps/warp-android-scribe/deploy/`.
 
 - **Version and build facts**: `version.toml` is the one source. A pre-commit
-  hook bumps PATCH on every commit (never resets), `scripts/build.sh` and
-  `scripts/build.ps1` bump the build counter on every run, and
+  hook bumps PATCH on every commit (never resets), `scripts/build/build.sh` and
+  `scripts/build/build.ps1` bump the build counter on every run, and
   `kits/warpui-kit-build` stamps the `WARP_SUITE_*` facts into each binary
   (About, `--version`, the Windows file version, the bridge's `/health`). The
   APK reads the same file. One `Copy version` line

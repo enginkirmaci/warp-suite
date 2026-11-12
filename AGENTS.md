@@ -21,6 +21,26 @@ Rust bridge is a workspace member.
 | warp-notes | `warp-notes` | `apps/warp-notes/` | Per-repo markdown notes with a live editor (Rust/GPUI) |
 | warp-android-scribe | `warp-android-scribe-bridge` | `android-apps/warp-android-scribe/` | Android dictation IME with a full QWERTY keyboard over Superwhisper or Hex (Kotlin/Compose + Rust bridge) |
 
+## Local setup
+
+The repository split moves each app to its own repository and keeps `apps/` as
+symlinks to the sibling checkouts. The full recipe is
+[`docs/agents/local-setup.md`](docs/agents/local-setup.md); the short version:
+
+```sh
+gh repo clone enginkirmaci/warp-suite && cd warp-suite
+scripts/dev/link-apps.sh --check      # report the links, change nothing
+scripts/dev/link-apps.sh              # create apps/<name> symlinks (junctions on Windows)
+python3 scripts/meta/version.py install-hooks
+cargo build -p warp-notes         # proves the linked workspace
+```
+
+`scripts/dev/link-apps.sh` never replaces a real `apps/<name>` directory: that is
+the pre-split layout and it means the app repositories do not exist yet (see
+`plans/app-repos-kits-and-suite-release.md`). App checkouts carry no
+`[workspace]` table on purpose; the root `apps/*` member glob and the kit
+`[patch]` table are what make the symlinked build work.
+
 ## Before you edit
 
 1. Read this file and, for a UI or kit change, the matching guide in
@@ -60,7 +80,7 @@ Rust bridge is a workspace member.
   or the workspace will not resolve.
 - [`apps.toml`](apps.toml) carries per-app build knobs (`package`,
   `linux_build`, `linux_skip`, `icon_prefix`, `scalable_svg`) and contract
-  notes. [`scripts/manifest.py`](scripts/manifest.py) is the reader both build
+  notes. [`scripts/meta/manifest.py`](scripts/meta/manifest.py) is the reader both build
   scripts and CI use. Add an `[apps.<name>]` section only when an app needs a
   non-default knob.
 
@@ -200,9 +220,9 @@ when one side changes, update the other side in the **same commit**.
   sidecar lock and an atomic rename. Reduced motion is per-app, not in this
   file.
 - **Version and build facts**: `version.toml` is the one source of the suite
-  version and the build counter; `scripts/version.py` is its only writer.
+  version and the build counter; `scripts/meta/version.py` is its only writer.
   `.githooks/pre-commit` bumps PATCH on every commit (never resets) and keeps
-  `Cargo.toml`/`Cargo.lock` in step; `scripts/build.sh` and `scripts/build.ps1`
+  `Cargo.toml`/`Cargo.lock` in step; `scripts/build/build.sh` and `scripts/build/build.ps1`
   bump build on every run. `kits/warpui-kit-build` stamps `WARP_SUITE_BUILD`,
   `WARP_SUITE_COMMIT`, `WARP_SUITE_CHANNEL` and `WARP_SUITE_RELEASED` into
   every binary (About, `--version`, the Windows file version, the bridge's
@@ -334,11 +354,11 @@ when one side changes, update the other side in the **same commit**.
 - Apps ship **assets only**: `packaging/linux/{*.desktop,icons}` and
   `packaging/windows/{*.ico,*.iss,settings}`. There is no per-app `install.sh`
   or `build.ps1`. The suite owns every build and install step.
-- [`scripts/build.sh`](scripts/build.sh) builds the Linux bundle and tarball;
-  [`scripts/build.ps1`](scripts/build.ps1) builds Windows zips and Inno Setup
-  installers; [`scripts/deploy.sh`](scripts/deploy.sh) and
-  [`scripts/deploy.ps1`](scripts/deploy.ps1) install/uninstall;
-  [`scripts/bundle-install.sh`](scripts/bundle-install.sh) runs inside an
+- [`scripts/build/build.sh`](scripts/build/build.sh) builds the Linux bundle and tarball;
+  [`scripts/build/build.ps1`](scripts/build/build.ps1) builds Windows zips and Inno Setup
+  installers; [`scripts/deploy/deploy.sh`](scripts/deploy/deploy.sh) and
+  [`scripts/deploy/deploy.ps1`](scripts/deploy/deploy.ps1) install/uninstall;
+  [`scripts/deploy/bundle-install.sh`](scripts/deploy/bundle-install.sh) runs inside an
   extracted bundle.
 - A Windows installer is built only when `packaging/windows/<app>.iss` exists;
   without one, `build.ps1` ships a portable zip.
@@ -396,7 +416,7 @@ when one side changes, update the other side in the **same commit**.
   `warpui-kit-core` if the family needs it.
 - Do not silence clippy. Fix the source, or use
   `#[expect(clippy::..., reason = "...")]` on that one item.
-- Do not add `android-apps/*` to `apps.toml`, `scripts/build.sh` or the suite
+- Do not add `android-apps/*` to `apps.toml`, `scripts/build/build.sh` or the suite
   release; the Gradle build and the APK are separate.
 - Do not remove the bearer token, the UFW LAN rule or HTTPS from the bridge.
   The public endpoint is `https://<nas-host>`; the token is the sole
@@ -416,6 +436,8 @@ when one side changes, update the other side in the **same commit**.
   versioned snake_case settings/cache contract.
 - [`docs/agents/versioning.md`](docs/agents/versioning.md) — `version.toml`,
   the PATCH/build rules, the hook, Windows/Android facts and the release flow.
+- [`docs/agents/local-setup.md`](docs/agents/local-setup.md) — the sibling
+  checkouts, the `apps/` symlinks and the one-workspace local build.
 - [`plans/`](plans/) — working design plans and proposals, one file per topic;
   delete a plan once its work lands.
 - [`kits/README.md`](kits/README.md) — what each kit crate provides and where a

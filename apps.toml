@@ -2,7 +2,7 @@
 #
 # The apps live in this repo under apps/<name> (imported with git subtree;
 # each keeps its own history). This file only carries the build knobs
-# scripts/build.sh and the release workflow use - the suite commit is
+# scripts/build/build.sh and the release workflow use - the suite commit is
 # the single provenance for every app.
 #
 # Per-app build knobs (all optional):

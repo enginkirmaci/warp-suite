@@ -14,8 +14,8 @@ Requires:
   cargo install resvg      (only when an app misses PNG sizes)
 
 Usage:
-  python scripts/make-ico.py                 # every app in apps.toml
-  python scripts/make-ico.py --app warp-agent
+  python scripts/build/make-ico.py                 # every app in apps.toml
+  python scripts/build/make-ico.py --app warp-agent
 """
 
 import argparse
@@ -29,7 +29,7 @@ from pathlib import Path
 
 from PIL import Image
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parent.parent.parent
 SIZES = [16, 24, 32, 48, 64, 128, 256]
 
 

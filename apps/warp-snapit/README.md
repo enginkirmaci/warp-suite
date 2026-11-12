@@ -40,7 +40,7 @@ colours are `"#AARRGGBB"`, and `AreaPadding`/`BorderThickness` may be a number
 or a thickness string. The schema contract is
 [`../../docs/agents/settings-schema.md`](../../docs/agents/settings-schema.md).
 Missing user files are seeded from `<exe dir>\settings\snapit`, just like the
-.NET companion (`scripts/build.ps1` in warp-suite stages the default seed next
+.NET companion (`scripts/build/build.ps1` in warp-suite stages the default seed next
 to the exe).
 
 ## Build and run

@@ -14,13 +14,13 @@ version = "0.1.8"
 build = 42
 ```
 
-`scripts/version.py` is the only writer. Nothing else edits a version by hand.
+`scripts/meta/version.py` is the only writer. Nothing else edits a version by hand.
 
 | Element | Rule |
 |---|---|
 | PATCH | +1 on every commit, through `.githooks/pre-commit`; never resets |
 | MINOR / MAJOR | by hand, `version.py bump minor` / `bump major`; patch keeps counting |
-| build | +1 on every run of `scripts/build.sh` or `scripts/build.ps1` |
+| build | +1 on every run of `scripts/build/build.sh` or `scripts/build/build.ps1` |
 
 A commit carries the version it ships: the hook bumps PATCH, rewrites
 `Cargo.toml` and `Cargo.lock`, and stages all three files before the commit is
@@ -71,17 +71,17 @@ no version copy. The bridge and the apps get the facts from
 ## One-time setup per clone
 
 ```sh
-python3 scripts/version.py install-hooks   # git config core.hooksPath .githooks
+python3 scripts/meta/version.py install-hooks   # git config core.hooksPath .githooks
 ```
 
 ## Commands
 
 ```sh
-python3 scripts/version.py show [--json] [--next]
-python3 scripts/version.py bump {patch|minor|major}
-python3 scripts/version.py build bump
-python3 scripts/version.py sync          # rewrite Cargo.toml/Cargo.lock
-python3 scripts/version.py check [--history]
+python3 scripts/meta/version.py show [--json] [--next]
+python3 scripts/meta/version.py bump {patch|minor|major}
+python3 scripts/meta/version.py build bump
+python3 scripts/meta/version.py sync          # rewrite Cargo.toml/Cargo.lock
+python3 scripts/meta/version.py check [--history]
 ```
 
 - `bump` stages the three files it writes; `--no-stage` leaves the index alone.
@@ -98,9 +98,9 @@ python3 scripts/version.py check [--history]
 Starting from `0.1.41`:
 
 ```sh
-python3 scripts/version.py build bump          # if this release should own a new build
-python3 scripts/version.py bump minor          # only when MINOR/MAJOR moves; tree says 0.2.41
-next=$(python3 scripts/version.py show --next) # 0.2.42: the hook bumps PATCH again
+python3 scripts/meta/version.py build bump          # if this release should own a new build
+python3 scripts/meta/version.py bump minor          # only when MINOR/MAJOR moves; tree says 0.2.41
+next=$(python3 scripts/meta/version.py show --next) # 0.2.42: the hook bumps PATCH again
 git commit -m "chore(release): v$next"
 git tag -a "v$next" -m "warp-suite $next"
 git push origin main "v$next"

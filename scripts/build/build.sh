@@ -17,7 +17,7 @@
 # Usage: build.sh [--version V] [--app NAME]... [--no-tar]
 set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-root="$(cd "$here/.." && pwd)"
+root="$(cd "$here/../.." && pwd)"
 
 version_arg=""
 selected=()
@@ -37,14 +37,14 @@ command -v jq >/dev/null || { echo "jq required (cargo metadata parsing)" >&2; e
 
 json_get() { printf '%s' "$1" | python3 -c 'import json,sys; print(json.load(sys.stdin)[sys.argv[1]])' "$2"; }
 
-known="$(python3 "$here/manifest.py" list)"
+known="$(python3 "$here/../meta/manifest.py" list)"
 for a in ${selected[@]+"${selected[@]}"}; do
     printf '%s\n' "$known" | grep -qx "$a" || { echo "apps.toml has no [apps.$a]" >&2; exit 1; }
 done
 
 # The suite version, build counter, commit and channel. version.toml is the
 # source; a plain `cargo build` reads it through kits/warpui-kit-build too.
-facts="$(python3 "$here/version.py" show --json)"
+facts="$(python3 "$here/../meta/version.py" show --json)"
 version="$(json_get "$facts" version)"
 if [ -n "$version_arg" ] && [ "$version_arg" != "$version" ]; then
     echo "version mismatch: --version $version_arg but version.toml says $version" >&2
@@ -54,9 +54,9 @@ fi
 # Every build script run consumes one build number. A CI job passes
 # WARP_SUITE_BUILD so the Linux and Windows artifacts of one tag agree.
 if [ -z "${WARP_SUITE_BUILD:-}" ]; then
-    WARP_SUITE_BUILD="$(python3 "$here/version.py" build bump)"
+    WARP_SUITE_BUILD="$(python3 "$here/../meta/version.py" build bump)"
 fi
-facts="$(python3 "$here/version.py" show --json)"
+facts="$(python3 "$here/../meta/version.py" show --json)"
 WARP_SUITE_VERSION="$version"
 WARP_SUITE_COMMIT="$(json_get "$facts" commit)"
 WARP_SUITE_CHANNEL="$(json_get "$facts" channel)"
@@ -98,7 +98,7 @@ while read -r app; do
         printf '%s\n' "${selected[@]}" | grep -qx "$app" || continue
     fi
 
-    linux_skip="$(python3 "$here/manifest.py" get "$app" linux_skip 2>/dev/null || true)"
+    linux_skip="$(python3 "$here/../meta/manifest.py" get "$app" linux_skip 2>/dev/null || true)"
     if [ "$linux_skip" = "true" ]; then
         echo "== $app: skipped on Linux (Windows-only)"
         continue
@@ -106,10 +106,10 @@ while read -r app; do
 
     app_dir="$root/apps/$app"
     # The cargo package name; defaults to the app name.
-    package="$(python3 "$here/manifest.py" get "$app" package 2>/dev/null || echo "$app")"
-    build_args="$(python3 "$here/manifest.py" get "$app" linux_build 2>/dev/null || true)"
-    icon_prefix="$(python3 "$here/manifest.py" get "$app" icon_prefix 2>/dev/null || echo "$app")"
-    svg_rel="$(python3 "$here/manifest.py" get "$app" scalable_svg 2>/dev/null || true)"
+    package="$(python3 "$here/../meta/manifest.py" get "$app" package 2>/dev/null || echo "$app")"
+    build_args="$(python3 "$here/../meta/manifest.py" get "$app" linux_build 2>/dev/null || true)"
+    icon_prefix="$(python3 "$here/../meta/manifest.py" get "$app" icon_prefix 2>/dev/null || echo "$app")"
+    svg_rel="$(python3 "$here/../meta/manifest.py" get "$app" scalable_svg 2>/dev/null || true)"
 
     echo "== $app"
     # The suite is one workspace (root Cargo.toml), so builds run from the root
@@ -174,7 +174,7 @@ if [ -n "$suite_sha" ]; then
     } >> "$bundle/REVISIONS.txt"
 fi
 
-install -m755 "$here/bundle-install.sh" "$bundle/bundle-install.sh"
+install -m755 "$here/../deploy/bundle-install.sh" "$bundle/bundle-install.sh"
 
 if [ "$make_tar" = 1 ]; then
     tar -czf "$dist_root/warp-suite-$version-linux.tar.gz" \
