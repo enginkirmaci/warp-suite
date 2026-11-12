@@ -16,3 +16,4 @@ android-apps/*/android/build/
 android-apps/*/android/app/build/
 apps/*
 !apps/README.md
+apps-checkouts/

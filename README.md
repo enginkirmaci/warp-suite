@@ -94,6 +94,7 @@ Both builds default the version to `git describe --tags --always
 | `.github/workflows/suite-release.yml` | the combined release pipeline |
 | `.github/workflows/kits.yml` | CI gate: kit fmt/clippy/tests |
 | `.github/workflows/kits-release.yml` | publishes a `kits-v*` tag |
+| `.github/workflows/integration.yml` | checks out the pinned app tags and runs the linked workspace gate |
 | `design/v3/` | the committed design contract (DESIGN.md + prototype source); the live source is the OpenDesign project `warp-suite-v3` |
 
 Each app repository owns its packaging assets and its own build/release

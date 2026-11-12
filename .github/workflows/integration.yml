@@ -1,0 +1,81 @@
+name: integration
+
+# The cross-repository gate. It checks out the app tags pinned in suite.toml,
+# links them into apps/ and runs the one-workspace gate over kits + apps. This
+# is the only place a kit change, an app change and a pin are exercised
+# together; the app repositories' own CI cannot see the other side.
+#
+# Needs SUITE_READ_TOKEN with read access to the app repositories.
+on:
+  workflow_dispatch:
+  schedule:
+    # nightly, so a kit change and a stale app pin show up without a push
+    - cron: '0 4 * * *'
+  push:
+    paths:
+      - 'suite.toml'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'kits/**'
+      - 'scripts/**'
+      - '.github/workflows/integration.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: integration-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: '0'
+
+jobs:
+  linked:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Check out the pinned app tags
+        env:
+          GH_TOKEN: ${{ secrets.SUITE_READ_TOKEN }}
+        run: |
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "::error::SUITE_READ_TOKEN is not set; the app repositories are private"
+            exit 1
+          fi
+          mkdir -p apps-checkouts
+          for app in $(python3 scripts/meta/manifest.py list); do
+            repo=$(python3 scripts/meta/manifest.py pin "$app" repo)
+            tag=$(python3 scripts/meta/manifest.py pin "$app" tag)
+            echo "== $repo $tag"
+            # full history: Warp Station's probes read the app repository's log
+            gh repo clone "$repo" "apps-checkouts/$app" -- --branch "$tag"
+          done
+          scripts/dev/link-apps.sh --source apps-checkouts
+
+      - uses: ./.github/actions/gpui-deps
+
+      - name: Read the pinned channel
+        run: echo "channel=$(sed -n 's/^channel = "\(.*\)"/\1/p' rust-toolchain.toml)" >> "$GITHUB_OUTPUT"
+        id: toolchain
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ steps.toolchain.outputs.channel }}
+          components: clippy, rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: . -> .build/target
+          shared-key: integration
+          cache-on-failure: true
+
+      - name: cargo fmt --check
+        run: cargo fmt --all --check
+
+      - name: cargo clippy --workspace
+        run: cargo clippy --locked --workspace --all-targets -- -D warnings
+
+      - name: cargo test --workspace
+        run: cargo test --locked --workspace
