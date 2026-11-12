@@ -15,16 +15,16 @@ tag = "kits-v0.1.11"
 
 [apps.warp-station]
 repo = "enginkirmaci/warp-station"
-tag = "v0.1.6"
+tag = "v0.1.7"
 
 [apps.warp-agent]
 repo = "enginkirmaci/warp-agent"
-tag = "v0.1.3"
+tag = "v0.1.4"
 
 [apps.warp-notes]
 repo = "enginkirmaci/warp-notes"
-tag = "v0.1.3"
+tag = "v0.1.4"
 
 [apps.warp-snapit]
 repo = "enginkirmaci/warp-snapit"
-tag = "v0.1.2"
+tag = "v0.1.3"
