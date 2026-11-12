@@ -7,10 +7,10 @@
     -Local installs a portable copy of what scripts\build\build.ps1 produced
     (%LOCALAPPDATA%\Programs\<app> plus a Start Menu shortcut).
 
-    -Release installs a published release through its Inno Setup installers,
-    silently; an app without one (warp-snapit) falls back to its portable zip.
+    -Release downloads the single warp-suite Windows ZIP and runs its
+    bundle-install.ps1.
 
-    -Uninstall removes the recorded portable files and runs the Inno
+    -Uninstall removes the recorded portable files and the old Inno
     uninstallers.
 #>
 param(
@@ -84,34 +84,20 @@ function Install-Release {
     if ($DryRun) { Write-Host "+ download release assets from $url"; return }
 
     $rel = Invoke-RestMethod -Uri $url -Headers @{ 'User-Agent' = 'warp-suite-deploy' }
-    $setups = @($rel.assets | Where-Object { $_.name -like '*-setup-x64.exe' })
-    $zips = @($rel.assets | Where-Object { $_.name -like '*-windows-portable.zip' })
-    if ($setups.Count + $zips.Count -eq 0) { throw "no Windows assets on $url" }
-    $setupApps = @($setups | ForEach-Object { $_.name -replace '-[0-9].*$', '' })
+    $bundle = @($rel.assets | Where-Object { $_.name -like 'warp-suite-*-windows-x64.zip' }) |
+        Select-Object -First 1
+    if (-not $bundle) { throw "no combined Windows bundle on $url" }
 
-    foreach ($asset in $setups) {
-        $appName = $asset.name -replace '-[0-9].*$', ''
-        if ($script:App -and ($script:App -notcontains $appName)) { continue }
-        $tmp = Join-Path $env:TEMP $asset.name
-        Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $tmp
-        Write-Host "installing $($asset.name)"
-        Start-Process $tmp -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART' -Wait
-    }
-
-    # Apps without an installer (warp-snapit) ship as a portable zip.
-    foreach ($asset in $zips) {
-        $appName = $asset.name -replace '-[0-9].*$', ''
-        if ($setupApps -contains $appName) { continue }
-        if ($script:App -and ($script:App -notcontains $appName)) { continue }
-        $tmp = Join-Path $env:TEMP $asset.name
-        $target = Join-Path $programs $appName
-        Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $tmp
-        Write-Host "installing $($asset.name) -> $target"
-        New-Item -ItemType Directory -Force -Path $target | Out-Null
-        Expand-Archive -Path $tmp -DestinationPath $target -Force
-        New-Item -ItemType Directory -Force -Path $stateDir | Out-Null
-        Get-ChildItem $target -Recurse -File | ForEach-Object { Record-Path $_.FullName }
-    }
+    $tmp = Join-Path $env:TEMP ("warp-suite-" + [guid]::NewGuid())
+    New-Item -ItemType Directory -Force -Path $tmp | Out-Null
+    $zip = Join-Path $tmp $bundle.name
+    Invoke-WebRequest -Uri $bundle.browser_download_url -OutFile $zip
+    Expand-Archive -Path $zip -DestinationPath $tmp -Force
+    $top = Get-ChildItem $tmp -Directory | Select-Object -First 1
+    if (-not $top) { throw "empty suite bundle: $($bundle.name)" }
+    $installer = Join-Path $top.FullName 'bundle-install.ps1'
+    if (-not (Test-Path $installer)) { throw "no bundle-install.ps1 in $($bundle.name)" }
+    & $installer
 }
 
 function Uninstall-All {
@@ -149,7 +135,12 @@ if ($Local) {
     Install-Portable (Join-Path $root 'dist\windows')
 } elseif ($Bundle) {
     if (-not (Test-Path $Bundle)) { throw "no such bundle: $Bundle" }
-    Install-Portable $Bundle
+    $installer = Join-Path $Bundle 'bundle-install.ps1'
+    if (Test-Path $installer) {
+        if ($DryRun) { Write-Host "+ $installer" } else { & $installer }
+    } else {
+        Install-Portable $Bundle
+    }
 } elseif ($Release) {
     Install-Release
 } else {

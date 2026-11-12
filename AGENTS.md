@@ -362,16 +362,20 @@ pinned integration gate prove the pair.
   [`scripts/build/build.ps1`](scripts/build/build.ps1) build the linked
   workspace; [`scripts/deploy/deploy.sh`](scripts/deploy/deploy.sh),
   [`scripts/deploy/deploy.ps1`](scripts/deploy/deploy.ps1) and
-  [`scripts/deploy/bundle-install.sh`](scripts/deploy/bundle-install.sh)
+  [`scripts/deploy/bundle-install.sh`](scripts/deploy/bundle-install.sh) /
+  [`scripts/deploy/bundle-install.ps1`](scripts/deploy/bundle-install.ps1)
   install the result.
 - A Windows installer is built only when the app ships
   `packaging/windows/<app>.iss`; without one the app release is a portable zip.
+  The suite release does not republish those per-app assets; it combines the
+  portable zips into one Windows ZIP with `bundle-install.ps1`.
 - Keep the desktop entry's `Exec=__WARP_SUITE_BIN__/...` placeholder; the
   build resolves it at install time.
 - A suite release is the [`suite.toml`](suite.toml) pin table:
   `suite-release.yml` downloads those app releases, verifies their checksums
-  and publishes the combined bundle. It needs `SUITE_READ_TOKEN` and never
-  rebuilds an app from sources.
+  and publishes one Linux tarball and one Windows ZIP. The app repositories
+  are public, so `GITHUB_TOKEN` is enough; it never rebuilds an app from
+  sources.
 - `warp-android-scribe` ships from its own repository: a sideloaded debug APK
   (`./gradlew assembleDebug`) and a bridge installed as a systemd user service
   on the NAS. Never add it to `suite.toml` or the desktop build.

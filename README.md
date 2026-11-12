@@ -25,8 +25,8 @@ See [Adding an app](#adding-an-app).
 
 A suite release is a pin table ([`suite.toml`](suite.toml)): the kit tag plus
 one tag per app. Each app release is built and published in its own repository;
-the suite job downloads the pinned releases and assembles the combined Linux
-bundle and the Windows assets.
+the suite job downloads the pinned releases and assembles one Linux tarball and
+one Windows ZIP.
 
 Tag this repo with the suite version and dispatch the assembler:
 
@@ -37,9 +37,9 @@ gh workflow run suite-release.yml --ref v0.1.0 -f version=0.1.0
 ```
 
 The job downloads the app releases pinned in `suite.toml`, verifies their
-`SHA256SUMS`, and publishes the combined Linux bundle and Windows assets. It
-needs `SUITE_READ_TOKEN` (read access to the app repositories) and never
-rebuilds an app.
+`SHA256SUMS`, and publishes the combined Linux bundle and Windows ZIP. All app
+repositories are public, so `GITHUB_TOKEN` is enough; the job never rebuilds an
+app.
 
 ## Install on a Linux machine
 
@@ -51,6 +51,16 @@ scripts/dev/link-apps.sh        # link the sibling app checkouts
 
 Binaries go to `~/.local/bin`, desktop entries + hicolor icons to
 `~/.local/share`. Everything is per-user; no root needed.
+
+## Install on Windows
+
+Download `warp-suite-<version>-windows-x64.zip` from the suite release,
+extract it, and run `install.cmd`. It installs under
+`%LOCALAPPDATA%\Programs\warp-suite`, adds a `warp-suite` Start Menu folder
+with one shortcut per app, and records what it wrote for `uninstall.cmd`.
+
+The same ZIP is portable: run the executables under `apps\` directly without
+installing. It contains Warp Station, Warp Agent, Warp Notes and Warp SnapIt.
 
 ## Build and deploy locally
 
@@ -67,7 +77,7 @@ scripts\dev\link-apps.ps1          # junctions on Windows
 scripts\build\build.ps1            # Windows: dist\windows\ zips + installers
 scripts\build\build.ps1 -App warp-notes -NoPackage
 scripts\deploy\deploy.ps1 -Local   # build, then install a portable copy
-scripts\deploy\deploy.ps1 -Release # install a published release (installers)
+scripts\deploy\deploy.ps1 -Release # install the published Windows ZIP
 scripts\deploy\deploy.ps1 -Uninstall
 ```
 
@@ -88,7 +98,7 @@ Both builds default the version to `git describe --tags --always
 | `scripts/build/build.sh` | Linux build: `cargo build --release` each app → `dist/linux/warp-suite-<v>-linux/` + tarball |
 | `scripts/build/build.ps1` | Windows build: `dist/windows/` portable zips + Inno Setup installers |
 | `scripts/deploy/deploy.sh` | Linux install/uninstall: local bundle or published release |
-| `scripts/deploy/deploy.ps1` | Windows install/uninstall: portable locally, installers from a release |
+| `scripts/deploy/deploy.ps1` | Windows install/uninstall: portable locally, the combined ZIP from a release |
 | `scripts/deploy/bundle-install.sh` | runs inside an extracted bundle; installs into `~/.local` and records what it wrote |
 | `install.sh` | shim over `scripts/deploy/deploy.sh` for the documented one-liner |
 | `.github/workflows/suite-release.yml` | the combined release pipeline |

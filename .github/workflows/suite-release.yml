@@ -3,8 +3,8 @@ name: suite-release
 # Assembles one combined suite release from the app releases pinned in
 # suite.toml. It never builds an app: each app was built and published in its
 # own repository at its pinned tag. The job downloads those assets, verifies
-# their checksums, merges the Linux bundles and Windows assets, and publishes
-# the suite release.
+# their checksums, merges the Linux bundles and portable Windows zips into one
+# Linux tarball and one Windows ZIP, and publishes the suite release.
 #
 # All app repositories are public; GITHUB_TOKEN is enough.
 
@@ -55,10 +55,9 @@ jobs:
             gh release download "$tag" --repo "$repo" \
               --pattern '*.tar.gz' \
               --pattern '*.zip' \
-              --pattern '*-setup-x64.exe' \
               --pattern 'SHA256SUMS' \
               --dir "artifacts/$app"
-            (cd "artifacts/$app" && sha256sum -c SHA256SUMS)
+            (cd "artifacts/$app" && sha256sum -c SHA256SUMS --ignore-missing)
           done
 
       - name: Assemble the suite
@@ -78,12 +77,18 @@ jobs:
           tag_name: v${{ inputs.version }}
           name: warp-suite v${{ inputs.version }}
           body: |
-            Combined suite release assembled from the app releases pinned in
-            `suite.toml`; it does not rebuild any app.
+            One Linux tarball and one Windows ZIP, assembled from the app
+            releases pinned in `suite.toml`; no app is rebuilt here.
 
-            The kit line is recorded in `REVISIONS.txt`, together with each
-            app tag. Linux: extract the tarball and run
-            `bundle-install.sh`, or use `./install.sh` from this repository.
+            Linux: extract the tarball and run `bundle-install.sh`, or use
+            `./install.sh --release` from this repository.
+
+            Windows: extract `warp-suite-<version>-windows-x64.zip` and run
+            `install.cmd`, or run the apps directly from the extracted
+            `apps\` folder. The ZIP contains Warp Station, Warp Agent, Warp
+            Notes and Warp SnapIt plus a Start Menu setup and uninstaller.
+
+            `REVISIONS.txt` inside each package records the kit and app pins.
           files: |
             dist/linux/*.tar.gz
             dist/windows/*
