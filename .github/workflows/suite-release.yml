@@ -6,8 +6,7 @@ name: suite-release
 # their checksums, merges the Linux bundles and Windows assets, and publishes
 # the suite release.
 #
-# Needs SUITE_READ_TOKEN: a fine-grained token with read access to the five app
-# repositories (the repository's own GITHUB_TOKEN cannot read them).
+# All app repositories are public; GITHUB_TOKEN is enough.
 
 on:
   workflow_dispatch:
@@ -46,12 +45,8 @@ jobs:
 
       - name: Download the pinned app releases
         env:
-          GH_TOKEN: ${{ secrets.SUITE_READ_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          if [ -z "${GH_TOKEN:-}" ]; then
-            echo "::error::SUITE_READ_TOKEN is not set; it needs read access to the app repositories"
-            exit 1
-          fi
           for app in $(python3 scripts/meta/manifest.py list); do
             tag=$(python3 scripts/meta/manifest.py pin "$app" tag)
             repo=$(python3 scripts/meta/manifest.py pin "$app" repo)
