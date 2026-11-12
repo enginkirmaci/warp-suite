@@ -101,7 +101,7 @@ cargo fmt --all
 cargo clippy --all-targets -p warpui-kit-core -- -D warnings
 ```
 
-The kit CI gate is [`.github/workflows/kits.yml`](.github/workflows/kits.yml):
+There is no kit CI workflow; run the gate locally before changing a kit:
 
 - `cargo fmt --all --check`.
 - Clippy with `-D warnings` on the six kit crates.

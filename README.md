@@ -102,7 +102,6 @@ Both builds default the version to `git describe --tags --always
 | `scripts/deploy/bundle-install.sh` | runs inside an extracted bundle; installs into `~/.local` and records what it wrote |
 | `install.sh` | shim over `scripts/deploy/deploy.sh` for the documented one-liner |
 | `.github/workflows/suite-release.yml` | the combined release pipeline |
-| `.github/workflows/kits.yml` | CI gate: kit fmt/clippy/tests |
 | `design/v3/` | the committed design contract (DESIGN.md + prototype source); the live source is the OpenDesign project `warp-suite-v3` |
 
 Each app repository owns its packaging assets and its own build/release

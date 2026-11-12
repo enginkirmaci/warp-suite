@@ -93,5 +93,5 @@ release. It downloads the pinned app releases; it never rebuilds app sources.
 
 ## CI
 
-- `kits.yml` runs `version.py check` and the kit gate.
+- `suite-release.yml` publishes the combined release when dispatched.
 - Each app's `ci.yml` / `release.yml` do the same for that app's line.

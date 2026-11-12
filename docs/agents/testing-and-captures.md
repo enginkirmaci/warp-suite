@@ -14,10 +14,10 @@ window in front of a capture when a probe cannot answer the question.
   `cargo test -p warp-notes`, `cargo test -p warp-station`,
   `cargo test -p warp-agent`,
   `cargo test -p warpui-kit-core`.
-- CI (`.github/workflows/kits.yml`) runs `cargo fmt --all --check`, clippy
-  with `-D warnings` on the kit and app crates, then the kit and app tests.
-  Match that locally before calling a UI change done; a passing probe is not
-  the whole gate.
+- There is no suite CI for the kits; run `cargo fmt --all --check`, clippy
+  with `-D warnings` on the kit and app crates, then the kit and app tests
+  locally before calling a UI change done. A passing probe is not the whole
+  gate.
 
 Probe skeleton (the shape used across
 `apps/warp-station/crates/warp-station/tests/`):
