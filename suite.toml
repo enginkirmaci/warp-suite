@@ -1,0 +1,29 @@
+# The suite's pin table.
+#
+# Each app is released from its own repository and pinned here by tag. The kit
+# line is pinned once; an app's Cargo.toml pins the same kit tag, and warp-suite
+# `[patch]`es that source to kits/ when the app is built through apps/.
+#
+# `version` names the combined suite release. It is deliberately independent of
+# the kit and app versions.
+[suite]
+version = "0.1.0"
+
+[kits]
+tag = "kits-v0.1.11"
+
+[apps.warp-station]
+repo = "enginkirmaci/warp-station"
+tag = "v0.1.1"
+
+[apps.warp-agent]
+repo = "enginkirmaci/warp-agent"
+tag = "v0.1.1"
+
+[apps.warp-notes]
+repo = "enginkirmaci/warp-notes"
+tag = "v0.1.1"
+
+[apps.warp-snapit]
+repo = "enginkirmaci/warp-snapit"
+tag = "v0.1.1"

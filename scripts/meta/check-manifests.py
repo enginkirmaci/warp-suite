@@ -56,16 +56,17 @@ def main() -> int:
         if key not in package_fields:
             errors.append(f"{rel(ROOT_MANIFEST)}: [workspace.package] has no {key}")
 
-    expected = {Path(m).as_posix() for m in workspace.get("members", [])}
+    # Only the kits are checked here. App repositories carry their own
+    # manifests, versions and gates; the symlinked apps/ entries are workspace
+    # members for the local build, not suite-owned sources.
+    expected = {
+        Path(m).as_posix()
+        for m in workspace.get("members", [])
+        if m.startswith("kits/")
+    }
     on_disk: set[str] = set()
-    for pattern in (
-        "apps/*/Cargo.toml",
-        "apps/*/crates/*/Cargo.toml",
-        "android-apps/*/bridge/Cargo.toml",
-        "kits/*/Cargo.toml",
-    ):
-        for path in ROOT.glob(pattern):
-            on_disk.add(rel(path.parent))
+    for path in ROOT.glob("kits/*/Cargo.toml"):
+        on_disk.add(rel(path.parent))
     for extra in sorted(on_disk - expected):
         errors.append(f"{extra}: manifest on disk but not a workspace member")
     for missing in sorted(expected - on_disk):

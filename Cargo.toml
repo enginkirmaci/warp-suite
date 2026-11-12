@@ -28,19 +28,14 @@ members = [
     "kits/warpui-kit-markdown",
     "kits/warpui-kit-picker",
     "kits/warpui-kit-platform",
-    "apps/warp-station/crates/warp-station",
-    "apps/warp-station/crates/warp-station-core",
-    "apps/warp-agent",
-    "apps/warp-notes",
-    "apps/warp-snapit",
-    # The Android IME lives outside apps/ because the desktop release does not
-    # build or ship it. Its bridge is a normal member so cargo and the CI gate
-    # still compile and test it with the same lockfile.
-    "android-apps/warp-android-scribe/bridge",
+    # Local-only symlinks to the sibling app checkouts (scripts/dev/link-apps.sh).
+    # With no links present the glob matches nothing and the kit-only CI still
+    # resolves.
+    "apps/*",
 ]
 
 [workspace.package]
-version = "0.1.12"
+version = "0.1.13"
 edition = "2024"
 # Apps inherit GPL-3.0; every kit overrides this with "MIT" in its own
 # manifest. The publishable kits inherit the suite URL the same way.
@@ -49,41 +44,32 @@ repository = "https://github.com/enginkirmaci/warp-suite"
 
 # One owner for every dependency more than one member uses.
 #
-# A member writes `dep = { workspace = true }` and adds only the features it
-# needs. Paths are relative to this file, so no member spells "../../kits/..."
-# and the four-level station path exists once, here. The gpui stack must move
-# together: `gpui`, `gpui_platform` and `gpui-kit` are one snapshot, so bump
-# all three in one edit, or the workspace will not resolve.
+# A kit writes `dep = { workspace = true }` and adds only the features it
+# needs. App repositories pin the kits by git tag instead; the `[patch]` table
+# below swaps that source for these paths when an app is built through apps/.
+# `gpui` and `gpui-kit` are one snapshot, so bump them together.
 [workspace.dependencies]
 # the gpui stack: crates.io snapshots of zed's gpui, pinned to the exact rev
-# gpui-kit 0.9 is built against
+# gpui-kit 0.9 is built against. App repositories repeat the same pins.
 gpui = { package = "gpui-pre", version = "=0.3.11" }
-gpui_platform = { package = "gpui-pre-platform", version = "=0.3.11", features = ["wayland", "x11"] }
 gpui-kit = "0.9"
 
 # the suite's own crates
 warpui-kit-core = { path = "kits/warpui-kit-core" }
 warpui-kit-build = { path = "kits/warpui-kit-build" }
 warpui-kit-diff = { path = "kits/warpui-kit-diff" }
-warpui-kit-markdown = { path = "kits/warpui-kit-markdown" }
-warpui-kit-picker = { path = "kits/warpui-kit-picker" }
 warpui-kit-platform = { path = "kits/warpui-kit-platform" }
-warp-station-core = { path = "apps/warp-station/crates/warp-station-core" }
 
 # third-party crates shared by two or more members
 anyhow = "1"
 async-channel = "2"
-chrono = { version = "0.4", default-features = false, features = ["clock"] }
 futures-util = "0.3"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp"] }
-libc = "0.2"
-reqwest = { version = "0.13", default-features = false, features = ["json", "rustls", "stream"] }
 rust-embed = "8"
 serde = "1"
 serde_json = "1"
 smallvec = "1"
 tempfile = "3"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "time", "net", "io-util", "sync"] }
 tracing = "0.1"
 tracing-appender = "0.2"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
@@ -97,8 +83,6 @@ winresource = "0.1"
 [patch."https://github.com/enginkirmaci/warp-suite"]
 warpui-kit-core = { path = "kits/warpui-kit-core" }
 warpui-kit-diff = { path = "kits/warpui-kit-diff" }
-warpui-kit-markdown = { path = "kits/warpui-kit-markdown" }
-warpui-kit-picker = { path = "kits/warpui-kit-picker" }
 warpui-kit-platform = { path = "kits/warpui-kit-platform" }
 warpui-kit-build = { path = "kits/warpui-kit-build" }
 

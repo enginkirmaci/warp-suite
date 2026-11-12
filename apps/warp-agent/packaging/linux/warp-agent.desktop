@@ -1,9 +1,0 @@
-[Desktop Entry]
-Type=Application
-Name=Warp Agent
-Comment=Chat client over opencode serve
-Exec=__WARP_SUITE_BIN__/warp-agent
-Icon=warpagent
-Terminal=false
-Categories=Development;
-StartupWMClass=warp-agent

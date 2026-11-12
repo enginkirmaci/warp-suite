@@ -14,3 +14,5 @@ android-apps/*/android/.kotlin/
 android-apps/*/android/local.properties
 android-apps/*/android/build/
 android-apps/*/android/app/build/
+apps/*
+!apps/README.md
