@@ -366,9 +366,10 @@ pinned integration gate prove the pair.
   `packaging/windows/<app>.iss`; without one the app release is a portable zip.
 - Keep the desktop entry's `Exec=__WARP_SUITE_BIN__/...` placeholder; the
   build resolves it at install time.
-- A suite release is the [`suite.toml`](suite.toml) pin table: every app tag
-  and the kit tag, assembled in Phase 5 of the repo-split plan. A suite release
-  never rebuilds an app from sources.
+- A suite release is the [`suite.toml`](suite.toml) pin table:
+  `suite-release.yml` downloads those app releases, verifies their checksums
+  and publishes the combined bundle. It needs `SUITE_READ_TOKEN` and never
+  rebuilds an app from sources.
 - `warp-android-scribe` ships from its own repository: a sideloaded debug APK
   (`./gradlew assembleDebug`) and a bridge installed as a systemd user service
   on the NAS. Never add it to `suite.toml` or the desktop build.

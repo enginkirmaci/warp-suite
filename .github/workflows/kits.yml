@@ -1,29 +1,23 @@
 name: kits
 
-# The kit workspace gate. The release workflow only runs on dispatch, so this
-# is what keeps kits/ honest between suite tags.
-#
-# Two jobs on purpose: fmt is seconds and does not need a toolchain cache, so
-# a formatting slip fails fast while clippy/tests warm their cache.
-
+# The kit workspace gate. Apps are built and tested in their own repositories;
+# this workflow only knows kits/, the suite scripts and the pin table.
 on:
   push:
     paths:
       - 'kits/**'
-      - 'apps/**'
-      - 'android-apps/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
+      - 'suite.toml'
       - 'scripts/**'
       - '.cargo/**'
       - '.github/workflows/kits.yml'
   pull_request:
     paths:
       - 'kits/**'
-      - 'apps/**'
-      - 'android-apps/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
+      - 'suite.toml'
       - 'scripts/**'
       - '.cargo/**'
       - '.github/workflows/kits.yml'
@@ -32,16 +26,12 @@ on:
 permissions:
   contents: read
 
-# One in-flight run per ref; a new push supersedes the queued one.
 concurrency:
   group: kits-${{ github.ref }}
   cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
-  # Debuginfo is most of a cargo target dir and none of what these probes
-  # assert on: 9.5 GB -> 2.9 GB and 53s -> 39s on a cold build. Smaller cache,
-  # faster restore, same test signal.
   CARGO_PROFILE_DEV_DEBUG: '0'
   CARGO_PROFILE_TEST_DEBUG: '0'
   CARGO_INCREMENTAL: '0'
@@ -52,8 +42,8 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          # `version.py check --history` walks every commit back to the one
-          # that added version.toml.
+          # version.py check --history walks every commit back to the one that
+          # added version.toml.
           fetch-depth: 0
       - name: Check manifest shape
         run: python3 scripts/meta/check-manifests.py
@@ -84,21 +74,12 @@ jobs:
           toolchain: ${{ steps.toolchain.outputs.channel }}
           components: clippy
 
-      # rust-cache keys on the rustc version, the lockfiles and
-      # .cargo/config.toml, so a toolchain or dependency bump is a fresh key and
-      # an unchanged one restores. The target dir is named explicitly because
-      # kits/ builds into the suite target dir (.cargo/config.toml), not the
-      # `kits/target` the action would assume by default - which is why the
-      # hand-rolled actions/cache this replaced never restored anything.
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: . -> .build/target
           shared-key: kits
           cache-on-failure: true
 
-      # kits/ is a member directory of the suite workspace (root Cargo.toml),
-      # not a workspace of its own: select the kit crates by package.
-      # -p selectors go BEFORE `--`: anything after it is passed to rustc.
       - name: cargo clippy
         run: |
           cargo clippy --locked --all-targets \
@@ -113,61 +94,3 @@ jobs:
             -p warpui-kit-core -p warpui-kit-diff \
             -p warpui-kit-markdown -p warpui-kit-picker \
             -p warpui-kit-platform -p warpui-kit-build
-
-  # One workspace now covers kits + apps, so this job typechecks the app
-  # crates against the kit crates as built - a renamed kit export or a feature
-  # an app does not enable still fails here rather than at release time.
-  # This is a typecheck + unit-test gate only: no release profile, no
-  # packaging - the release workflow owns those.
-  apps:
-    runs-on: ubuntu-latest
-    steps:
-      # Full history on purpose: warp-station's changes_probe/git_parity probes
-      # read this repository itself and assert on its commit log. With the
-      # default fetch-depth 1 they see a single commit and fail.
-      - uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-
-      - uses: ./.github/actions/gpui-deps
-
-      - name: Read the pinned channel
-        run: echo "channel=$(sed -n 's/^channel = "\(.*\)"/\1/p' rust-toolchain.toml)" >> "$GITHUB_OUTPUT"
-        id: toolchain
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: ${{ steps.toolchain.outputs.channel }}
-          components: clippy
-
-      # ONE workspace and ONE lockfile, so a single cache entry covers every
-      # app: the old "two anchor workspaces" split (listing apps/* separately
-      # because each was its own workspace and rust-cache pruned per entry) is
-      # gone with the per-app lockfiles.
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: . -> .build/target
-          shared-key: apps
-          cache-on-failure: true
-
-      # warp-snapit is Windows-only (its engine is cfg(windows)-gated) but its
-      # platform-neutral modules test on Linux; its package is `warp-snapit`.
-      # Every app is a member of the root workspace, so -p selects it.
-      # The Android bridge is a workspace member too; the Gradle/APK half is
-      # built separately and is not in this job.
-      # The kit job only lints kits/; app-code warnings (this audit found
-      # several by hand) used to reach main unchecked.
-      - name: Clippy apps
-        run: |
-          cargo clippy --locked --all-targets \
-            -p warp-station-core -p warp-station \
-            -p warp-agent -p warp-notes -p warp-snapit \
-            -p warp-android-scribe-bridge \
-            -- -D warnings
-
-      - name: Test apps
-        run: |
-          set -euo pipefail
-          cargo test --locked \
-            -p warp-station-core -p warp-station \
-            -p warp-agent -p warp-notes -p warp-snapit \
-            -p warp-android-scribe-bridge

@@ -8,6 +8,7 @@
 # the kit and app versions.
 [suite]
 version = "0.1.0"
+build = 1
 
 [kits]
 tag = "kits-v0.1.11"

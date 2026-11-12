@@ -28,10 +28,18 @@ one tag per app. Each app release is built and published in its own repository;
 the suite job downloads the pinned releases and assembles the combined Linux
 bundle and the Windows assets.
 
-The pin-table assembler is Phase 5 of
-[`plans/app-repos-kits-and-suite-release.md`](plans/app-repos-kits-and-suite-release.md).
-Until it lands, deploy from the app releases directly, or build the linked
-workspace locally with the commands below.
+Tag this repo with the suite version and dispatch the assembler:
+
+```sh
+git tag -a "v0.1.0" -m "warp-suite 0.1.0"
+git push origin "v0.1.0"
+gh workflow run suite-release.yml --ref v0.1.0 -f version=0.1.0
+```
+
+The job downloads the app releases pinned in `suite.toml`, verifies their
+`SHA256SUMS`, and publishes the combined Linux bundle and Windows assets. It
+needs `SUITE_READ_TOKEN` (read access to the app repositories) and never
+rebuilds an app.
 
 ## Install on a Linux machine
 

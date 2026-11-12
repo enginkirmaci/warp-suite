@@ -7,6 +7,7 @@ reachable from this checkout.
 
 Usage:
   manifest.py list                 print one pinned app name per line
+  manifest.py pin <app> <key>      print one field of [apps.<app>] in suite.toml
   manifest.py get <app> <key>      print one field of apps/<app>/app.toml
 """
 
@@ -26,6 +27,20 @@ def suite() -> dict:
 
 def app_names() -> list[str]:
     return list(suite())
+
+
+def pin(name: str, key: str):
+    if name == "kits":
+        data = tomllib.loads(SUITE.read_text(encoding="utf-8")).get("kits", {})
+        if key not in data:
+            sys.exit(f"[kits] has no {key}")
+        return data[key]
+    known = suite()
+    if name not in known:
+        sys.exit(f"suite.toml has no [apps.{name}] (known: {', '.join(known) or 'none'})")
+    if key not in known[name]:
+        sys.exit(f"[apps.{name}] has no {key}")
+    return known[name][key]
 
 
 def get(name: str, key: str):
@@ -50,6 +65,9 @@ def main() -> None:
     if argv == ["list"]:
         for name in app_names():
             print(name)
+        return
+    if len(argv) == 3 and argv[0] == "pin":
+        print(pin(argv[1], argv[2]))
         return
     if len(argv) == 3 and argv[0] == "get":
         print(get(argv[1], argv[2]))

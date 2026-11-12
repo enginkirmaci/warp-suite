@@ -2,9 +2,10 @@
 
 Status: 2026-11-12. Phases 1–4 implemented: the kit line and release, the five
 app repositories (history kept), their standalone manifests/CI/releases, the
-symlinked kit workspace and `suite.toml`. Phase 5 (the suite assembler) and
-Phase 6 (the integration gate) are next. The app repositories are committed
-locally; pushing them waits on the `KITS_READ_TOKEN` secret.
+symlinked kit workspace, `suite.toml` and the suite assembler (`suite-release.yml`
+plus `scripts/build/suite-assemble.sh`). Phase 6 (the integration gate) is next.
+The app repositories are committed locally; pushing them waits on the
+`KITS_READ_TOKEN` secret, and the suite assembler needs `SUITE_READ_TOKEN`.
 
 ## Goal
 

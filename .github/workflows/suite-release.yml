@@ -1,185 +1,80 @@
 name: suite-release
 
-# Builds the apps in apps/ at this commit and publishes one combined GitHub
-# Release. Deploy = dispatch this workflow with a version.
+# Assembles one combined suite release from the app releases pinned in
+# suite.toml. It never builds an app: each app was built and published in its
+# own repository at its pinned tag. The job downloads those assets, verifies
+# their checksums, merges the Linux bundles and Windows assets, and publishes
+# the suite release.
 #
-# Both jobs call the same scripts a local build uses - scripts/build/build.sh on
-# Linux, scripts/build/build.ps1 on Windows - so CI cannot drift from a local build.
-#
-# Cache notes (why this is fast now):
-#   - .cargo/config.toml redirects every workspace to .build/target, so the
-#     cache must name that path explicitly (a bare `target` restores nothing).
-#   - Swatinem/rust-cache keys on rustc + the lockfiles and prunes the target
-#     dir down to dependencies before saving, so the entry stays small instead
-#     of re-uploading the apps' own multi-GB artifacts on every run.
+# Needs SUITE_READ_TOKEN: a fine-grained token with read access to the five app
+# repositories (the repository's own GITHUB_TOKEN cannot read them).
 
 on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Suite version (release tag will be v<version>)'
+        description: 'Suite version (suite.toml [suite].version); release tag v<version>'
         required: true
-      skip_windows:
-        description: 'Build Linux only (skips the Windows installers)'
-        type: boolean
-        default: false
 
 permissions:
   contents: write
 
-# A release is never cancelled by a newer dispatch, but a queued one waits.
 concurrency:
   group: suite-release
   cancel-in-progress: false
 
 env:
   CARGO_TERM_COLOR: always
-  CARGO_INCREMENTAL: '0'
 
 jobs:
-  linux:
+  assemble:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
 
-      - name: Check the suite version
+      - name: Check the suite version and the tag
         run: |
-          actual=$(python3 scripts/meta/version.py show --json | python3 -c 'import json,sys; print(json.load(sys.stdin)["version"])')
+          actual=$(python3 -c 'import tomllib; print(tomllib.load(open("suite.toml","rb"))["suite"]["version"])')
           test "$actual" = "${{ inputs.version }}" || {
-            echo "::error::version.toml says $actual, the dispatch says ${{ inputs.version }}"
+            echo "::error::suite.toml says $actual, the dispatch says ${{ inputs.version }}"
             exit 1
           }
           test "$GITHUB_REF" = "refs/tags/v${{ inputs.version }}" || {
-            echo "::error::dispatch the release with --ref v${{ inputs.version }}, not $GITHUB_REF"
+            echo "::error::dispatch the suite release with --ref v${{ inputs.version }}, not $GITHUB_REF"
             exit 1
           }
 
-      - name: Read the suite build
-        id: suite
-        run: echo "build=$(python3 scripts/meta/version.py show --json | python3 -c 'import json,sys; print(json.load(sys.stdin)["build"])')" >> "$GITHUB_OUTPUT"
-
-      - uses: ./.github/actions/gpui-deps
-
-      - name: Read the pinned channel
-        run: echo "channel=$(sed -n 's/^channel = "\(.*\)"/\1/p' rust-toolchain.toml)" >> "$GITHUB_OUTPUT"
-        id: toolchain
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: ${{ steps.toolchain.outputs.channel }}
-
-      # ONE workspace covers kits + all four apps (root Cargo.toml), so one
-      # cache entry covers the whole graph and the pruning problem that forced
-      # the old "two anchor workspaces" split is gone. The target dir is still
-      # named explicitly: rust-cache would otherwise default to `<root>/target`,
-      # which does not exist here, leaving a registry-only entry and a full
-      # compile every run.
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: . -> .build/target
-          shared-key: release-linux
-          cache-on-failure: true
-
-      - name: Build Linux bundle
+      - name: Download the pinned app releases
         env:
-          WARP_SUITE_BUILD: ${{ steps.suite.outputs.build }}
-        run: scripts/build/build.sh --version "${{ inputs.version }}"
-
-      - uses: actions/upload-artifact@v7
-        with:
-          name: warp-suite-linux
-          path: dist/linux/*.tar.gz
-          if-no-files-found: error
-          compression-level: 0
-
-  windows:
-    # warp-snapit is Windows-only and the .iss installers only build there, so
-    # this job is what makes the release complete. skip_windows is for the
-    # quick Linux-only iteration loop.
-    if: ${{ !inputs.skip_windows }}
-    runs-on: windows-latest
-    defaults:
-      run:
-        shell: pwsh
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Check the suite version
-        shell: bash
+          GH_TOKEN: ${{ secrets.SUITE_READ_TOKEN }}
         run: |
-          actual=$(python scripts/meta/version.py show --json | python -c 'import json,sys; print(json.load(sys.stdin)["version"])')
-          test "$actual" = "${{ inputs.version }}" || {
-            echo "::error::version.toml says $actual, the dispatch says ${{ inputs.version }}"
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "::error::SUITE_READ_TOKEN is not set; it needs read access to the app repositories"
             exit 1
-          }
-          test "$GITHUB_REF" = "refs/tags/v${{ inputs.version }}" || {
-            echo "::error::dispatch the release with --ref v${{ inputs.version }}, not $GITHUB_REF"
-            exit 1
-          }
+          fi
+          for app in $(python3 scripts/meta/manifest.py list); do
+            tag=$(python3 scripts/meta/manifest.py pin "$app" tag)
+            repo=$(python3 scripts/meta/manifest.py pin "$app" repo)
+            mkdir -p "artifacts/$app"
+            echo "== $repo $tag"
+            gh release download "$tag" --repo "$repo" \
+              --pattern '*.tar.gz' \
+              --pattern '*.zip' \
+              --pattern '*-setup-x64.exe' \
+              --pattern 'SHA256SUMS' \
+              --dir "artifacts/$app"
+            (cd "artifacts/$app" && sha256sum -c SHA256SUMS)
+          done
 
-      - name: Read the suite build
-        id: suite
-        shell: bash
-        run: echo "build=$(python scripts/meta/version.py show --json | python -c 'import json,sys; print(json.load(sys.stdin)["build"])')" >> "$GITHUB_OUTPUT"
-
-      - name: Read the pinned channel
-        shell: bash
-        run: echo "channel=$(sed -n 's/^channel = "\(.*\)"/\1/p' rust-toolchain.toml)" >> "$GITHUB_OUTPUT"
-        id: toolchain
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: ${{ steps.toolchain.outputs.channel }}
-
-      # Same rule as the Linux job: one workspace, target dir named explicitly.
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: . -> .build/target
-          shared-key: release-windows
-          cache-on-failure: true
-
-      # windows-latest normally ships Inno Setup; only install when absent.
-      - name: Install Inno Setup
-        run: |
-          if (-not (Get-Command iscc -ErrorAction SilentlyContinue)) {
-            choco install innosetup -y --no-progress
-          }
-
-      - name: Build Windows deliverables
-        env:
-          WARP_SUITE_BUILD: ${{ steps.suite.outputs.build }}
-        run: scripts/build/build.ps1 -Version "${{ inputs.version }}"
-
-      - uses: actions/upload-artifact@v7
-        with:
-          name: warp-suite-windows
-          path: |
-            dist/windows/*.zip
-            dist/windows/*.exe
-            dist/windows/REVISIONS.txt
-          if-no-files-found: error
-          compression-level: 0
-
-  release:
-    needs: [linux, windows]
-    # Only publish when BOTH platforms built. `needs` alone would also skip this
-    # job when windows is skipped, so the condition is explicit - and it
-    # deliberately does NOT accept `skipped` or `cancelled`: skip_windows is a
-    # Linux build check, and publishing from it would ship a Linux-only release
-    # under the real version tag (that is how v0.1.2 briefly went out without
-    # installers). `always()` also admits cancelled jobs, so exclude them.
-    if: ${{ always() && !cancelled() && needs.linux.result == 'success' && needs.windows.result == 'success' }}
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/download-artifact@v8
-        with:
-          path: artifacts
-          merge-multiple: true
+      - name: Assemble the suite
+        run: scripts/build/suite-assemble.sh --version "${{ inputs.version }}"
 
       - name: Refuse a second release for this tag
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           if gh release view "v${{ inputs.version }}" >/dev/null 2>&1; then
-            echo "::error::release v${{ inputs.version }} already exists; bump version.toml instead of reusing its tag"
+            echo "::error::release v${{ inputs.version }} already exists; bump suite.toml instead"
             exit 1
           fi
 
@@ -188,18 +83,13 @@ jobs:
           tag_name: v${{ inputs.version }}
           name: warp-suite v${{ inputs.version }}
           body: |
-            Combined suite release built from this commit: ${{ github.sha }}.
+            Combined suite release assembled from the app releases pinned in
+            `suite.toml`; it does not rebuild any app.
 
-            Linux: scripts/build/build.sh -> warp-suite-${{ inputs.version }}-linux.tar.gz.
-            Extract and run bundle-install.sh, or use ./install.sh.
-
-            Windows: scripts/build/build.ps1 -> per-app installers (Inno Setup) and
-            portable zips. warp-snapit is Windows-only and ships portable only.
-
-            Libraries: the kits/ workspace at this commit (warpui-kit-*), also
-            recorded in each REVISIONS.txt.
+            The kit line is recorded in `REVISIONS.txt`, together with each
+            app tag. Linux: extract the tarball and run
+            `bundle-install.sh`, or use `./install.sh` from this repository.
           files: |
-            artifacts/*.tar.gz
-            artifacts/*.exe
-            artifacts/*.zip
-            artifacts/REVISIONS.txt
+            dist/linux/*.tar.gz
+            dist/windows/*
+            dist/SHA256SUMS
