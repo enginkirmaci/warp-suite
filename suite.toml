@@ -15,7 +15,7 @@ tag = "kits-v0.1.11"
 
 [apps.warp-station]
 repo = "enginkirmaci/warp-station"
-tag = "v0.1.5"
+tag = "v0.1.6"
 
 [apps.warp-agent]
 repo = "enginkirmaci/warp-agent"
