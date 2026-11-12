@@ -40,7 +40,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.9"
+version = "0.1.10"
 edition = "2024"
 # Apps inherit GPL-3.0; every kit overrides this with "MIT" in its own
 # manifest. The publishable kits inherit the suite URL the same way.

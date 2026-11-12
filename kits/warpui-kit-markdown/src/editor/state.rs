@@ -275,6 +275,7 @@ struct FrameKey {
     size: gpui::Size<Pixels>,
     em: f32,
     max_column_em: Option<f32>,
+    margin_x_em: f32,
     top_margin_em: f32,
     colors: LiveColors,
 }
@@ -358,6 +359,8 @@ pub struct LiveEditorState {
     em: f32,
     /// The widest text column, in em; `None` lets it fill the width.
     max_column_em: Option<f32>,
+    /// Space either side of the text column, in em.
+    margin_x_em: f32,
     /// Space above the first line, in em.
     top_margin_em: f32,
     placeholder: SharedString,
@@ -459,6 +462,7 @@ impl LiveEditorState {
             menu_property: None,
             em: 16.,
             max_column_em: Some(frame::DEFAULT_MAX_COLUMN_EM),
+            margin_x_em: frame::DEFAULT_MARGIN_X_EM,
             top_margin_em: frame::DEFAULT_TOP_MARGIN_EM,
             placeholder: SharedString::default(),
             base_dir: None,
@@ -503,6 +507,17 @@ impl LiveEditorState {
     pub fn set_max_column_em(&mut self, max: Option<f32>, cx: &mut Context<Self>) {
         if self.max_column_em != max {
             self.max_column_em = max;
+            self.frame_key = None;
+            self.views_revision = u64::MAX;
+            cx.notify();
+        }
+    }
+
+    /// Space either side of the text column, in em: a host that already pads
+    /// its surface can drop the engine's own side margins.
+    pub fn set_margin_x_em(&mut self, margin: f32, cx: &mut Context<Self>) {
+        if self.margin_x_em != margin {
+            self.margin_x_em = margin;
             self.frame_key = None;
             self.views_revision = u64::MAX;
             cx.notify();
@@ -1078,6 +1093,7 @@ impl LiveEditorState {
             size: bounds.size,
             em: self.em,
             max_column_em: self.max_column_em,
+            margin_x_em: self.margin_x_em,
             top_margin_em: self.top_margin_em,
             colors,
         };
@@ -1106,6 +1122,7 @@ impl LiveEditorState {
                 let style = frame::Style {
                     em: self.em,
                     max_column_em: self.max_column_em,
+                    margin_x_em: self.margin_x_em,
                     top_margin_em: self.top_margin_em,
                     fonts: &fonts,
                     colors: &colors,

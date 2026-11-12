@@ -9,7 +9,8 @@
 
 use super::display::{Band, Decor};
 use super::frame::{
-    DEFAULT_MAX_COLUMN_EM, DEFAULT_TOP_MARGIN_EM, Frame, LaidBox, LaidLine, Rect, TableStrip,
+    DEFAULT_MARGIN_X_EM, DEFAULT_MAX_COLUMN_EM, DEFAULT_TOP_MARGIN_EM, Frame, LaidBox, LaidLine,
+    Rect, TableStrip,
 };
 use super::icons::{self, Icon};
 use super::layout::{Piece, link_icon_width, remove_gap};
@@ -78,6 +79,7 @@ pub struct LiveEditor {
     code_overlay: Option<CodeOverlay>,
     host_menu: Option<HostMenu>,
     column: ColumnWidth,
+    margin_x_em: Option<f32>,
     top_margin: TopMargin,
 }
 
@@ -123,6 +125,7 @@ impl LiveEditor {
             code_overlay: None,
             host_menu: None,
             column: ColumnWidth::default(),
+            margin_x_em: None,
             top_margin: TopMargin::default(),
         }
     }
@@ -193,6 +196,14 @@ impl LiveEditor {
         self
     }
 
+    /// The space either side of the text column, in em. A host that already
+    /// pads its own surface can drop the engine's side margins and let the
+    /// text fill the card.
+    pub fn margin_x_em(mut self, margin: f32) -> Self {
+        self.margin_x_em = Some(margin);
+        self
+    }
+
     /// Replace the engine's space above the first line, in em. A card that
     /// pads its own surface uses this to drop the doubled top gap.
     pub fn top_margin_em(mut self, top: f32) -> Self {
@@ -238,6 +249,7 @@ impl RenderOnce for LiveEditor {
             code_overlay,
             host_menu,
             column,
+            margin_x_em,
             top_margin,
         } = self;
         state.update(cx, |editor, cx| {
@@ -260,6 +272,7 @@ impl RenderOnce for LiveEditor {
                 },
                 cx,
             );
+            editor.set_margin_x_em(margin_x_em.unwrap_or(DEFAULT_MARGIN_X_EM), cx);
             editor.set_top_margin_em(
                 match top_margin {
                     TopMargin::Default => DEFAULT_TOP_MARGIN_EM,
