@@ -1,9 +1,10 @@
 # App repos, kit releases and the suite assembly
 
-Status: proposal, 2026-11-12. Decisions settled (see *Decisions*). Phase 1
-(kit line, `kits-release.yml`, `scripts/build/kit-build.sh`, the symlink tooling and
-the local-setup guide) is implemented on the working tree and verified in a
-scratch checkout. Phase 2 waits on the app repositories.
+Status: 2026-11-12. Phases 1–4 implemented: the kit line and release, the five
+app repositories (history kept), their standalone manifests/CI/releases, the
+symlinked kit workspace and `suite.toml`. Phase 5 (the suite assembler) and
+Phase 6 (the integration gate) are next. The app repositories are committed
+locally; pushing them waits on the `KITS_READ_TOKEN` secret.
 
 ## Goal
 

@@ -5,10 +5,9 @@ repositories next to it. On a developer machine `warp-suite/apps/` is a set of
 symlinks into those checkouts, so the root workspace still resolves every app
 and kit together: one lockfile, one target directory, one gpui compile.
 
-> The split is being executed from `plans/app-repos-kits-and-suite-release.md`.
-> Until Phase 2 creates the app repositories, `apps/` still holds the real
-> sources and `scripts/dev/link-apps.sh` correctly reports each one as a real
-> directory instead of replacing it.
+> The split is complete: the apps live in their own repositories and `apps/`
+> holds only symlinks. `scripts/dev/link-apps.sh` is the only writer of those
+> links; it reports a real directory instead of replacing it.
 
 ## Layout
 

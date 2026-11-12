@@ -55,18 +55,17 @@ code blocks. `-platform` is the odd one out — no gpui by default, and
 
 ## How the apps consume it
 
-The paths live once, in the root `[workspace.dependencies]`, so a member only
-names the crate and the depth of its own directory stops mattering:
+Every app repository pins the kit line by tag:
 
 ```toml
-warpui-kit-core = { workspace = true }
-warpui-kit-markdown = { workspace = true, features = ["mermaid", "all-languages"] }
+warpui-kit-core = { git = "https://github.com/enginkirmaci/warp-suite", tag = "kits-v0.1.11", package = "warpui-kit-core" }
+warpui-kit-markdown = { git = "...", tag = "kits-v0.1.11", package = "warpui-kit-markdown", features = ["mermaid", "all-languages"] }
 ```
 
-The apps live under `apps/` in this repo, so a release builds from the suite
-checkout alone. The suite commit is the kits' provenance: the Linux bundle's
-`REVISIONS.txt` records it against each crate, and there is no separate sync
-step.
+The `kits-v<version>` tag is the provenance: `kits.toml` on that release
+records the version, build and commit. When an app is built through
+`warp-suite/apps/<name>`, the root `[patch]` table swaps the git source for the
+local `kits/` paths, so a kit change is visible without cutting a tag.
 
 Adding a crate: give it a directory with a `Cargo.toml` and `src/`, add it to
 the workspace `members` in the root `Cargo.toml`, and add it to

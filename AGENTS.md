@@ -6,25 +6,24 @@ the app's own `AGENTS.md` when the work is in one app, then the deep guides in
 
 ## What this repo is
 
-warp-suite is the monorepo for desktop apps and the Android dictation keyboard.
-The desktop apps live under `apps/<name>/`, imported with `git subtree` so each
-keeps its history; the shared `warpui-kit-*` crates live under `kits/`; one
-Cargo workspace builds all of it and one release pipeline publishes it. The
-Android app lives under `android-apps/` and has its own Gradle build; only its
-Rust bridge is a workspace member.
+warp-suite is the kit and release repository. The shared `warpui-kit-*` crates
+live under `kits/`; each app lives in its own repository and pins a kit tag.
+Locally `apps/<name>` is a symlink to the sibling checkout, and the root
+workspace builds the kits plus whatever apps are linked. The Android app has
+its own repository and Gradle build; its Rust bridge is not a member here.
 
-| App | Package | Path | What it is |
+| App | Package | Repository | What it is |
 |---|---|---|---|
-| warp-station | `warp-station` + `warp-station-core` | `apps/warp-station/` | Repository workbench (Rust/GPUI) |
-| warp-agent | `warp-agent` | `apps/warp-agent/` | Chat client over `opencode serve` and `dsh web` (Rust/GPUI) |
-| warp-snapit | `warp-snapit` | `apps/warp-snapit/` | Windows-only zone snapper (Win32, no GPUI/kit) |
-| warp-notes | `warp-notes` | `apps/warp-notes/` | Per-repo markdown notes with a live editor (Rust/GPUI) |
-| warp-android-scribe | `warp-android-scribe-bridge` | `android-apps/warp-android-scribe/` | Android dictation IME with a full QWERTY keyboard over Superwhisper or Hex (Kotlin/Compose + Rust bridge) |
+| warp-station | `warp-station` + `warp-station-core` | [warp-station](https://github.com/enginkirmaci/warp-station) | Repository workbench (Rust/GPUI) |
+| warp-agent | `warp-agent` | [warp-agent](https://github.com/enginkirmaci/warp-agent) | Chat client over `opencode serve` and `dsh web` (Rust/GPUI) |
+| warp-snapit | `warp-snapit` | [warp-snapit](https://github.com/enginkirmaci/warp-snapit) | Windows-only zone snapper (Win32, no GPUI/kit) |
+| warp-notes | `warp-notes` | [warp-notes](https://github.com/enginkirmaci/warp-notes) | Per-repo markdown notes with a live editor (Rust/GPUI) |
+| warp-android-scribe | `warp-android-scribe-bridge` | [warp-android-scribe](https://github.com/enginkirmaci/warp-android-scribe) | Android dictation IME with a full QWERTY keyboard over Superwhisper or Hex (Kotlin/Compose + Rust bridge) |
 
 ## Local setup
 
-The repository split moves each app to its own repository and keeps `apps/` as
-symlinks to the sibling checkouts. The full recipe is
+Each app lives in its own repository; `apps/` holds symlinks to the sibling
+checkouts. The full recipe is
 [`docs/agents/local-setup.md`](docs/agents/local-setup.md); the short version:
 
 ```sh
@@ -35,20 +34,19 @@ python3 scripts/meta/version.py install-hooks
 cargo build -p warp-notes         # proves the linked workspace
 ```
 
-`scripts/dev/link-apps.sh` never replaces a real `apps/<name>` directory: that is
-the pre-split layout and it means the app repositories do not exist yet (see
-`plans/app-repos-kits-and-suite-release.md`). App checkouts carry no
-`[workspace]` table on purpose; the root `apps/*` member glob and the kit
-`[patch]` table are what make the symlinked build work.
+`scripts/dev/link-apps.sh` never replaces a real `apps/<name>` directory (that
+would hide a checkout). App checkouts carry no `[workspace]` table on purpose;
+the root `apps/*` member glob and the kit `[patch]` table are what make the
+symlinked build work.
 
 ## Before you edit
 
 1. Read this file and, for a UI or kit change, the matching guide in
    [`docs/agents/`](docs/agents/): design system, new-app recipe, and testing
    and captures.
-2. Read the app's `AGENTS.md` (`apps/<name>/AGENTS.md` or
-   `android-apps/<name>/AGENTS.md`). It wins over this file for app-specific
-   facts.
+2. Read the app repository's `AGENTS.md` (the `apps/<name>/AGENTS.md` symlink
+   points at it, or open the Android repository's own file). It wins over this
+   file for app-specific facts.
 3. Read the root [`Cargo.toml`](Cargo.toml), [`Cargo.lock`](Cargo.lock) and the
    touched crate's `Cargo.toml`. Note the pins and what is already a
    dependency before adding anything.
@@ -62,55 +60,57 @@ the pre-split layout and it means the app repositories do not exist yet (see
 
 ## Workspace, pins, toolchain
 
-- The root `Cargo.toml` is the only workspace. It has `resolver = "3"`, edition
-  2024, and every app and kit crate as a member. Do not create a per-app
-  workspace or a second lockfile.
-- One [`Cargo.lock`](Cargo.lock) serves the whole suite. CI runs with
-  `--locked`; keep it committed and do not hand-edit it.
+- The root `Cargo.toml` is the kit workspace. It has `resolver = "3"`, edition
+  2024, `kits/*` as members and an `apps/*` glob that adds whatever app
+  checkouts are linked locally. App repositories have their own workspace,
+  lockfile and version; do not add their crates as explicit members here.
+- One [`Cargo.lock`](Cargo.lock) serves the kits and the linked apps. CI runs
+  kit-only with `--locked`; keep it committed and do not hand-edit it.
 - [`rust-toolchain.toml`](rust-toolchain.toml) pins channel `1.99`. Patch
   releases flow; bump the channel deliberately, in one edit, because CI reads
   it from this file.
 - [`.cargo/config.toml`](.cargo/config.toml) sends every build to
   `.build/target`. Keep it that way: one GPUI dependency tree is shared by
   every app and kit.
-- The GPUI stack is `gpui-kit 0.9`, `gpui-pre =0.3.11` and
-  `gpui-pre-platform =0.3.11`, declared once in the root
-  `[workspace.dependencies]`. Never add the real crates.io `gpui`; it is
-  stale. Bump `gpui-kit`, `gpui-pre` and `gpui-pre-platform` together there,
-  or the workspace will not resolve.
-- [`apps.toml`](apps.toml) carries per-app build knobs (`package`,
-  `linux_build`, `linux_skip`, `icon_prefix`, `scalable_svg`) and contract
-  notes. [`scripts/meta/manifest.py`](scripts/meta/manifest.py) is the reader both build
-  scripts and CI use. Add an `[apps.<name>]` section only when an app needs a
-  non-default knob.
+- The kit workspace pins `gpui` (`gpui-pre =0.3.11`) and `gpui-kit 0.9` in the
+  root `[workspace.dependencies]`. Each app repository repeats the same pins in
+  its own manifest. Never add the real crates.io `gpui`; it is stale. Bump
+  `gpui`, `gpui-pre-platform` where an app uses it, and `gpui-kit` together, or
+  the linked build will not resolve.
+- [`suite.toml`](suite.toml) is the pin table: the kit tag and one tag per app.
+  Each app's `app.toml` carries its build knobs (`package`, `linux_skip`,
+  `icon_prefix`, `scalable_svg`).
+  [`scripts/meta/manifest.py`](scripts/meta/manifest.py) reads both.
 
 ## Commands and gates
 
 Use the package selector from the repo root. The app directory also works
 because cargo walks up to the suite workspace.
 
+`cargo build -p <app>` needs `scripts/dev/link-apps.sh` to have linked that
+app. With no links the workspace is kit-only, which is what CI builds.
+
 ```sh
 cargo build -p warp-notes
 cargo test -p warp-notes
 cargo test -p warp-station -p warp-station-core
 cargo test -p warpui-kit-core
-cargo test -p warp-android-scribe-bridge
 cargo fmt --all
-cargo clippy --locked --all-targets -p warp-agent -- -D warnings
+cargo clippy --locked --all-targets -p warpui-kit-core -- -D warnings
 ```
 
-The CI gate is [`.github/workflows/kits.yml`](.github/workflows/kits.yml):
+The kit CI gate is [`.github/workflows/kits.yml`](.github/workflows/kits.yml):
 
 - `cargo fmt --all --check`.
-- Clippy with `-D warnings` on all six kit crates, all app crates and the
-  Android bridge.
-- `cargo test --locked` on the kit crates, the app crates and the Android
-  bridge.
+- Clippy with `-D warnings` on the six kit crates.
+- `cargo test --locked` on the six kit crates.
 
-The Android Gradle project is built separately and is not in that workflow:
+Each app's own `ci.yml` runs that app's fmt, clippy and tests. The Android
+Gradle project is built in its own repository:
 
 ```sh
-cd android-apps/warp-android-scribe/android
+# in the warp-android-scribe checkout
+cd android
 JAVA_HOME=/usr/lib/jvm/java-17-openjdk ANDROID_HOME=$HOME/tools/android-sdk \
   ./gradlew assembleDebug
 ```
@@ -119,19 +119,18 @@ Match that locally for the crates you touched before calling a change done. A
 passing probe is not the whole gate. Run `cargo fmt --all` (without `--check`)
 to fix formatting rather than reporting it.
 
-The clippy selectors are:
+The kit clippy selectors are:
 
 ```sh
 cargo clippy --locked --all-targets \
   -p warpui-kit-core -p warpui-kit-diff -p warpui-kit-markdown \
   -p warpui-kit-picker -p warpui-kit-platform -p warpui-kit-build \
-  -p warp-station-core -p warp-station -p warp-agent -p warp-notes -p warp-snapit \
-  -p warp-android-scribe-bridge \
   -- -D warnings
 ```
 
-`cargo test` after a kit change builds the apps against that kit directly; use
-it when a kit's public API moves.
+`cargo test -p <app>` after a kit change builds the linked app against that kit
+directly; use it when a kit's public API moves. With the app checkouts linked,
+`cargo test --workspace` covers the kits and the apps together.
 
 If `cargo` is missing from an agent shell, prepend
 `PATH="$HOME/.cargo/bin:$PATH"` for that command.
@@ -142,13 +141,13 @@ Plain `cargo check --target x86_64-pc-windows-msvc` dies in cc-rs on C
 dependencies here. The Rust skill carries the working stub script:
 
 ```sh
+# in the app repository checkout, e.g. ../warp-station
 $HOME/.agents/skills/rust/scripts/check-windows.sh -p warp-station
 ```
 
 It type-checks the Rust code, `#[cfg(windows)]` blocks included, compiles no C,
 and links nothing. Report it as a type-check, not a Windows build. The real
-Windows build is the `windows-latest` job in
-[`.github/workflows/suite-release.yml`](.github/workflows/suite-release.yml).
+Windows build is the app repository's `release` workflow.
 
 ## Commits
 
@@ -167,8 +166,9 @@ Windows build is the `windows-latest` job in
 
 ## Cross-app contracts
 
-The apps talk to each other. These are the interfaces that must move together;
-when one side changes, update the other side in the **same commit**.
+The apps talk to each other across repositories. These are the interfaces that
+must move together: land both sides in the same change window and let the
+pinned integration gate prove the pair.
 
 - **warp-agent door** (`~/.warp/agent/ipc.port` + `ipc.token`):
   token-authenticated NDJSON on `127.0.0.1`. Commands: `ping`,
@@ -219,17 +219,16 @@ when one side changes, update the other side in the **same commit**.
   additive; a writer must not drop the key it does not own. Writes use a
   sidecar lock and an atomic rename. Reduced motion is per-app, not in this
   file.
-- **Version and build facts**: `version.toml` is the one source of the suite
-  version and the build counter; `scripts/meta/version.py` is its only writer.
-  `.githooks/pre-commit` bumps PATCH on every commit (never resets) and keeps
-  `Cargo.toml`/`Cargo.lock` in step; `scripts/build/build.sh` and `scripts/build/build.ps1`
-  bump build on every run. `kits/warpui-kit-build` stamps `WARP_SUITE_BUILD`,
-  `WARP_SUITE_COMMIT`, `WARP_SUITE_CHANNEL` and `WARP_SUITE_RELEASED` into
-  every binary (About, `--version`, the Windows file version, the bridge's
-  `/health`); the APK derives its version from the same file. The env names and
-  the `Copy version` line are a family contract: change the apps, the bridge,
-  the build scripts and `docs/agents/versioning.md` together.
-- **warp-android-scribe bridge** (`android-apps/warp-android-scribe`): LAN
+- **Version and build facts**: each repository owns its `version.toml`. The kit
+  line is warp-suite's; each app line is the app repository's. A pre-commit
+  hook bumps that line's PATCH on every commit (never resets); the
+  repository's build script bumps its build counter. `kits/warpui-kit-build`
+  stamps the app's own `WARP_BUILD` family into each binary (About,
+  `--version`, the Windows file version, the bridge's `/health`); the APK
+  reads its repository's file. The `Copy version` line is the family contract:
+  change the apps, the bridge, the build scripts and
+  `docs/agents/versioning.md` together.
+- **warp-android-scribe bridge** (the `warp-android-scribe` repository): LAN
   `http://<nas-lan>:8787` (UFW `<nas-subnet>`) and public
   `https://<nas-host>` through Cloudflare Tunnel -> Nginx Proxy
   Manager -> 8787. `POST /transcribe?engine=hex|superwhisper&lang=tr|auto&tone=…`
@@ -253,8 +252,8 @@ when one side changes, update the other side in the **same commit**.
   The bearer scheme, JSON field names and status codes are the Android client's
   contract: change both sides in the same commit. Android 17 LAN sockets need
   `ACCESS_LOCAL_NETWORK`; the app requests it and offers Local/Remote modes.
-  The APK is sideloaded; the bridge is installed by hand on the NAS
-  from `android-apps/warp-android-scribe/deploy/`.
+  The APK is sideloaded; the bridge is installed by hand on the NAS from that
+  repository's `deploy/` directory.
 
 ## GPUI Kit app conventions
 
@@ -322,21 +321,21 @@ when one side changes, update the other side in the **same commit**.
   state takes turns behind a lock. See
   [`docs/agents/testing-and-captures.md`](docs/agents/testing-and-captures.md)
   for the full rules, the env hooks and the hidden-window capture recipe.
-- Warp Station's `changes_probe` and `git_parity` read this repository's own
-  git history; CI checks that job out with `fetch-depth: 0`. Do not shallow-
-  clone it locally.
+- Warp Station's `changes_probe` and `git_parity` read the app repository's own
+  git history; its CI checks that job out with `fetch-depth: 0`. Do not
+  shallow-clone the app repo locally.
 - The Android bridge has four integration probes: `api_probe` (auth, limits,
   temp-file cleanup, engine routing, gateway errors), `settings_probe` (a fake
   `superwhisper` shell script for the profile, vocabulary diff and processing
   download), `superwhisper_cli_probe` (session polling, refusal, warming retry,
   timeout) and `hex_cli_probe` (the Hex argument line, language narrowing, exit
-  4, refusal, timeout). The Android Gradle project has no CI job; build it
-  locally with `assembleDebug`.
+  4, refusal, timeout). The probes run in the Android repository's CI; the
+  Gradle project builds with `assembleDebug`.
 
 ## Platform rules
 
 - Windows and Linux are both required for the GPUI apps; `warp-snapit` is
-  Windows-only by design and skips Linux in `apps.toml`.
+  Windows-only by design and skips Linux in its `app.toml`.
 - Gate at the smallest scope that works. Use paired `cfg` lets when only the
   command differs, whole-function gates when the algorithm differs.
 - Use `PathBuf`; never hardcoded separators or absolute Unix paths in shared
@@ -351,44 +350,40 @@ when one side changes, update the other side in the **same commit**.
 
 ## Packaging and release
 
-- Apps ship **assets only**: `packaging/linux/{*.desktop,icons}` and
-  `packaging/windows/{*.ico,*.iss,settings}`. There is no per-app `install.sh`
-  or `build.ps1`. The suite owns every build and install step.
-- [`scripts/build/build.sh`](scripts/build/build.sh) builds the Linux bundle and tarball;
-  [`scripts/build/build.ps1`](scripts/build/build.ps1) builds Windows zips and Inno Setup
-  installers; [`scripts/deploy/deploy.sh`](scripts/deploy/deploy.sh) and
-  [`scripts/deploy/deploy.ps1`](scripts/deploy/deploy.ps1) install/uninstall;
-  [`scripts/deploy/bundle-install.sh`](scripts/deploy/bundle-install.sh) runs inside an
-  extracted bundle.
-- A Windows installer is built only when `packaging/windows/<app>.iss` exists;
-  without one, `build.ps1` ships a portable zip.
+- Each app repository owns its packaging assets
+  (`packaging/linux/{*.desktop,icons}`, `packaging/windows/{*.ico,*.iss,settings}`)
+  and its own `release` workflow: Linux tarball, Windows portable zip and,
+  where a `.iss` exists, the Inno Setup installer.
+- warp-suite owns the kit build ([`scripts/build/kit-build.sh`](scripts/build/kit-build.sh)),
+  the suite assembler and the install scripts. The local
+  [`scripts/build/build.sh`](scripts/build/build.sh) /
+  [`scripts/build/build.ps1`](scripts/build/build.ps1) build the linked
+  workspace; [`scripts/deploy/deploy.sh`](scripts/deploy/deploy.sh),
+  [`scripts/deploy/deploy.ps1`](scripts/deploy/deploy.ps1) and
+  [`scripts/deploy/bundle-install.sh`](scripts/deploy/bundle-install.sh)
+  install the result.
+- A Windows installer is built only when the app ships
+  `packaging/windows/<app>.iss`; without one the app release is a portable zip.
 - Keep the desktop entry's `Exec=__WARP_SUITE_BIN__/...` placeholder; the
   build resolves it at install time.
-- A release is a tag on a commit whose `version.toml` says that version,
-  dispatched with
-  `gh workflow run suite-release.yml --ref v<version> -f version=<version>`.
-  The workflow refuses a mismatch or a non-tag ref. One release builds every
-  app at that commit and records it in the release body and the Linux
-  `REVISIONS.txt`; see `docs/agents/versioning.md`.
-- `android-apps/` is outside that pipeline. `warp-android-scribe` ships as a
-  sideloaded debug APK (`./gradlew assembleDebug`); its bridge is a systemd
-  user service on the NAS. Never add the Android app to `apps.toml` to make the
-  desktop build pick it up.
+- A suite release is the [`suite.toml`](suite.toml) pin table: every app tag
+  and the kit tag, assembled in Phase 5 of the repo-split plan. A suite release
+  never rebuilds an app from sources.
+- `warp-android-scribe` ships from its own repository: a sideloaded debug APK
+  (`./gradlew assembleDebug`) and a bridge installed as a systemd user service
+  on the NAS. Never add it to `suite.toml` or the desktop build.
 
 ## Adding an app
 
-1. Import it with history: `git subtree add --prefix=apps/<name> <repo> <ref>`.
-2. Add an `[apps.<name>]` section to [`apps.toml`](apps.toml) only for
-   non-default build knobs. Add `package = "..."` when the directory name is
-   not the cargo package name.
-3. Add it to the root workspace `members` (both build scripts loop over
-   `apps.toml`, but cargo needs the member) and, for every dependency more
-   than one member uses, to `[workspace.dependencies]`.
+1. Create the app repository with its own `version.toml`, `app.toml`,
+   `Cargo.toml` (no `[workspace]` table), CI and release workflow, and the kit
+   git pins.
+2. Add an `[apps.<name>]` section to [`suite.toml`](suite.toml) with its repo
+   and tag.
+3. Run `scripts/dev/link-apps.sh`; `apps/<name>` appears next to the others.
 4. Add a shared crate to `kits/` only when it is needed by more than one app;
-   otherwise keep it in the app. A new kit is a member and a
-   `[workspace.dependencies]` path entry like the others.
+   otherwise keep it in the app.
 5. Document the cross-app contracts in the README and in this file.
-6. Add `apps/<name>/AGENTS.md` for the app-specific facts.
 
 ## Plans and proposals
 
@@ -402,8 +397,9 @@ when one side changes, update the other side in the **same commit**.
 
 ## Traps and do-nots
 
-- Do not `git subtree pull` or `git subtree push`. warp-suite is the source of
-  truth; the old per-app repos are read-only.
+- Do not copy app sources into `apps/`; the directory holds symlinks and the
+  link script is the only writer. App code lives in its own repository.
+- Do not add an app to `suite.toml` before its release tag exists.
 - Do not add a second workspace, lockfile, target dir, palette, accent picker or
   `gpui` dependency.
 - Do not edit generated output (`dist/`, `.build/`, `target/`, `out/`).
@@ -416,8 +412,8 @@ when one side changes, update the other side in the **same commit**.
   `warpui-kit-core` if the family needs it.
 - Do not silence clippy. Fix the source, or use
   `#[expect(clippy::..., reason = "...")]` on that one item.
-- Do not add `android-apps/*` to `apps.toml`, `scripts/build/build.sh` or the suite
-  release; the Gradle build and the APK are separate.
+- Do not add `warp-android-scribe` to `suite.toml`, `scripts/build/build.sh` or
+  the suite release; the Gradle build and the APK are separate.
 - Do not remove the bearer token, the UFW LAN rule or HTTPS from the bridge.
   The public endpoint is `https://<nas-host>`; the token is the sole
   auth there and must not be logged, committed or shared. Add Cloudflare
@@ -442,6 +438,6 @@ when one side changes, update the other side in the **same commit**.
   delete a plan once its work lands.
 - [`kits/README.md`](kits/README.md) — what each kit crate provides and where a
   shared shape belongs.
-- [`android-apps/warp-android-scribe/README.md`](android-apps/warp-android-scribe/README.md)
+- [`warp-android-scribe`](https://github.com/enginkirmaci/warp-android-scribe)
   — the Android IME, the bridge API, NAS install and the decisions.
 - Each app's `README.md` and `AGENTS.md` — app-specific detail.
