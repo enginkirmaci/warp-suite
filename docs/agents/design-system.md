@@ -546,6 +546,19 @@ window-wide list cursor and no window-level arrow handler.
 - **Global keys stay global.** Quick open, search, palette and app shortcuts
   stay on the window context. A list claims `Enter`, `Space`, `Delete` and
   `F2` only while focused, plus `Shift+F10` for its row menu.
+- **Pane moves cross lists, never wrap.** `warpui_kit_core::pane_nav` maps
+  `Left`/`Right` and `Tab`/`Shift+Tab` to the list beside the focused one.
+  The host clears the order at the top of its render and each view registers
+  its list only while it draws it, so a pane that is off screen (a stacked
+  detail, a clean tree with no file column) is not a stop and the rightmost
+  list goes nowhere. A tree keeps `Left`/`Right` for collapse/expand and
+  opts into `Tab` alone.
+- **Every app lists its keys.** The sheet is
+  `warpui_kit_core::shortcuts::dialog` with the app's own groups; the app
+  opens it (`?` and `Ctrl+/` are the family habit) and moves focus onto the
+  card, so a list cannot move its cursor under it. Rows come from the same
+  source the handlers use where the set is dynamic (Warp Station's launcher
+  rows), not from a second hand-written map.
 - **The cursor is accessible.** Rows carry `a11y_tree_item`/`aria_selected`
   and the list exposes a name, so a probe can move the cursor without a
   pointer.

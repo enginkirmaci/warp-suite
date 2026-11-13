@@ -14,6 +14,10 @@
 //! - [`kit`] — maps the palette onto gpui-kit's shadcn-style theme tokens
 //! - [`list_nav`] — the list key map: arrows, Home/End, PageUp/PageDown and
 //!   the row actions every list shares
+//! - [`pane_nav`] — the pane key map: `←`/`→` and `Tab`/`Shift+Tab` hand the
+//!   keyboard to the list beside the focused one, never wrapping
+//! - [`shortcuts`] — the keyboard-reference card: groups of key/description
+//!   rows over a scrim, with the app's own content
 //! - [`about`] — the About screen every app carries above Settings: the
 //!   family table, the marks, and the Build/Legal cards
 //! - [`activity`] — the one window-activity line: the titlebar chip and the
@@ -48,11 +52,13 @@ pub mod list_nav;
 pub mod media;
 pub mod motion;
 pub mod palette;
+pub mod pane_nav;
 pub mod pump;
 pub mod scale;
 pub mod scroll;
 pub mod settings;
 pub mod shell;
+pub mod shortcuts;
 pub mod text_menu;
 pub mod tooltip;
 pub mod tooltip_overlay;

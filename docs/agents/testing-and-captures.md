@@ -80,6 +80,7 @@ construction. Use them instead of clicking through a hidden window.
 | --- | --- | --- |
 | Warp Station | `WARP_STATION_PAGE` | `settings`, `summary`, `tools`, `about` |
 | Warp Station | `WARP_STATION_LICENSE` | `1` opens About with the license card up |
+| Warp Station | `WARP_STATION_SHORTCUTS` | `1` opens the keyboard sheet on launch |
 | Warp Station | `WARP_STATION_SHEET` | tab label, case-insensitive: `Overview`, `Changes`, `History`, `Pull requests`, `Issues`, `Pipelines` |
 | Warp Station | `WARP_STATION_SELECT` | a name or index in the list |
 | Warp Station | `WARP_STATION_TOOLS_OPEN` | `formatters`, `nuget`, `clipboard` |
