@@ -26,6 +26,7 @@ compatibility rules that must not drift.
 | `~/.warp/station/settings.json` | warp-station | versioned settings |
 | `~/.warp/station/cache/repos.json` | warp-station | regenerable status |
 | `~/.warp/station/cache/models.json` | warp-station | regenerable model catalog |
+| `~/.warp/station/cache/flow.json` | warp-station | regenerable per-branch flow record |
 | `~/.warp/agent/settings.json` | warp-agent | versioned settings |
 | `~/.warp/agent/ui.json` | warp-agent | versioned window/session state |
 | `~/.warp/agent/cache/models.json` | warp-agent | regenerable model catalog |
@@ -94,9 +95,10 @@ Top level: `schema_version`, `nuget_local`, `repos`, `clipboard_password`,
   `open_pull_request_after_push` (true; open the Create PR step after a successful
   push/publish), `open_pipelines_after_merge` (true; run the Pipelines watch
   after a merge), `watch_in_background` (true; keep following a watched run
-  after leaving the Pipelines tab). The two step switches are gated by
-  `auto_advance`; `watch_in_background` only continues a follow that is already
-  armed. Nothing here creates, pushes or merges on its own.
+  after leaving the Pipelines tab), `watch_all_runs_on_branch` (false; tally
+  every run the merge starts and toast the gate result). The two step switches
+  are gated by `auto_advance`; `watch_in_background` only continues a follow
+  that is already armed. Nothing here creates, pushes or merges on its own.
 - `notifications`: `enabled` (true), `only_when_unfocused` (true),
   `errors` (true), `action_confirmations` (true), `pipelines` (true), and the retired
   `fetch_summaries` (true; kept so older files parse, no longer shown — the
@@ -110,6 +112,17 @@ Top level: `schema_version`, `nuget_local`, `repos`, `clipboard_password`,
 `git_status_loaded`, `github_pr_count`, `github_issue_count`,
 `git_last_commit_at`, `git_last_fetch_at`. No tags; deleting the file loses no
 user state.
+
+## warp-station flow cache
+
+`schema_version`, `flows` keyed by `<folder>\u001f<branch>`: `folder`,
+`branch`, `pushed_at`, `pull` (`source`, `number`, `title`, `state`
+`open`/`merged`/`closed`, `head`, `target`, `url`, `merged_at`), `run`
+(`source`, `id`, `name`, `label`, `state`, `branch`, `url`, `at`), `gate`
+(`total`, `passed`, `failed`, `skipped`, `running`, `settled`, `at`) and
+`updated_at`. Records older than 30 days are pruned. The file is disposable:
+deleting it loses only the Changes strip's remembered step until the live
+passes answer again.
 
 ## warp-agent settings
 

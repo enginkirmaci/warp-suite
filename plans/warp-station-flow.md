@@ -1,9 +1,13 @@
 # The push → pull request → pipeline flow
 
-Status: 2026-11-13 — implemented. Decisions: screen advance only (Create and
-Merge stay one click each), GitHub and Azure both covered, and a watched run
-keeps polling after the Pipelines tab is left behind with a switch to turn
-that off. The "What else" list below is the unstarted backlog.
+Status: 2026-11-13 — the follow-up backlog landed: the four-step flow strip
+with its per-branch cache, the watch-all merge gate, the actionable pipeline
+toast, the form prefill, and Azure's in-app create. Decisions: screen advance
+only (Create and Merge stay one click each), GitHub and Azure both covered, a
+watched run keeps polling after the Pipelines tab is left behind with a switch
+to turn that off, and the branch focus stays session-only. The "What else" list
+keeps the remaining ideas (auto-create draft, stage notifications, keyboard
+reach).
 
 ## Goal
 
@@ -37,9 +41,11 @@ the automation only changes which screen is showing.
 - The toolbar never shows the verb while there is nothing sensible to do. It is
   a state, not a one-shot: after a restart a pushed branch with no PR still
   offers it.
-- `Store::start_new_pull()` switches to Pull requests and opens the in-pane form
-  on GitHub. Azure has no in-app form, so the button opens the project's
-  `pullrequestcreate` page (the same place the list's **New** goes).
+- `Store::start_new_pull()` switches to Pull requests and opens the in-pane
+  form on either platform. The form's Create writes GitHub through
+  `gh pr create` and Azure through `azure::create_pull` (POST
+  `…/pullrequests?api-version=7.1`); the optional reviewer is passed to GitHub
+  as-is and resolved against the Azure organization's people for Azure.
 - `Store::open_pull_shortcut()` opens the existing row: GitHub's Pull requests
   tab, Azure's Pipelines tab (where an Azure pull request lives).
 
@@ -91,7 +97,8 @@ silently — no error toast for an empty pipeline.
   button never notifies on open.
 - A new desktop category, `notifications.pipelines` (default true), gates the
   desktop copy only. The in-app toast always shows, like every other notice.
-- The toast is not clickable yet; opening the run stays a Pipelines action.
+- The toast has one **Open run** action: it switches to Pipelines and opens the
+  run the toast named. The desktop copy has no click callback on this path.
 
 ## 4. Workflow settings
 
@@ -100,9 +107,10 @@ New `workflow` section in `~/.warp/station/settings.json`:
 | Key | Default | Meaning |
 |---|---|---|
 | `auto_advance` | false | master: the two screen advances below |
-| `open_pull_request_after_push` | true | after a successful push/publish, open the Create PR step (GitHub's in-pane form; Azure's create page stays a click) |
+| `open_pull_request_after_push` | true | after a successful push/publish, open the Create PR step in the pane |
 | `open_pipelines_after_merge` | true | after a merge, run the Pipelines watch |
 | `watch_in_background` | true | keep polling the watched run after leaving Pipelines |
+| `watch_all_runs_on_branch` | false | tally every run the merge starts and toast one gate result |
 
 - The `auto_advance` master gates the two navigation switches. With it off the
   buttons still appear and still work; nothing moves on its own.
@@ -131,12 +139,13 @@ does.
 - **Detached HEAD / no upstream**: no Create verb.
 - **Default branch**: no Create verb; pushing `main` has nothing to open.
 - **Both platforms on**: an open GitHub PR on the branch wins the View verb;
-  otherwise GitHub owns Create (in-app form) and Azure provides the page.
+  otherwise GitHub owns Create in the pane. An open Azure PR wins when there
+  is no GitHub one; Create falls back to Azure's form when GitHub is off.
 - **A pull request already open for the branch** (snapshot stale): the button
   says View; the form still refuses a duplicate with `gh`'s own message.
-- **Azure's create page**: the auto-advance only opens the in-app GitHub form;
-  launching a browser without a click is more than the switch promises, so the
-  Azure button is shown and its page waits for the press.
+- **Azure's create form**: the same in-pane form. A typed reviewer name or
+  sign-in name is matched against the organization's people and sent as the
+  identity GUID; no match refuses the create instead of silently dropping it.
 - **Repo switched while watching**: the workspace reset drops the run, the
   watch and the branch focus; the notification does not follow across repos.
 - **Pipelines tab hidden with background watching on**: only the watched run's
@@ -152,50 +161,27 @@ does.
 
 ## What else / better ways
 
-Ordered by value against cost.
+Landed: the four-step flow strip and its `cache/flow.json`; the watch-all
+merge gate (`watch_all_runs_on_branch`); the toast's in-app **Open run**
+action; the commit-message prefill; Azure's in-pane create form. The branch focus
+stays session-only by decision.
 
-1. **A flow strip instead of three one-off buttons.** After a push, the Changes
-   head shows the whole next path — `Create PR → Merge → Pipeline → Result` —
-   with the current step filled and the completed ones as links. It explains
-   itself, survives a restart, and makes the automation one visible state
-   rather than three separate reveals.
-2. **A watched-runs list, not one run.** The merge might start several
-   workflows on the target branch. `Vec<Watch>` with per-branch notifications
-   ("2 of 3 passed") would report the whole merge gate, at the cost of more list
-   diffing and noise. Start with one run; add a "watch all runs on branch"
-   switch if the user asks.
-3. **Make the pipeline toast actionable.** A toast with an "Open run" action
-   (and a desktop notification click) would remove the last hunt. The toast
-   component has no action slot today; this is a kit change, not an app one.
-4. **Auto-fill the form without opening the PR.** On the post-push advance,
-   prefill the title with the tip commit's subject and the body with the
-   commit bodies; the user still reviews and presses Create. That is the safest
-   "less clicking" step and uses data the History pass has.
-5. **Auto-create only for a draft.** `gh pr create --fill --draft` behind a
-   separate switch lets the team triage drafts; the user asked for no-click, but
-   a draft is reversible where a real PR is social.
-6. **Persist the flow step per branch.** Today the View-vs-Create verb is
-   derived from the live snapshot. A small per-branch record ("PR opened",
-   "merged at", "run id") would make the step survive a restart and would let
-   the strip say "Pipeline 2m ago" without another `gh` call.
-7. **A branch filter that persists across a repo switch is a trap** — the
-   current session-only focus is deliberate. If it should survive, it belongs
-   in `settings.json` with a timestamp, so a stale focus cannot hide every run
-   on the next launch.
-8. **Azure in-app PR creation.** The POST is straightforward but needs a
-   project/repository id, a default reviewer and a title/body form; the browser
-   page is the honest shortcut until the form exists on both platforms.
-9. **Notifications for multi-stage pipelines.** The run's state is the whole
-   pipeline; stage or job failures are already in the detail. A notification per
-   stage would be noise.
-10. **Keyboard reach.** The two new verbs should also answer a shortcut once the
-    app has a command surface; today the toolbar is mouse-first.
+Still open:
+
+- **Auto-create only for a draft.** `gh pr create --fill --draft` behind a
+  separate switch lets the team triage drafts; the user asked for no-click, but
+  a draft is reversible where a real PR is social.
+- **Notifications for multi-stage pipelines.** The run's state is the whole
+  pipeline; stage or job failures are already in the detail. A notification per
+  stage would be noise.
+- **Keyboard reach.** The verbs should also answer a shortcut once the app has
+  a command surface; today the toolbar is mouse-first.
 
 ## Verification
 
 - `cargo test -p warp-station -p warp-station-core` (the probes: `follow_probe`
-  gains the notification and background-watch cases; `changes_probe` and
-  `settings_probe` the new controls).
+  gains the prefill, toast-action, watch-all gate and Azure-create cases;
+  `changes_probe` the strip; `settings_probe` the watch-all row).
 - `cargo fmt --all --check`, `cargo clippy --all-targets -p warp-station -p warp-station-core -- -D warnings`.
 - `changes_probe` reads this repository's own history, so run it from the full
   clone.
