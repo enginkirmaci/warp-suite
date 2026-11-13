@@ -50,7 +50,7 @@ compatibility rules that must not drift.
 
 Top level: `schema_version`, `nuget_local`, `repos`, `clipboard_password`,
 `snapit`, `keep_awake`, `opencode`, `deepseek`, `warp_agent`, `warp_notes`,
-`general`, `changes`, `notifications`.
+`general`, `changes`, `workflow`, `notifications`.
 
 - `nuget_local`: `enable_nuget` (true), `watch_folder` (null),
   `nuget_package_filter` (`*.nupkg`), `file_copy_delay_ms` (2000),
@@ -90,8 +90,15 @@ Top level: `schema_version`, `nuget_local`, `repos`, `clipboard_password`,
 - `changes`: `diff_view` (`unified` default, `split`) and `diff_wrap`
   (false). The last layout and word-wrap choices from the diff header; global,
   not per repository. An unknown layout string reads unified.
+- `workflow`: `auto_advance` (false; the master for the two screen advances),
+  `open_pull_request_after_push` (true; open the Create PR step after a successful
+  push/publish), `open_pipelines_after_merge` (true; run the Pipelines watch
+  after a merge), `watch_in_background` (true; keep following a watched run
+  after leaving the Pipelines tab). The two step switches are gated by
+  `auto_advance`; `watch_in_background` only continues a follow that is already
+  armed. Nothing here creates, pushes or merges on its own.
 - `notifications`: `enabled` (true), `only_when_unfocused` (true),
-  `errors` (true), `action_confirmations` (true), and the retired
+  `errors` (true), `action_confirmations` (true), `pipelines` (true), and the retired
   `fetch_summaries` (true; kept so older files parse, no longer shown — the
   bulk fetch pass it summarized is gone).
 
