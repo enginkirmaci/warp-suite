@@ -89,7 +89,9 @@ construction. Use them instead of clicking through a hidden window.
 | Warp Station | `WARP_STATION_NEW_PULL` | `1` to open the New pull request form on the first Pull requests draw |
 | Warp Station | `WARP_STATION_IPC_DIR` | override the agent-door directory |
 | warp-agent | `WARP_AGENT_PAGE` | `settings`, `settings-chat`, `settings-permissions`, `settings-server`, `about` |
+| warp-agent | `WARP_AGENT_SHORTCUTS` | `1` opens the keyboard sheet on launch |
 | warp-notes | `WARP_NOTES_PAGE` | `settings`, `about` |
+| warp-notes | `WARP_NOTES_SHORTCUTS` | `1` opens the keyboard sheet on launch |
 
 The hooks are read once at launch; unset means the app's normal default. They
 exist for captures and automation, not as user-facing settings.
