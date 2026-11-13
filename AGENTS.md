@@ -30,6 +30,7 @@ checkouts. The full recipe is
 gh repo clone enginkirmaci/warp-suite && cd warp-suite
 scripts/dev/link-apps.sh --check      # report the links, change nothing
 scripts/dev/link-apps.sh              # create apps/<name> symlinks (junctions on Windows)
+scripts/dev/refresh.sh                # pull the apps' main, then build without installers
 python3 scripts/meta/version.py install-hooks
 cargo build -p warp-notes         # proves the linked workspace
 ```

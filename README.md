@@ -66,6 +66,8 @@ installing. It contains Warp Station, Warp Agent, Warp Notes and Warp SnapIt.
 
 ```sh
 scripts/dev/link-apps.sh                  # once per checkout
+scripts/dev/refresh.sh                    # pull the apps' latest main, then build
+scripts/dev/refresh.sh --app warp-notes   # one app, sync and build
 scripts/build/build.sh                    # Linux bundle + tarball
 scripts/build/build.sh --app warp-notes   # one app, fast loop
 scripts/deploy/deploy.sh --local          # build, then install into ~/.local
@@ -74,12 +76,19 @@ scripts/deploy/deploy.sh --uninstall      # remove exactly what it installed
 
 ```powershell
 scripts\dev\link-apps.ps1          # junctions on Windows
+scripts\dev\refresh.ps1            # latest main, then a portable build (no installers)
 scripts\build\build.ps1            # Windows: dist\windows\ zips + installers
 scripts\build\build.ps1 -App warp-notes -NoPackage
 scripts\deploy\deploy.ps1 -Local   # build, then install a portable copy
 scripts\deploy\deploy.ps1 -Release # install the published Windows ZIP
 scripts\deploy\deploy.ps1 -Uninstall
 ```
+
+`refresh.sh` / `refresh.ps1` fetch each app's `origin`, fast-forward `main` and
+then call the platform build with installers off (`build.ps1 -NoPackage` on
+Windows; the Linux build has no installer step). A checkout with uncommitted
+changes, on another branch or with diverged history is reported and left
+alone. `--check` only fetches and reports, `--no-build` stops after the sync.
 
 Both builds default the version to `git describe --tags --always
 --first-parent`; CI passes `--version` / `-Version` explicitly.
@@ -95,6 +104,7 @@ Both builds default the version to `git describe --tags --always
 | `scripts/meta/manifest.py` | suite.toml + app.toml reader shared by the scripts + CI |
 | `.cargo/config.toml` | one cargo target dir for the whole suite: `.build/target` for every app, `kits` and `scripts/build/build.sh` |
 | `kits/` | the six `warpui-kit-*` crates, members of the kit workspace; their paths live in the root `[workspace.dependencies]` |
+| `scripts/dev/refresh.sh` | pulls each app's latest `main`, then builds without installers (`refresh.ps1` on Windows) |
 | `scripts/build/build.sh` | Linux build: `cargo build --release` each app → `dist/linux/warp-suite-<v>-linux/` + tarball |
 | `scripts/build/build.ps1` | Windows build: `dist/windows/` portable zips + Inno Setup installers |
 | `scripts/deploy/deploy.sh` | Linux install/uninstall: local bundle or published release |

@@ -36,8 +36,64 @@ $root = Split-Path -Parent (Split-Path -Parent $here)
 $dist = Join-Path $root 'dist\windows'
 
 $versionPy = Join-Path $here '..\meta\version.py'
-$facts = & python3 $versionPy show --json | ConvertFrom-Json
-if ($LASTEXITCODE -ne 0 -or -not $facts) { throw "version.py show --json failed" }
+$manifest = Join-Path $here '..\meta\manifest.py'
+
+# Windows installs Python as `python`, `python3` or the `py` launcher depending
+# on how it was set up, so resolve an interpreter that can import tomllib
+# (3.11+) instead of assuming `python3`. Everything below runs through it.
+$python = $null
+foreach ($candidate in @(
+        [pscustomobject]@{ Exe = 'python3'; Args = @() },
+        [pscustomobject]@{ Exe = 'python'; Args = @() },
+        [pscustomobject]@{ Exe = 'py'; Args = @('-3') })) {
+    $command = Get-Command $candidate.Exe -ErrorAction SilentlyContinue
+    if (-not $command) { continue }
+    $probe = @($candidate.Args) + @('-c', 'import tomllib')
+    try {
+        & $command.Source @probe 2>$null
+        $ok = $LASTEXITCODE -eq 0
+    } catch {
+        $ok = $false
+    }
+    if ($ok) {
+        $python = [pscustomobject]@{ Exe = $command.Source; Args = @($candidate.Args) }
+        break
+    }
+}
+if (-not $python) {
+    throw 'python 3.11+ is required (version.py, manifest.py) and was not found on PATH'
+}
+
+# A native command writing to stderr is a terminating error under
+# $ErrorActionPreference = 'Stop' in Windows PowerShell 5.1, which would hide
+# the message. Capture stderr as text and report the exit code ourselves.
+function Invoke-Python {
+    param([string[]]$Arguments)
+    $commandArgs = @($python.Args) + @($Arguments)
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $lines = @(& $python.Exe @commandArgs 2>&1 | ForEach-Object { "$_" })
+        $code = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $previous
+    }
+    [pscustomobject]@{ Code = $code; Lines = $lines }
+}
+
+function Read-VersionFacts {
+    $result = Invoke-Python @($versionPy, 'show', '--json')
+    if ($result.Code -ne 0) {
+        throw "version.py show --json failed (exit $($result.Code)): $($result.Lines -join ' ')"
+    }
+    try {
+        return ($result.Lines -join "`n" | ConvertFrom-Json)
+    } catch {
+        throw "version.py show --json returned invalid JSON: $($_.Exception.Message)"
+    }
+}
+
+$facts = Read-VersionFacts
 if ($Version -and $Version -ne $facts.version) {
     throw "version mismatch: -Version $Version but version.toml says $($facts.version)"
 }
@@ -46,9 +102,13 @@ $Version = $facts.version
 # Every build script run consumes one build number. A CI job passes
 # WARP_SUITE_BUILD so the Linux and Windows artifacts of one tag agree.
 if (-not $env:WARP_SUITE_BUILD) {
-    $env:WARP_SUITE_BUILD = (& python3 $versionPy build bump | Select-Object -Last 1)
+    $bump = Invoke-Python @($versionPy, 'build', 'bump')
+    if ($bump.Code -ne 0) {
+        throw "version.py build bump failed (exit $($bump.Code)): $($bump.Lines -join ' ')"
+    }
+    $env:WARP_SUITE_BUILD = ($bump.Lines | Select-Object -Last 1)
 }
-$facts = & python3 $versionPy show --json | ConvertFrom-Json
+$facts = Read-VersionFacts
 $env:WARP_SUITE_VERSION = $Version
 $env:WARP_SUITE_COMMIT = $facts.commit
 $env:WARP_SUITE_CHANNEL = $facts.channel
@@ -58,9 +118,11 @@ $env:WARP_SUITE_RELEASED = $facts.released
 # no longer package roots, and apps/warp-station is not even a crate directory
 # (its crates live in crates/). Drive the loop off apps.toml instead, which
 # carries the cargo package name per app.
-$manifest = Join-Path $here '..\meta\manifest.py'
-$appNames = @(& python3 $manifest list)
-if ($LASTEXITCODE -ne 0 -or $appNames.Count -eq 0) { throw "manifest.py list failed" }
+$manifestList = Invoke-Python @($manifest, 'list')
+if ($manifestList.Code -ne 0 -or $manifestList.Lines.Count -eq 0) {
+    throw "manifest.py list failed (exit $($manifestList.Code)): $($manifestList.Lines -join ' ')"
+}
+$appNames = @($manifestList.Lines)
 if ($App) {
     $appNames = @($appNames | Where-Object { $App -contains $_ })
     if ($appNames.Count -eq 0) { throw "no app matched: $($App -join ', ')" }
@@ -85,13 +147,10 @@ $revisions = @(
 foreach ($name in $appNames) {
     $dir = Get-Item (Join-Path (Join-Path $root 'apps') $name)
     # The cargo package name; defaults to the app name.
-    # A missing key exits non-zero with a message on stderr, which the next
-    # line absorbs by falling back to the app name - but under
-    # $ErrorActionPreference = 'Stop' PS 5.1 promotes redirected native
-    # stderr to a terminating error, so catch the miss and fall back.
     $package = $null
-    try { $package = (& python3 $manifest get $name package 2>$null) } catch { }
-    if ($LASTEXITCODE -ne 0 -or -not $package) { $package = $name }
+    $packageResult = Invoke-Python @($manifest, 'get', $name, 'package')
+    if ($packageResult.Code -eq 0) { $package = $packageResult.Lines | Select-Object -Last 1 }
+    if (-not $package) { $package = $name }
     Write-Host "== $name"
 
     $meta = & cargo metadata --no-deps --format-version 1 --manifest-path (Join-Path $root 'Cargo.toml') | ConvertFrom-Json

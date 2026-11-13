@@ -72,6 +72,8 @@ cargo test -p warp-station -p warp-station-core
 cargo fmt --all                      # the whole symlinked workspace
 cargo clippy --locked --all-targets -p warp-agent -- -D warnings
 
+scripts/dev/refresh.sh                     # pull the apps' main, then build
+scripts/dev/refresh.sh --app warp-notes    # one app, sync and build
 scripts/build/build.sh                     # Linux bundle + tarball
 scripts/build/build.sh --app warp-notes    # one app
 scripts/build/kit-build.sh                 # kit release artifacts in dist/kits/
@@ -79,6 +81,14 @@ scripts/build/kit-build.sh                 # kit release artifacts in dist/kits/
 
 `scripts/dev/link-apps.sh --check` is the quick health check: it reports a missing
 target, a wrong link and a real directory separately.
+
+`scripts/dev/refresh.sh` (and `scripts/dev/refresh.ps1` on Windows) fetches
+each app's `origin`, fast-forwards `main`, and then runs the platform build
+with installers off (`build.ps1 -NoPackage` on Windows; the Linux build has no
+installer step). It never merges, rebases, resets or stashes: an uncommitted
+tree, a feature branch or diverged history is reported and left alone.
+`--check` fetches and reports only, `--no-build` stops after the sync, and
+`--dry-run` prints the git and build commands.
 
 ## Why the apps have no `[workspace]` table
 
