@@ -377,8 +377,10 @@ mockup, and use the shared helper where one exists.
 - **Dialog:** the scrim card every app draws for a blocking surface —
   `popup()`, `line_strong()` edge, 10px radius, one shadow. The header is 44
   high with the title at `font_brand` 15/600 and a quiet close; the footer
-  holds the one filled primary. Notes' prompt, quick open, shortcut sheet and
-  Trash are this same card.
+  holds the one filled primary. Its actions take the **control height** (34,
+  6 radius), not an older compact metric: a 26px button beside the 36px field
+  and the 34px kit buttons made the same card carry three heights. Notes'
+  prompt, quick open, shortcut sheet and Trash are this same card.
 - **Primary action:** one to a surface. Fill with `.bg(accent())` and
   `.text_color(on_accent())`; Warp Station's primary paths hover
   `accent_hover()`, while warp-notes' primary button and warp-agent's shared
