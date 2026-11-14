@@ -408,6 +408,18 @@ mockup, and use the shared helper where one exists.
   working, and the trigger closes the menu by hitting the catcher instead of
   toggling it straight back open. Warp Station's pull-request head menus
   (`ui::pull_request::menu_layer`) are this one.
+- **Flow strip:** the branch's `Create PR → Merge → Pipeline → Result` path,
+  as the detail pane's **first band, above the repo name**, so every tab reads
+  the same branch state; it used to sit inside Changes, below the tabs and the
+  branch toolbar, where it pushed that tab's body down and left the other tabs
+  without it. The band fills `well()` (the window's darkest step), takes 8
+  padding (6 compact) over the head's `DETAIL_PADDING`, and closes with a
+  `hairline()` rule. Four chips, 46 high (34 when compact), 12 padding, a 20
+  badge circle (18), a 10 gap to the label column; the label is `font_control`
+  14/500, the detail `font_meta` 13, both at `line_height(relative(1.25))`
+  with a 3 gap — at the default 1.6 line height the two lines measured 45.5
+  and overflowed the old 40 chip. Steps are 16-long 1px connectors with an
+  8 gap.
 - **Head icon verb:** `controls::icon_button()` — 34 square on `panel()`,
   `line_strong()` edge, `raised()` hover, glyph as the child. Warp Station's
   detail head (`head_icon`) and warp-notes' note head (`…`) are this one.
