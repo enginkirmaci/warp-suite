@@ -392,6 +392,13 @@ mockup, and use the shared helper where one exists.
 - **Ghost action:** `ghost_bg()` / `ghost_border()` (station) read the live
   ramp; `GHOST_BORDER_HOVER` is still a Copper constant on the dialogs'
   secondary hover edge.
+- **Panel toggle:** the title bar's list/sidebar verb swaps its glyph with the
+  pane, and every app ships the same bytes: `panel-left-close` (chevron
+  toward the collapse side) while the pane is shown, `panel-left-open`
+  (chevron outward) while it is hidden; a right-hand pane mirrors them
+  (`panel-right-close` / `panel-right-open`). The accessible name flips with
+  it (`Hide list` / `Show list`). A single static glyph said "a panel exists",
+  not what the press would do.
 - **Head icon verb:** `controls::icon_button()` — 34 square on `panel()`,
   `line_strong()` edge, `raised()` hover, glyph as the child. Warp Station's
   detail head (`head_icon`) and warp-notes' note head (`…`) are this one.
