@@ -1,15 +1,16 @@
 # Plan: the merge conflict editor
 
-Status: phase 1 built locally 2026-11-14 — the marker parser and index-stage
-read, the one-block Local/Incoming/Result editor, per-side take checkboxes,
-take-alls, the manual Result toggle, Accept (write + `git add`) and the
-F7/F10/F11/Ctrl+Enter keys are in, with core and headless UI probes. Open:
-phase 2 (whole-file panes, layout toggle, Base, synchronized scrolling, bulk
-resolution) and phase 3 (direct Result editing, Take both, word-level
-highlights). A delete/modify or binary conflict reads as no conflict (the
-reader returns `None`), so those files have no editor yet; phase 2 owns them. The owner settled the shape: a custom conflict view, not a
-resolve card, with the sides called **Local** and **Incoming** and the
-reference tool's features.
+Status: phases 1 and 2 built locally 2026-11-14 — the marker parser with
+per-stage line ranges, the whole-file Local/Incoming panes with the block wash,
+jump-to-conflict scrolling, the diff3 Base pane, the Split/Columns layout, the
+manual Result toggle, Accept (write + `git add`), the conflicted row's
+whole-file Local/Incoming menu, and the F7/F10/F11/Ctrl+Enter keys are in,
+with core and headless UI probes. Open: phase 3 (direct Result editing, Take
+both, word-level highlights), wheel-lockstep scrolling, the pinned `Conflicts`
+section, double-click entry, and delete/modify or binary conflicts (the reader
+returns `None`, so those files have no editor yet). The owner settled the
+shape: a custom conflict view, not a resolve card, with the sides called
+**Local** and **Incoming** and the reference tool's features.
 
 ## 1. The reference
 
@@ -49,18 +50,22 @@ A 52-high head, then the panes:
 | Head right | `Take all Local`, `Take all Incoming`, layout toggle (phase 2), `Accept Merge` (primary) |
 | Panes | the current block's Local and Incoming sides side by side, the assembled Result below |
 
-- **Default layout** is Visual Studio's split: the two sides on top, the
-  Result below. The toggle flips to three columns on a wide pane and stacks
-  everything on a narrow one.
-- **One block at a time in phase 1.** The panes show the block under the
-  cursor, not the whole file: that needs no three-way alignment and stays
-  readable at the app's pane widths. A numbered conflict strip above the panes
-  carries `2 of 5` and jumps to a block; phase 2 grows the same two panes into
-  the full files with the block highlighted.
-- **Checking a side** on the block (Local or Incoming, mirroring Visual
-  Studio's checkboxes) resolves that block and the Result updates in place;
-  the block's tint — green for Local, blue for Incoming — says which side it
-  took. Prev/next walks the blocks.
+- **Layout** defaults to Visual Studio's split: the two sides on top, the
+  Result below. `Columns` puts Local, the optional Base, Incoming and Result
+  in one row; it is offered on a pane wider than 1000 px and falls back to the
+  split otherwise.
+- **Whole files.** Each pane shows its whole stage file, with every block's
+  lines washed and the current block's washed stronger; the block ranges come
+  from the parser's stage projections, so no three-way alignment pass is
+  needed. A numbered strip carries `2 of 5`; prev/next or a chip scrolls every
+  pane to that block at once. Wheel scrolling stays per pane (lockstep wheel
+  sync is still open).
+- **Base** appears between Local and Incoming only when the repository uses
+  `merge.conflictStyle=diff3`, because a merge-style file has no base section
+  to map.
+- **Checking a side** on the current block (Local or Incoming, mirroring
+  Visual Studio's checkboxes) resolves it and the Result updates in place;
+  the pane wash says which side it took. Prev/next walks the blocks.
 - **Result**: assembled from the blocks, read-only until `Edit manually`, which
   swaps in an editor seeded with the current assembly; block actions disable
   while manual, and `Reset choices` returns to the assembled view. Visual
@@ -108,24 +113,27 @@ it while the editor is open.
 
 ## 6. Phases
 
-1. **Usable editor.** Parser and conflict model in core; the one-block screen
-   with the block strip, Local/Incoming sides, the assembled Result, per-block
-   checkboxes, Take all, Accept, band integration and shortcuts.
-2. **Full three-way view.** Whole-file panes with a Base toggle, block ranges
-   mapped by a diff pass, synchronized scrolling, the layout toggle, and bulk
-   Keep All Local / Take All Incoming from the `Conflicts` section's context
-   menu.
-3. **Polish.** Direct Result editing with range remapping, Take both (Local
-   first, Incoming first), word-level highlights, and an "open in editor" verb.
+1. **Landed.** Parser and conflict model in core, the block strip, the
+   assembled Result, per-block checkboxes, Take all, Accept, band integration
+   and shortcuts.
+2. **Landed.** Whole-file panes with the parser's stage line ranges, the Base
+   pane for diff3, the Split/Columns layout, jump-to-conflict scrolling, and
+   the conflicted row's whole-file Local/Incoming menu.
+3. **Open.** Direct Result editing with range remapping, Take both (Local
+   first, Incoming first), word-level highlights, wheel-lockstep scrolling,
+   the pinned `Conflicts` section, double-click entry, and delete/modify or
+   binary conflicts.
 
 The phases are ordered; phase 1 is shippable on its own because Accept Merge
 and the band close the loop.
 
 ## 7. Risks
 
-- **Alignment.** Mapping a block onto the Local/Incoming files needs a diff
-  pass (Base→Local, Base→Incoming); repeated blocks make text search a
-  heuristic. Phase 1 avoids whole-file alignment, so the risk lands in phase 2.
+- **Alignment.** The parser maps a block to its stage lines by counting the
+  projection (common lines plus that side's sections), which is exact for a
+  content conflict because removing the markers and the other side leaves the
+  stage file. Delete/modify and binary conflicts break the projection and are
+  therefore outside the editor for now.
 - **Editor adoption.** Phase 1's block panes use the diff kit's read-only
   `render_code` (line numbers, no syntax coloring) and a `TextareaState` for
   the manual Result; phase 2's whole-file panes want the pinned
@@ -144,10 +152,13 @@ and the band close the loop.
 
 ## 8. Acceptance
 
-- A scratch repo with a two-block conflict: double-clicking the row opens the
-  editor with `0 of 2 resolved`; checking Local on the first and Incoming on
-  the second updates the Result; Accept writes the file, stages it, and the
+- A scratch repo with a two-block conflict: the pane's button (or Enter) opens
+  the editor with `0 of 2 resolved`; checking Local on the first and Incoming
+  on the second updates the Result; Accept writes the file, stages it, and the
   row leaves Conflicts.
+- The whole-file panes show the stage files with the blocks washed; Columns
+  keeps four panes in one row; Base appears only for a diff3 fixture; the
+  conflicted row's menu resolves every block to one side in one press.
 - `Take all Local` / `Take all Incoming` resolve every block in one press;
   `Ctrl+Enter` accepts when the Result is complete.
 - Manual mode: edit the Result, Accept writes exactly that text; Reset returns
