@@ -1037,83 +1037,23 @@ fn undo_takes_a_new_row_back_in_one_step(tcx: &mut TestAppContext) {
     assert!(h.state().replace('¦', "") == TABLE, "{:?}", h.state());
 }
 
-#[cfg(feature = "mermaid")]
-mod diagrams {
-    use super::*;
+/// A Mermaid fence is an ordinary code block: its language and source are
+/// exposed and its lines take their room in the flow instead of a picture.
+#[gpui::test]
+fn a_mermaid_fence_is_an_ordinary_code_block(tcx: &mut TestAppContext) {
+    let note = "before\n\n```mermaid\nflowchart TD\n    A --> B\n```\n\nafter";
+    let h = Harness::open_read_only(tcx, note);
+    let blocks = h.cx.read(|cx| h.editor.read(cx).code_blocks());
+    assert_eq!(blocks.len(), 1);
+    assert_eq!(blocks[0].language.as_deref(), Some("mermaid"));
+    assert_eq!(blocks[0].code, "flowchart TD\n    A --> B");
 
-    const NOTE: &str = "top\n\n```mermaid\nflowchart TD\n    A --> B\n```\n\nend";
-
-    /// The note after its diagram has rendered.
-    fn rendered(tcx: &mut TestAppContext, text: &str) -> Harness {
-        let mut h = Harness::opened(tcx, text);
-        h.settle();
-        h.settle();
-        h
-    }
-
-    #[gpui::test]
-    fn a_parked_block_gives_way_to_its_picture(tcx: &mut TestAppContext) {
-        let mut h = rendered(tcx, NOTE);
-        // the caret stayed at the top; the block is a picture by now, so the
-        // text under it sits where the picture ends and not after five lines
-        // of code
-        let end = h.bounds_of(h.offset_of("end"));
-        assert!(end.origin.y > px(100.), "{end:?}");
-        let source = h.bounds_of(h.offset_of("flowchart"));
-        let blank = h.bounds_of(h.offset_of("end") - 1);
-        assert_eq!(
-            source.origin.y, blank.origin.y,
-            "hidden source lines take no room: their place is the row below"
-        );
-    }
-
-    #[gpui::test]
-    fn a_click_on_a_diagram_leaves_the_caret(tcx: &mut TestAppContext) {
-        let mut h = rendered(tcx, NOTE);
-        h.act(MoveToEnd);
-        let before = h.state();
-        let top = h.bounds_of(h.offset_of("top"));
-        h.click(Point::new(top.origin.x + px(40.), top.origin.y + px(70.)));
-        assert_eq!(h.state(), before);
-    }
-
-    #[gpui::test]
-    fn the_edit_button_opens_the_source(tcx: &mut TestAppContext) {
-        let mut h = rendered(tcx, NOTE);
-        h.act(MoveToEnd);
-        let top = h.bounds_of(h.offset_of("top"));
-        // the column's right edge is 700px from its left, at the default size
-        h.click(Point::new(top.origin.x + px(684.), top.origin.y + px(62.)));
-        assert!(
-            h.state().contains("```mermaid\n¦flowchart"),
-            "{:?}",
-            h.state()
-        );
-    }
-
-    #[gpui::test]
-    fn arrow_keys_enter_a_diagram_from_either_side(tcx: &mut TestAppContext) {
-        let mut h = rendered(tcx, NOTE);
-        h.act(MoveToEnd);
-        h.act(MoveUp);
-        h.act(MoveUp);
-        assert!(h.state().contains("```¦\n\nend"), "{:?}", h.state());
-        let mut h = rendered(tcx, NOTE);
-        h.act(MoveDown);
-        h.act(MoveDown);
-        assert!(h.state().contains("¦```mermaid"), "{:?}", h.state());
-    }
-
-    #[gpui::test]
-    fn a_broken_diagram_stays_code(tcx: &mut TestAppContext) {
-        let mut h = rendered(tcx, "top\n\n```mermaid\nflowchart TD\n  A[[[\n```\n\nend");
-        let source = h.bounds_of(h.offset_of("flowchart"));
-        let end = h.bounds_of(h.offset_of("end"));
-        assert!(
-            end.origin.y > source.origin.y + px(40.),
-            "{source:?} {end:?}"
-        );
-    }
+    let mut h = Harness::opened(tcx, note);
+    let title = h.bounds_of(h.offset_of("flowchart"));
+    let arrow = h.bounds_of(h.offset_of("A --> B"));
+    let after = h.bounds_of(h.offset_of("after"));
+    assert!(title.origin.y < arrow.origin.y, "{title:?} {arrow:?}");
+    assert!(arrow.origin.y < after.origin.y, "{arrow:?} {after:?}");
 }
 
 // ---- read-only ------------------------------------------------------------

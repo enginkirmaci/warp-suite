@@ -78,7 +78,7 @@ Notes:
   `apps/warp-snapit/Cargo.toml`).
 - Add `warpui-kit-diff`, `-markdown` or `-picker` when the app shows diffs,
   edits markdown or needs a filtered picker; the language features hang off
-  the kit (`features = ["all-languages", "mermaid"]`), not off `gpui-kit`.
+  the kit (`features = ["all-languages"]`), not off `gpui-kit`.
 - No `[lib]` or `[[bin]]` table: cargo names the library and the binary after
   `[package] name`, and `src/lib.rs` / `src/main.rs` are the default paths.
 

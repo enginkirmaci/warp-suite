@@ -32,10 +32,6 @@ const TABLE_ROW_LINE_EM: f32 = 1.3;
 const TABLE_ROW_PAD_EM: f32 = 0.25;
 /// The depth of a table's add strips, in em.
 const TABLE_STRIP_EM: f32 = 1.;
-/// A rendered diagram's edit button, in em.
-const DIAGRAM_BUTTON_W_EM: f32 = 1.75;
-const DIAGRAM_BUTTON_H_EM: f32 = 1.5;
-const DIAGRAM_BUTTON_INSET_EM: f32 = 0.25;
 /// Between a property's key and its value column, in em.
 const PROPERTY_KEY_GAP_EM: f32 = 0.5;
 /// The Add property button past its text, in em.
@@ -98,8 +94,6 @@ pub enum TableStrip {
 pub struct Hover {
     /// A table's block, and the add strip when on one.
     pub table: Option<(usize, Option<TableStrip>)>,
-    /// A rendered diagram's block, and whether on its edit button.
-    pub diagram: Option<(usize, bool)>,
 }
 
 /// One placed source line.
@@ -134,10 +128,6 @@ pub enum HitKind {
     Text,
     /// A task box, by its `[ ]` source range.
     Checkbox(Range<usize>),
-    /// A rendered diagram, by block: inert.
-    Diagram(usize),
-    /// A rendered diagram's edit button, by block.
-    EditDiagram(usize),
     /// A table's add strip, by block.
     TableStrip(usize, TableStrip),
     /// Something a click does nothing on.
@@ -509,42 +499,10 @@ impl Frame {
         })
     }
 
-    /// A rendered diagram's area: the whole column, like a block in the flow.
-    fn diagram_rect(&self, line: &LaidLine) -> Rect {
-        Rect {
-            x: 0.,
-            y: line.top,
-            width: self.column_width,
-            height: line.height,
-        }
-    }
-
-    /// The edit button of the rendered diagram on `line`.
-    pub fn diagram_button(&self, line: &LaidLine) -> Rect {
-        let width = self.em * DIAGRAM_BUTTON_W_EM;
-        let inset = self.em * DIAGRAM_BUTTON_INSET_EM;
-        Rect {
-            x: self.column_width - width - inset,
-            y: line.top + inset,
-            width,
-            height: self.em * DIAGRAM_BUTTON_H_EM,
-        }
-    }
-
-    /// The rendered diagram under a point, and whether on its edit button.
-    pub fn diagram_at(&self, x: f32, y: f32) -> Option<(usize, bool)> {
-        let line = &self.lines[self.line_at(y)];
-        let block = line.view.diagram?;
-        self.diagram_rect(line)
-            .contains(x, y)
-            .then(|| (block, self.diagram_button(line).contains(x, y)))
-    }
-
     /// What the pointer rests on at a point.
     pub fn hover_at(&self, x: f32, y: f32) -> Hover {
         Hover {
             table: self.table_at(x, y),
-            diagram: self.diagram_at(x, y),
         }
     }
 
@@ -608,13 +566,6 @@ impl Frame {
         };
         if let Some((block, Some(strip))) = self.table_at(x, y) {
             return widget(HitKind::TableStrip(block, strip));
-        }
-        if let Some((block, on_button)) = self.diagram_at(x, y) {
-            return widget(if on_button {
-                HitKind::EditDiagram(block)
-            } else {
-                HitKind::Diagram(block)
-            });
         }
         match line.view.role {
             LineRole::Text => {}

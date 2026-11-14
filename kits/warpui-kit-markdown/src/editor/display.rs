@@ -6,7 +6,6 @@
 //! proportions of Obsidian's default theme.
 
 use super::code::CodeToken;
-use super::diagram::{DiagramStatus, MERMAID};
 use super::images::{ImageStatus, requested_size};
 use crate::live::{
     InlineObject, InlineObjectKind, LiveBlock, LiveBlockKind, LiveDocument, LiveLine, LiveLineKind,
@@ -361,8 +360,6 @@ pub struct LineView {
     pub image: Option<ImageView>,
     pub table: Option<TableRowView>,
     pub property: Option<PropertyView>,
-    /// This line's image is the rendered block of this index.
-    pub diagram: Option<usize>,
     /// A hidden line whose text shows on this other line: a list item in its
     /// property's row.
     pub host: Option<usize>,
@@ -407,8 +404,6 @@ pub struct ViewContext<'a> {
     pub notes: Option<&'a std::collections::HashSet<String>>,
     /// How an image source stands right now.
     pub images: &'a dyn Fn(&str) -> ImageStatus,
-    /// How a Mermaid block stands right now.
-    pub diagrams: &'a dyn Fn(usize) -> DiagramStatus,
 }
 
 // Obsidian's default theme metrics, in em of the base size unless noted.
@@ -431,8 +426,6 @@ const GUIDE_X: f32 = 0.9;
 const CHECKBOX_X: f32 = 0.4581;
 const TASK_TEXT_X: f32 = 1.9375;
 const CODE_PAD: f32 = 1.0;
-/// Below a rendered diagram.
-const DIAGRAM_GAP: f32 = 0.4375;
 const CALLOUT_PAD_LEFT: f32 = 1.5;
 const CALLOUT_PAD: f32 = 0.75;
 const CALLOUT_TITLE_LINE_HEIGHT: f32 = 1.3;
@@ -912,7 +905,7 @@ pub fn build_view(cx: &ViewContext<'_>, ix: usize) -> LineView {
         let block = &cx.doc.blocks[block_ix];
         match &block.kind {
             LiveBlockKind::Code { lang } => {
-                return code_line(cx, ix, block_ix, block, lang.as_deref());
+                return code_line(cx, ix, block, lang.as_deref());
             }
             LiveBlockKind::Table { .. } => return table_line(cx, ix, block_ix, block),
             LiveBlockKind::Callout { .. } if !cx.reveal.touches(&block.range) => {
@@ -1366,24 +1359,10 @@ fn code_guides(em: f32, body: &str) -> Vec<Decor> {
         .collect()
 }
 
-fn code_line(
-    cx: &ViewContext<'_>,
-    ix: usize,
-    block_ix: usize,
-    block: &LiveBlock,
-    lang: Option<&str>,
-) -> LineView {
+fn code_line(cx: &ViewContext<'_>, ix: usize, block: &LiveBlock, lang: Option<&str>) -> LineView {
     let line = &cx.doc.lines[ix];
     let em = cx.em;
     let touched = cx.reveal.touches(&block.range);
-    let diagram = if lang == Some(MERMAID) && !touched {
-        (cx.diagrams)(block_ix)
-    } else {
-        DiagramStatus::None
-    };
-    if let DiagramStatus::Ready { key, width, height } = diagram {
-        return diagram_line(cx, ix, block_ix, block, key, Px(width), Px(height));
-    }
     let size = Px(em * CODE_SCALE);
     let first = ix == block.lines.start;
     let last = ix + 1 == block.lines.end;
@@ -1407,13 +1386,6 @@ fn code_line(
             b.source(line.range.clone(), faint, size, None, Px(0.));
         } else if first && let Some(lang) = lang {
             decor.push(Decor::Label(capitalized(lang)));
-        } else if let DiagramStatus::Failed(message) = diagram {
-            // why the source shows instead of its diagram
-            let error = RunStyle {
-                ink: Ink::Tone(Tone::Red),
-                ..mono
-            };
-            b.synthetic(&message, line.range.start, error, size);
         }
     } else {
         decor.extend(code_guides(em, &cx.text[line.range.clone()]));
@@ -1444,38 +1416,6 @@ fn code_line(
         right: Px(em * CODE_PAD),
         text: b.finish(size, true, line.range.start),
         decor,
-        ..LineView::default()
-    }
-}
-
-/// A parked Mermaid block: the picture on its opening fence's line, and no
-/// other line taking any room.
-fn diagram_line(
-    cx: &ViewContext<'_>,
-    ix: usize,
-    block_ix: usize,
-    block: &LiveBlock,
-    key: String,
-    width: Px,
-    height: Px,
-) -> LineView {
-    let line = &cx.doc.lines[ix];
-    let text = empty_box(Px(cx.em), false, line.range.start);
-    if ix != block.lines.start {
-        return LineView {
-            hidden: true,
-            text,
-            ..LineView::default()
-        };
-    }
-    LineView {
-        height: Height {
-            bottom: Px(cx.em * DIAGRAM_GAP),
-            ..Height::default()
-        },
-        text,
-        image: Some(ImageView { key, width, height }),
-        diagram: Some(block_ix),
         ..LineView::default()
     }
 }
@@ -1901,7 +1841,6 @@ mod tests {
             tokens: &|_| None,
             notes: None,
             images: &|_| ImageStatus::Missing,
-            diagrams: &|_| DiagramStatus::None,
         };
         let view = build_view(&cx, line);
         if let Some(table) = &view.table {
@@ -2036,7 +1975,6 @@ mod tests {
                 tokens: &|_| None,
                 notes: None,
                 images: &|_| ImageStatus::Missing,
-                diagrams: &|_| DiagramStatus::None,
             };
             build_view(&cx, 0)
         };
@@ -2060,7 +1998,6 @@ mod tests {
             tokens: &|_| None,
             notes: None,
             images: &|_| ImageStatus::Missing,
-            diagrams: &|_| DiagramStatus::None,
         };
         let bars = build_view(&cx, 0)
             .decor
@@ -2111,7 +2048,6 @@ mod tests {
             tokens: &|_| None,
             notes: None,
             images: &|_| ImageStatus::Missing,
-            diagrams: &|_| DiagramStatus::None,
         };
         let view = build_view(&cx, 0);
         assert!(
@@ -2123,67 +2059,16 @@ mod tests {
         );
     }
 
-    /// Line `line` of a note with one Mermaid block, in `status`.
-    fn mermaid_view(line: usize, caret: usize, status: &DiagramStatus) -> LineView {
+    /// A Mermaid fence is an ordinary code block: its source always shows and
+    /// its fences reveal like any other while the caret is inside the block.
+    #[test]
+    fn a_mermaid_fence_is_an_ordinary_code_block() {
         let text = "```mermaid\ngraph TD\n```\n\nx";
-        let doc = parse_document(text);
-        let cx = ViewContext {
-            text,
-            doc: &doc,
-            reveal: Reveal {
-                selection: Some(caret..caret),
-            },
-            em: 16.,
-            tokens: &|_| None,
-            notes: None,
-            images: &|_| ImageStatus::Missing,
-            diagrams: &|_| status.clone(),
-        };
-        build_view(&cx, line)
-    }
-
-    #[test]
-    fn a_rendered_diagram_replaces_its_block_until_the_caret_enters() {
-        let ready = DiagramStatus::Ready {
-            key: "k".to_string(),
-            width: 100.,
-            height: 50.,
-        };
-        let parked = mermaid_view(0, 25, &ready);
-        assert_eq!(parked.image.as_ref().unwrap().key, "k");
-        assert_eq!(parked.diagram, Some(0));
-        assert!(parked.decor.is_empty(), "no code band behind the picture");
-        assert!(mermaid_view(1, 25, &ready).hidden);
-        assert!(mermaid_view(2, 25, &ready).hidden);
-        // the caret on any of its lines brings the source back
-        for caret in [0, 15, 23] {
-            let active = mermaid_view(1, caret, &ready);
-            assert!(active.image.is_none() && !active.hidden, "caret {caret}");
-            assert_eq!(active.text.display_text(), "graph TD");
-        }
-    }
-
-    #[test]
-    fn a_block_waiting_for_its_diagram_stays_code() {
-        let view = mermaid_view(0, 25, &DiagramStatus::None);
-        assert!(view.image.is_none());
-        assert!(
-            view.decor
-                .iter()
-                .any(|d| matches!(d, Decor::Label(label) if label == "Mermaid"))
-        );
-    }
-
-    #[test]
-    fn a_broken_diagram_says_why_under_its_source() {
-        let failed = DiagramStatus::Failed("bad arrow".to_string());
-        assert_eq!(mermaid_view(1, 25, &failed).text.display_text(), "graph TD");
-        assert_eq!(
-            mermaid_view(2, 25, &failed).text.display_text(),
-            "bad arrow"
-        );
-        // while editing, the fence is back and the message makes way
-        assert_eq!(mermaid_view(2, 15, &failed).text.display_text(), "```");
+        assert_eq!(at(text, 1, 25), "graph TD", "the source is always visible");
+        assert_eq!(at(text, 0, 25), "", "the opening fence hides while parked");
+        assert_eq!(at(text, 2, 25), "", "the closing fence hides while parked");
+        assert_eq!(at(text, 0, 5), "```mermaid", "the caret brings it back");
+        assert_eq!(at(text, 2, 5), "```", "the caret brings it back");
     }
 
     #[test]
@@ -2234,7 +2119,6 @@ mod tests {
             tokens: &|_| None,
             notes: None,
             images: &|_| ImageStatus::Missing,
-            diagrams: &|_| DiagramStatus::None,
         };
         assert!(
             build_view(&cx, 1).hidden,
@@ -2258,7 +2142,6 @@ mod tests {
                 width: 100.,
                 height: 50.,
             },
-            diagrams: &|_| DiagramStatus::None,
         };
         build_view(&cx, line)
     }
@@ -2338,7 +2221,6 @@ mod tests {
                 tokens: &|_| None,
                 notes: None,
                 images: &|_| ImageStatus::Missing,
-                diagrams: &|_| DiagramStatus::None,
             };
             build_view(&cx, 0).text.frags.iter().any(|f| f.link_icon)
         };
@@ -2361,7 +2243,6 @@ mod tests {
             tokens: &|_| None,
             notes: Some(&notes),
             images: &|_| ImageStatus::Missing,
-            diagrams: &|_| DiagramStatus::None,
         };
         let view = build_view(&cx, 0);
         let inks: Vec<Ink> = view.text.frags[0].runs.iter().map(|(_, s)| s.ink).collect();
@@ -2384,7 +2265,6 @@ mod tests {
             tokens: &|_| None,
             notes: None,
             images: &|_| ImageStatus::Missing,
-            diagrams: &|_| DiagramStatus::None,
         };
         (0..doc.lines.len()).map(|ix| build_view(&cx, ix)).collect()
     }
@@ -2498,7 +2378,6 @@ mod tests {
                 tokens: &|_| None,
                 notes: None,
                 images: &|_| ImageStatus::Missing,
-                diagrams: &|_| DiagramStatus::None,
             };
             assert!(build_view(&cx, 1).property.is_some(), "caret {caret}");
         }
@@ -2522,7 +2401,6 @@ mod tests {
             tokens: &|_| None,
             notes: None,
             images: &|_| ImageStatus::Missing,
-            diagrams: &|_| DiagramStatus::None,
         };
         let view = build_view(&cx, 0);
         let t = &view.text;
@@ -2551,7 +2429,6 @@ mod tests {
             tokens: &|_| None,
             notes: None,
             images: &|_| ImageStatus::Missing,
-            diagrams: &|_| DiagramStatus::None,
         };
         let view = build_view(&cx, 0);
         assert_eq!(view.text.display_text(), "a    b");
@@ -2571,7 +2448,6 @@ mod tests {
             tokens: &|_| None,
             notes: None,
             images: &|_| ImageStatus::Missing,
-            diagrams: &|_| DiagramStatus::None,
         };
         let h1 = build_view(&cx, 0);
         assert!((h1.text.size.0 - 25.888).abs() < 0.01);

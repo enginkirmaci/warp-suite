@@ -9,14 +9,12 @@
 //!   reveal rules, as plain data with a map back to source offsets
 //! - `layout` shapes and wraps one line's text, rows mixing font sizes
 //! - `frame` places the lines and answers hit-testing questions
-//! - `images` loads the pictures a note names, for views and paint to look up;
-//!   `diagram` renders Mermaid blocks into more of them
+//! - `images` loads the pictures a note names, for views and paint to look up
 //! - `state` owns the document, selection, undo and every editing command,
 //!   with the pure commands themselves in `ops`
 //! - `element` paints a frame and wires input
 
 pub(crate) mod code;
-pub(crate) mod diagram;
 pub(crate) mod display;
 
 pub use display::note_key;

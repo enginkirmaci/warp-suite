@@ -59,7 +59,7 @@ Every app repository pins the kit line by tag:
 
 ```toml
 warpui-kit-core = { git = "https://github.com/enginkirmaci/warp-suite", tag = "kits-v0.1.11", package = "warpui-kit-core" }
-warpui-kit-markdown = { git = "...", tag = "kits-v0.1.11", package = "warpui-kit-markdown", features = ["mermaid", "all-languages"] }
+warpui-kit-markdown = { git = "...", tag = "kits-v0.1.11", package = "warpui-kit-markdown", features = ["all-languages"] }
 ```
 
 The `kits-v<version>` tag is the provenance: `kits.toml` on that release

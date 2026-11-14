@@ -52,9 +52,8 @@ const CHECKBOX_BORDER: f32 = 1.;
 const CHECK_SCALE: f32 = 0.75;
 /// A callout title icon, in em.
 const ICON_SIZE: f32 = 1.;
-/// A table strip's plus and a diagram's edit icon, in em.
+/// A table strip's plus, in em.
 const STRIP_ICON_SIZE: f32 = 0.75;
-const BUTTON_ICON_SIZE: f32 = 1.;
 /// The widest gap between strikes of emboldened text, in logical px: below
 /// the quarter-pixel glyph positions, so the strokes merge.
 const STRIKE_STEP: f32 = 0.35;
@@ -141,8 +140,7 @@ impl LiveEditor {
         self
     }
 
-    /// The color behind the editor, when it is not the theme's background:
-    /// a diagram's labels mask its lines with this.
+    /// The color behind the editor, when it is not the theme's background.
     pub fn surface(mut self, color: impl Into<Hsla>) -> Self {
         self.surface = Some(color.into());
         self
@@ -843,9 +841,6 @@ impl Painter {
         if let Some((block, strip)) = hover.table {
             self.paint_table_strips(block, strip, origin, em, window, cx);
         }
-        if let Some((block, on_button)) = hover.diagram {
-            self.paint_diagram_hover(block, on_button, origin, em, window, cx);
-        }
         if let Some(range) = &marked {
             self.paint_marked(&doc, range, origin, window);
         }
@@ -1124,55 +1119,6 @@ impl Painter {
             };
             self.paint_centered_icon(icons::ADD, bounds, em * STRIP_ICON_SIZE, ink, window, cx);
         }
-    }
-
-    /// A hovered diagram's outline and edit button.
-    fn paint_diagram_hover(
-        &self,
-        block: usize,
-        on_button: bool,
-        origin: Point<Pixels>,
-        em: f32,
-        window: &mut Window,
-        cx: &mut App,
-    ) {
-        let found = self
-            .frame
-            .lines
-            .iter()
-            .find(|line| line.view.diagram == Some(block));
-        let Some(line) = found else {
-            return;
-        };
-        let at = origin + point(px(0.), px(line.top));
-        let extent = size(px(self.frame.column_width), px(line.height));
-        window.paint_quad(quad(
-            Bounds::new(at, extent),
-            px(CORNER_RADIUS),
-            gpui::transparent_black(),
-            px(1.),
-            self.colors.border,
-            gpui::BorderStyle::default(),
-        ));
-        let button = Self::bounds_of(self.frame.diagram_button(line), origin);
-        if on_button {
-            window.paint_quad(quad(
-                button,
-                px(CORNER_RADIUS),
-                warpui_kit_core::palette::HOVER,
-                px(0.),
-                gpui::transparent_black(),
-                gpui::BorderStyle::default(),
-            ));
-        }
-        self.paint_centered_icon(
-            icons::EDIT_SOURCE,
-            button,
-            em * BUTTON_ICON_SIZE,
-            self.colors.text,
-            window,
-            cx,
-        );
     }
 
     fn paint_box(

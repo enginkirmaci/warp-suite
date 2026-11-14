@@ -4,7 +4,6 @@
 //! every other field on each platform; the markdown shortcuts sit on top.
 
 use super::code::CodeTokens;
-use super::diagram::{Diagrams, Look};
 use super::display::{Band, Decor, LineView, Reveal, ViewContext, build_view};
 use super::frame::{self, Frame, Hit, HitKind, Hover, ShapeCache, TableStrip};
 use super::images::ImageStore;
@@ -342,7 +341,6 @@ pub struct LiveEditorState {
     images: ImageStore,
     /// The revision the images were last refreshed for.
     images_revision: u64,
-    diagrams: Diagrams,
     tokens: CodeTokens,
     tokens_revision: u64,
     press: Option<Press>,
@@ -450,7 +448,6 @@ impl LiveEditorState {
             shapes: ShapeCache::default(),
             images: ImageStore::default(),
             images_revision: u64::MAX,
-            diagrams: Diagrams::default(),
             tokens: CodeTokens::default(),
             tokens_revision: u64::MAX,
             press: None,
@@ -564,8 +561,7 @@ impl LiveEditorState {
         }
     }
 
-    /// What the host paints behind the text: what a diagram's labels mask
-    /// its lines with.
+    /// What the host paints behind the text.
     pub(super) fn set_surface(&mut self, surface: Option<Hsla>, cx: &mut Context<Self>) {
         if self.surface != surface {
             self.surface = surface;
@@ -1012,22 +1008,7 @@ impl LiveEditorState {
 
     /// The pixels behind an image key of a view.
     pub(super) fn image_data(&self, key: &str) -> Option<std::sync::Arc<gpui::RenderImage>> {
-        self.images.data(key).or_else(|| self.diagrams.data(key))
-    }
-
-    /// A diagram finished rendering off the UI thread.
-    #[cfg(feature = "mermaid")]
-    pub(super) fn diagram_rendered(
-        &mut self,
-        hash: u64,
-        result: Result<super::diagram::backend::Picture, String>,
-        cx: &mut Context<Self>,
-    ) {
-        if self.diagrams.finish(hash, result) {
-            self.views_revision = u64::MAX;
-            self.frame_key = None;
-            cx.notify();
-        }
+        self.images.data(key)
     }
 
     fn clamp_offset(&self, offset: usize) -> usize {
@@ -1078,15 +1059,6 @@ impl LiveEditorState {
         let selection = (focused && !self.read_only).then(|| self.selection.range());
         let mut colors = LiveColors::from_theme(cx);
         colors.background = self.surface.unwrap_or(colors.background);
-        let look = Look {
-            colors,
-            em: self.em,
-            scale: window.scale_factor(),
-            family: cx.theme().font_family.clone(),
-        };
-        let (doc, text) = (self.doc.clone(), self.text.clone());
-        self.diagrams
-            .refresh(self.revision, &text, &doc, &look, window, cx);
         let key = FrameKey {
             revision: self.revision,
             selection: selection.clone(),
@@ -1205,8 +1177,6 @@ impl LiveEditorState {
         let lookup = |block: usize| tokens.block(block);
         let images = &self.images;
         let image_status = |src: &str| images.status(src);
-        let diagrams = &self.diagrams;
-        let diagram_status = |block: usize| diagrams.status(block);
         let context = ViewContext {
             text: &text,
             doc: &doc,
@@ -1217,7 +1187,6 @@ impl LiveEditorState {
             tokens: &lookup,
             notes: self.notes.as_ref(),
             images: &image_status,
-            diagrams: &diagram_status,
         };
         if self.views_revision != self.revision || self.views.len() != doc.lines.len() {
             self.views = (0..doc.lines.len())
@@ -1563,11 +1532,6 @@ impl LiveEditorState {
             return Some(self.text.len());
         }
         let hit = frame.hit(goal, y);
-        // a parked diagram opens from the side the caret comes from
-        if let HitKind::Diagram(block) | HitKind::EditDiagram(block) = hit.kind {
-            let range = &self.doc.blocks[block].range;
-            return Some(if down { range.start } else { range.end });
-        }
         Some(self.snap(self.clamp_offset(hit.offset), down))
     }
 
@@ -2663,12 +2627,8 @@ impl LiveEditorState {
         let focused = self.focus_handle.is_focused(window);
         match &hit.kind {
             HitKind::Text => {}
-            HitKind::Inert | HitKind::Diagram(_) => return,
+            HitKind::Inert => return,
             HitKind::Checkbox(range) => return self.toggle_box(range.clone(), cx),
-            HitKind::EditDiagram(block) => {
-                let first = self.doc.blocks[*block].lines.start + 1;
-                return self.move_caret(self.doc.lines[first].range.start, false, cx);
-            }
             HitKind::TableStrip(block, strip) => return self.add_to_table(*block, *strip, cx),
             HitKind::AddProperty => return self.add_property(cx),
             HitKind::AddItem(line) => return self.add_item(*line, None, cx),
@@ -2807,11 +2767,11 @@ impl LiveEditorState {
                         Some(CursorStyle::PointingHand)
                     }
                     HitKind::Text => None,
-                    HitKind::Inert | HitKind::Diagram(_) => Some(CursorStyle::Arrow),
+                    HitKind::Inert => Some(CursorStyle::Arrow),
                     _ => Some(CursorStyle::PointingHand),
                 });
                 // read-only hides the edit-only hover affordances: no table
-                // add strips, no diagram edit button
+                // add strips
                 let hover = if self.read_only {
                     Hover::default()
                 } else {

@@ -7,8 +7,6 @@ license = "MIT"
 repository.workspace = true
 
 [features]
-# renders ```mermaid blocks as diagrams; without it they stay code blocks
-mermaid = ["dep:merman", "dep:serde_json"]
 # forwarded to the code-block highlighter — enable the languages notes show
 tree-sitter-bash = ["warpui-kit-diff/tree-sitter-bash"]
 tree-sitter-c = ["warpui-kit-diff/tree-sitter-c"]
@@ -35,9 +33,6 @@ gpui-kit = { workspace = true }
 
 anyhow = { workspace = true }
 log = "0.4"
-# leaves out the default ELK layout, which is EPL-2.0, and math labels
-merman = { version = "0.9", default-features = false, features = ["svg", "layout-cytoscape", "all-diagrams"], optional = true }
-serde_json = { workspace = true, optional = true }
 unicode-segmentation = { workspace = true }
 
 [dev-dependencies]

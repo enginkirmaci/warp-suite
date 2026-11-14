@@ -4,7 +4,7 @@ Obsidian-style live markdown editing for [gpui-kit](https://crates.io/crates/gpu
 
 Two ways in, sharing one parser:
 
-- **`LiveEditor`**, a full editor that works like Obsidian's live preview: headings at their real size, source syntax hidden until the caret touches it, drawn bullets, checkboxes, quote bars, callouts, tables, code blocks, images and Mermaid diagrams, a Properties panel for frontmatter, with Obsidian's editing keys. Its layout metrics, reveal rules and key behavior were measured against Obsidian itself; its colors are the app's.
+- **`LiveEditor`**, a full editor that works like Obsidian's live preview: headings at their real size, source syntax hidden until the caret touches it, drawn bullets, checkboxes, quote bars, callouts, tables, code blocks, images, a Properties panel for frontmatter, with Obsidian's editing keys. Its layout metrics, reveal rules and key behavior were measured against Obsidian itself; its colors are the app's.
 - **`live_highlighter_factory`**, a highlighter for a kit code editor when a fixed-grid editor is what you want: source markers fade off the caret's line.
 
 ## What's inside
@@ -67,8 +67,6 @@ an in-app view). `[[wikilinks]]` and relative targets arrive as
 **Images** render wherever markdown puts them. Alone on a line one takes the full width it needs; inside a sentence it flows with the text and grows its row, the text staying on the row's bottom like Obsidian's. A file that cannot be loaded leaves its source.
 
 **Tables** edit in place, and hovering one shows strips under and beside it that add a row or a column, writing the table back aligned the way Obsidian does.
-
-**Diagrams.** With the `mermaid` feature, ` ```mermaid ` blocks render in the app's colors, through Merman and resvg off the UI thread. A click on a diagram does nothing; arrow keys or its `</>` button open the source, and a block that does not parse stays code with the error under it. The feature leaves out Merman's ELK layout (EPL-2.0) and math labels. Without it they are ordinary code blocks and none of that is compiled.
 
 **Known gaps.** No math or HTML rendering. While the caret is on an image its source shows beside the image, where Obsidian keeps the image only and edits blind. Dates show as their ISO text rather than Obsidian's date field, and a property's type follows from its key and value, with no menu to set one.
 
