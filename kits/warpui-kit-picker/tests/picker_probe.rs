@@ -168,10 +168,10 @@ fn field_pick_writes_the_target_and_closes(cx: &mut TestAppContext) {
 /// secondary callback and closes the popup, so the host can open its own
 /// context menu at that point.
 #[gpui_kit::gpui::test]
-fn secondary_click_routes_the_row_and_closes(cx: &mut TestAppContext) {
+fn secondary_click_routes_the_row_and_keeps_the_popup(cx: &mut TestAppContext) {
     cx.update(gpui_kit::init);
     let seen: Arc<std::sync::Mutex<Vec<String>>> = Arc::default();
-    let (_handle, cx) = cx.add_window_view(|window, cx| {
+    let (handle, cx) = cx.add_window_view(|window, cx| {
         let field = cx.new(|cx| InputState::new(window, cx).placeholder("target"));
         let secondary: SecondaryFn = {
             let seen = seen.clone();
@@ -217,8 +217,17 @@ fn secondary_click_routes_the_row_and_closes(cx: &mut TestAppContext) {
     );
     cx.update(|window, cx| drop(window.draw(cx)));
     assert!(
+        cx.debug_bounds("model-panel-test").is_some(),
+        "a secondary click leaves the popup up under the host's menu"
+    );
+    // the host owns the close: dismissing the picker takes it down
+    handle.update(cx, |host, cx| {
+        host.picker.update(cx, FilteredPicker::dismiss);
+    });
+    cx.update(|window, cx| drop(window.draw(cx)));
+    assert!(
         cx.debug_bounds("model-panel-test").is_none(),
-        "a secondary click closes the popup"
+        "the host's dismiss closes the popup"
     );
 }
 

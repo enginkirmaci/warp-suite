@@ -591,11 +591,12 @@ impl FilteredPicker {
             let value = item.value.clone();
             row = row.on_mouse_down(
                 MouseButton::Right,
-                cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
-                    // the row's own pick must not follow the menu's press
+                cx.listener(move |_this, event: &gpui::MouseDownEvent, window, cx| {
+                    // the row's own pick must not follow the menu's press; the
+                    // popup stays up, so the context menu hangs over the list
+                    // it belongs to (the host closes the popup itself)
                     cx.stop_propagation();
                     on_secondary(&value, event.position, window, cx);
-                    this.dismiss(cx);
                 }),
             );
         }

@@ -45,10 +45,10 @@ Three mount shapes via `PickerSpec::overlay` + `OverlayAnchor`:
 The new-branch-style flows are app-built: return `PickerBody::Replace(...)` to take over the panel body, or a `footer` element under the list. Trailing row actions (the armed delete) are rendered by the shell; the arm/confirm cycle stays in the app via `set_on_trailing`.
 
 `set_on_secondary(f)` is the row's right-click hook: the shell hands the app the
-row's value and the pointer position in window coordinates and dismisses the
-popup. The app opens its own context menu at that point — a menu drawn as a
-child of the row would sit inside the scrolling list and be clipped by the
-panel.
+row's value and the pointer position in window coordinates and leaves the popup
+open, so the app's context menu hangs over the list it belongs to. The host
+closes the popup itself when the menu goes away. A menu drawn as a child of the
+row would sit inside the scrolling list and be clipped by the panel.
 
 `set_disabled(true)` dims the trigger and refuses to open it, for a slot whose
 value an adjacent control owns (warp-agent's Variant field while "always select
