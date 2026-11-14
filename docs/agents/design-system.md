@@ -392,13 +392,16 @@ mockup, and use the shared helper where one exists.
 - **Ghost action:** `ghost_bg()` / `ghost_border()` (station) read the live
   ramp; `GHOST_BORDER_HOVER` is still a Copper constant on the dialogs'
   secondary hover edge.
-- **Panel toggle:** the title bar's list/sidebar verb swaps its glyph with the
-  pane, and every app ships the same bytes: `panel-left-close` (chevron
-  toward the collapse side) while the pane is shown, `panel-left-open`
-  (chevron outward) while it is hidden; a right-hand pane mirrors them
-  (`panel-right-close` / `panel-right-open`). The accessible name flips with
-  it (`Hide list` / `Show list`). A single static glyph said "a panel exists",
-  not what the press would do.
+- **Panel toggle:** the title bar's list/sidebar verb shows the pane's state in
+  its **fill**, not in an arrow, and every app ships the same bytes:
+  `panel-left-on` (the left column solid) while the pane is shown,
+  `panel-left-off` (outline only) while it is hidden; a right-hand pane mirrors
+  them (`panel-right-on` / `panel-right-off`). The 24-box glyph is the family
+  rect (`3..21`, radius 2), a divider at `x = 9` (right: `15`), and the fill is
+  a 5-wide column inside it, so state reads at 16 px. The chevrons the pair
+  used to carry read as "push this way", an action, and the two looked alike in
+  a still screenshot. The accessible name still flips (`Hide list` / `Show
+  list`).
 - **Head menu:** a menu drops from the button that opened it. The trigger's
   bounds are captured at prepaint and an `anchored` layer puts the card at its
   bottom-right, 6 below the edge — never a fixed offset from the pane or the
