@@ -173,6 +173,11 @@ pub type RefreshFn = Box<dyn Fn(&mut App)>;
 /// the action completed (the confirm click) — the shell then dismisses the
 /// popup itself, so the app never re-enters the picker from its own listener.
 pub type TrailingFn = Box<dyn Fn(&str, &mut App) -> bool>;
+/// A right-click on a row, with the pointer in window coordinates. The shell
+/// dismisses itself after the call; the host opens its own menu there — the
+/// rows are built inside a scrolling list, so a menu drawn as a child of the
+/// row would be clipped by the panel.
+pub type SecondaryFn = Rc<dyn Fn(&str, gpui::Point<gpui::Pixels>, &mut Window, &mut App)>;
 
 /// The `provider/name` split of a catalog model id (`""` when unsplit).
 pub fn model_provider(model: &str) -> &str {
@@ -264,6 +269,7 @@ pub struct FilteredPicker {
     on_dismiss: Option<DismissFn>,
     on_refresh: Option<RefreshFn>,
     on_trailing: Option<TrailingFn>,
+    on_secondary: Option<SecondaryFn>,
     filter: Entity<InputState>,
     open: bool,
     /// The host switched this slot off (a value an adjacent toggle owns): the
@@ -299,6 +305,7 @@ impl FilteredPicker {
             on_dismiss: None,
             on_refresh: None,
             on_trailing: None,
+            on_secondary: None,
             filter,
             open,
             disabled: false,
@@ -331,6 +338,13 @@ impl FilteredPicker {
     /// A trailing-delete click (armed or not — the app decides).
     pub fn set_on_trailing(&mut self, f: TrailingFn) -> &mut Self {
         self.on_trailing = Some(f);
+        self
+    }
+
+    /// A right-click on a row: the host gets the row's value and the pointer
+    /// position and opens its context menu; the shell dismisses the popup.
+    pub fn set_on_secondary(&mut self, f: SecondaryFn) -> &mut Self {
+        self.on_secondary = Some(f);
         self
     }
 
@@ -533,6 +547,7 @@ impl FilteredPicker {
         fonts: FontTokens,
         accent: gpui::Rgba,
         show_tooltips: bool,
+        on_secondary: Option<SecondaryFn>,
         cx: &mut Context<Self>,
     ) -> gpui::AnyElement {
         let font_body = fonts.font_body;
@@ -571,7 +586,20 @@ impl FilteredPicker {
             .hover(|r| r.bg(palette::HOVER))
             .on_click(cx.listener(move |this, _, window, cx| {
                 this.choose(&value.clone(), window, cx);
-            }))
+            }));
+        if let Some(on_secondary) = on_secondary {
+            let value = item.value.clone();
+            row = row.on_mouse_down(
+                MouseButton::Right,
+                cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
+                    // the row's own pick must not follow the menu's press
+                    cx.stop_propagation();
+                    on_secondary(&value, event.position, window, cx);
+                    this.dismiss(cx);
+                }),
+            );
+        }
+        row = row
             .child(
                 div()
                     .size(px(icon_small))
@@ -670,6 +698,7 @@ impl FilteredPicker {
         let list_id = self.list_id();
         let (font_meta, font_body) = (fonts.font_meta, fonts.font_body);
         let rows = rows.to_vec();
+        let on_secondary = self.on_secondary.clone();
         let list_height = rows.len().min(spec.visible_rows) as f32 * ROW_HEIGHT;
         uniform_list(
             SharedString::from(list_id),
@@ -682,9 +711,15 @@ impl FilteredPicker {
                             label,
                             selector,
                         } => Self::group_row(id, label, selector.as_deref(), font_meta),
-                        PickerRow::Item(item) => {
-                            Self::item_row(item, &spec, fonts, accent, show_tooltips, cx)
-                        }
+                        PickerRow::Item(item) => Self::item_row(
+                            item,
+                            &spec,
+                            fonts,
+                            accent,
+                            show_tooltips,
+                            on_secondary.clone(),
+                            cx,
+                        ),
                         PickerRow::Message { id, label } => Self::message_row(id, label, font_body),
                     })
                     .collect()

@@ -14,7 +14,8 @@ use warpui_kit_core::palette;
 use warpui_kit_core::{FontTokens, font_tokens};
 use warpui_kit_picker::{
     DismissFn, FilteredPicker, OverlayAnchor, PanelChrome, PickFn, PickerBody, PickerData,
-    PickerIcons, PickerItem, PickerRow, PickerSpec, PickerTarget, Selection, TriggerScale,
+    PickerIcons, PickerItem, PickerRow, PickerSpec, PickerTarget, SecondaryFn, Selection,
+    TriggerScale,
 };
 
 const ICONS: PickerIcons = PickerIcons {
@@ -161,6 +162,64 @@ fn field_pick_writes_the_target_and_closes(cx: &mut TestAppContext) {
         host.field.read(cx).value().trim().to_string()
     });
     assert_eq!(value, "openai/gpt", "the pick lands in the target field");
+}
+
+/// A right-click on a row hands its value and the pointer to the host's
+/// secondary callback and closes the popup, so the host can open its own
+/// context menu at that point.
+#[gpui_kit::gpui::test]
+fn secondary_click_routes_the_row_and_closes(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+    let seen: Arc<std::sync::Mutex<Vec<String>>> = Arc::default();
+    let (_handle, cx) = cx.add_window_view(|window, cx| {
+        let field = cx.new(|cx| InputState::new(window, cx).placeholder("target"));
+        let secondary: SecondaryFn = {
+            let seen = seen.clone();
+            Rc::new(
+                move |value: &str,
+                      _position: gpui::Point<gpui::Pixels>,
+                      _window: &mut Window,
+                      _cx: &mut App| {
+                    seen.lock().unwrap().push(value.to_string());
+                },
+            )
+        };
+        let picker = cx.new(|cx| {
+            let mut picker = FilteredPicker::new(
+                spec(true, OverlayAnchor::Field),
+                PickerTarget::Field(field.clone()),
+                Box::new(data),
+                window,
+                cx,
+            );
+            picker.set_on_secondary(secondary);
+            picker
+        });
+        Host { field, picker }
+    });
+    cx.run_until_parked();
+    cx.update(|window, cx| drop(window.draw(cx)));
+
+    click(cx, "model-trigger-test");
+    cx.run_until_parked();
+    cx.update(|window, cx| drop(window.draw(cx)));
+    let bounds = cx
+        .debug_bounds("row-openai-gpt")
+        .expect("the row renders in the open panel");
+    let at = point(bounds.center().x, bounds.center().y);
+    cx.simulate_mouse_down(at, gpui::MouseButton::Right, Modifiers::default());
+    cx.simulate_mouse_up(at, gpui::MouseButton::Right, Modifiers::default());
+    cx.run_until_parked();
+    assert_eq!(
+        seen.lock().unwrap().as_slice(),
+        ["openai/gpt"],
+        "the row's value reaches the host"
+    );
+    cx.update(|window, cx| drop(window.draw(cx)));
+    assert!(
+        cx.debug_bounds("model-panel-test").is_none(),
+        "a secondary click closes the popup"
+    );
 }
 
 #[gpui_kit::gpui::test]
