@@ -382,7 +382,11 @@ mockup, and use the shared helper where one exists.
 - **Primary action:** one to a surface. Fill with `.bg(accent())` and
   `.text_color(on_accent())`; Warp Station's primary paths hover
   `accent_hover()`, while warp-notes' primary button and warp-agent's shared
-  `controls::button(…, BtnKind::Primary(accent), …)` dim to 0.9.
+  `controls::button(…, BtnKind::Primary(accent), …)` dim to 0.9. The **fill**
+  marks it primary — every button label is `MEDIUM` at `font_control`, the
+  same as the chip beside it. A semibold primary read as a taller control next
+  to a medium chip (the About head's `Release notes` / `Copy version` pair),
+  so the family keeps one button weight.
 - **Ghost action:** `ghost_bg()` / `ghost_border()` (station) read the live
   ramp; `GHOST_BORDER_HOVER` is still a Copper constant on the dialogs'
   secondary hover edge.

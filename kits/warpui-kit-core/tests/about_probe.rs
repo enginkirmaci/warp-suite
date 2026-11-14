@@ -138,6 +138,33 @@ fn every_member_has_a_row_and_the_current_app_is_the_primary(cx: &mut TestAppCon
     cx.debug_bounds("about-copy-version").expect("copy version");
 }
 
+/// The head's two verbs are one control shape: a filled primary and the quiet
+/// chip share the control height and sit on one baseline, so the fill is the
+/// only thing that tells them apart (a heavier label made the primary read as
+/// a bigger button).
+#[gpui_kit::gpui::test]
+fn the_head_actions_are_one_control_size(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+    let (_root, cx) = cx.add_window_view(|_, _| Page {
+        selected: AppId::Station,
+        current: AppId::Station,
+    });
+    cx.simulate_resize(size(px(1280.), px(900.)));
+    cx.run_until_parked();
+    cx.update(|window, cx| drop(window.draw(cx)));
+
+    let primary = cx.debug_bounds("about-primary").expect("primary");
+    let copy = cx.debug_bounds("about-copy-version").expect("copy version");
+    assert_eq!(
+        primary.size.height, copy.size.height,
+        "the head's actions are one control height"
+    );
+    assert_eq!(
+        primary.origin.y, copy.origin.y,
+        "the head's actions sit on one baseline"
+    );
+}
+
 #[gpui_kit::gpui::test]
 fn snap_it_has_no_primary_on_linux(cx: &mut TestAppContext) {
     cx.update(gpui_kit::init);

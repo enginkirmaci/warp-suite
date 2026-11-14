@@ -51,9 +51,12 @@ pub fn button(
         .text_size(px(text_size))
         .cursor_pointer();
     match kind {
+        // One weight for every button: a filled primary is louder by its fill,
+        // not by a heavier label. A semibold primary beside a medium chip read
+        // as a bigger control, which is what the About head showed.
         BtnKind::Primary(on_accent) => {
             el = el
-                .font_weight(FontWeight::SEMIBOLD)
+                .font_weight(FontWeight::MEDIUM)
                 .bg(accent)
                 .text_color(on_accent);
         }
