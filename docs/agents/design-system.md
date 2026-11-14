@@ -399,6 +399,15 @@ mockup, and use the shared helper where one exists.
   (`panel-right-close` / `panel-right-open`). The accessible name flips with
   it (`Hide list` / `Show list`). A single static glyph said "a panel exists",
   not what the press would do.
+- **Head menu:** a menu drops from the button that opened it. The trigger's
+  bounds are captured at prepaint and an `anchored` layer puts the card at its
+  bottom-right, 6 below the edge — never a fixed offset from the pane or the
+  row, which put the pull-request head's menu over its own buttons. It rides a
+  pane-sized catcher (`.occlude()`, a mouse-down that closes it), so a press
+  anywhere else takes it down; its items sit above the catcher and keep
+  working, and the trigger closes the menu by hitting the catcher instead of
+  toggling it straight back open. Warp Station's pull-request head menus
+  (`ui::pull_request::menu_layer`) are this one.
 - **Head icon verb:** `controls::icon_button()` — 34 square on `panel()`,
   `line_strong()` edge, `raised()` hover, glyph as the child. Warp Station's
   detail head (`head_icon`) and warp-notes' note head (`…`) are this one.
