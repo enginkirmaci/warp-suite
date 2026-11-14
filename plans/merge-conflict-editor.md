@@ -1,16 +1,17 @@
 # Plan: the merge conflict editor
 
-Status: phases 1 and 2 built locally 2026-11-14 — the marker parser with
-per-stage line ranges, the whole-file Local/Incoming panes with the block wash,
+Status: phases 1–3 built locally 2026-11-14 — the marker parser with
+per-stage line ranges, whole-file Local/Incoming panes with the block wash,
 jump-to-conflict scrolling, the diff3 Base pane, the Split/Columns layout, the
-manual Result toggle, Accept (write + `git add`), the conflicted row's
-whole-file Local/Incoming menu, and the F7/F10/F11/Ctrl+Enter keys are in,
-with core and headless UI probes. Open: phase 3 (direct Result editing, Take
-both, word-level highlights), wheel-lockstep scrolling, the pinned `Conflicts`
-section, double-click entry, and delete/modify or binary conflicts (the reader
-returns `None`, so those files have no editor yet). The owner settled the
-shape: a custom conflict view, not a resolve card, with the sides called
-**Local** and **Incoming** and the reference tool's features.
+directly editable Result with range remapping, Take both in either order,
+word-level highlights, the conflicted row's whole-file menu and its
+double-click entry, Accept (write + `git add`), and the
+F7/F10/F11/Ctrl+Enter keys are in, with core and headless UI probes. Open:
+wheel-lockstep scrolling, the pinned `Conflicts` section, delete/modify or
+binary conflicts (the reader returns `None`, so those files have no editor
+yet), and an open-in-editor verb. The owner settled the shape: a custom
+conflict view, not a resolve card, with the sides called **Local** and
+**Incoming** and the reference tool's features.
 
 ## 1. The reference
 
@@ -47,8 +48,8 @@ A 52-high head, then the panes:
 | Part | Content |
 |---|---|
 | Head left | Back, the path, `2 of 5 resolved`, prev/next conflict |
-| Head right | `Take all Local`, `Take all Incoming`, layout toggle (phase 2), `Accept Merge` (primary) |
-| Panes | the current block's Local and Incoming sides side by side, the assembled Result below |
+| Head right | `Take all Local`, `Take all Incoming`, `L+I` / `I+L`, layout toggle, `Base`, `Reset`, `Accept Merge` (primary) |
+| Panes | the whole Local and Incoming files side by side, the editable Result below |
 
 - **Layout** defaults to Visual Studio's split: the two sides on top, the
   Result below. `Columns` puts Local, the optional Base, Incoming and Result
@@ -64,16 +65,25 @@ A 52-high head, then the panes:
   `merge.conflictStyle=diff3`, because a merge-style file has no base section
   to map.
 - **Checking a side** on the current block (Local or Incoming, mirroring
-  Visual Studio's checkboxes) resolves it and the Result updates in place;
-  the pane wash says which side it took. Prev/next walks the blocks.
-- **Result**: assembled from the blocks, read-only until `Edit manually`, which
-  swaps in an editor seeded with the current assembly; block actions disable
-  while manual, and `Reset choices` returns to the assembled view. Visual
-  Studio edits the Result directly; a mode switch is the honest first cut
-  because a free edit has to remap every block range.
-- **Accept Merge** is disabled until every block has a choice or the Result is
-  manually edited. It writes the file, stages it (which clears the unmerged
-  entry), and returns to the list.
+  Visual Studio's checkboxes) rewrites that block's range in the Result with
+  the side's text; the pane wash says which side it took. `L+I` and `I+L`
+  write both sides in either order. Checking the chosen side again puts the
+  markers back. Prev/next walks the blocks.
+- **The Result is directly editable.** It starts as the marker-bearing
+  worktree text and is the text Accept writes. Every keystroke is reduced to
+  its smallest changed span, and every block range is remapped through it;
+  a block the edit touches loses its pick and is marked manual (the strip
+  shows it), and a later take replaces the edited range. `Reset` restores the
+  worktree text and clears every pick.
+- **Word-level highlights.** In the current block, corresponding Local and
+  Incoming lines mark their changed middle (common prefix and suffix); a line
+  the other side does not have is marked whole. The mark is a tint behind the
+  changed tokens, red on Local and green on Incoming.
+- **Accept Merge** is disabled while the Result still holds a conflict marker
+  line. It writes the file, stages it (which clears the unmerged entry), and
+  returns to the list.
+- **Double-click** a conflicted row to open its editor; a single press only
+  selects it.
 
 ## 4. Data and plumbing
 
@@ -119,10 +129,10 @@ it while the editor is open.
 2. **Landed.** Whole-file panes with the parser's stage line ranges, the Base
    pane for diff3, the Split/Columns layout, jump-to-conflict scrolling, and
    the conflicted row's whole-file Local/Incoming menu.
-3. **Open.** Direct Result editing with range remapping, Take both (Local
-   first, Incoming first), word-level highlights, wheel-lockstep scrolling,
-   the pinned `Conflicts` section, double-click entry, and delete/modify or
-   binary conflicts.
+3. **Landed.** Direct Result editing with range remapping, Take both (Local
+   first, Incoming first), word-level highlights, and double-click entry.
+   Open: wheel-lockstep scrolling, the pinned `Conflicts` section,
+   delete/modify and binary conflicts, and an open-in-editor verb.
 
 The phases are ordered; phase 1 is shippable on its own because Accept Merge
 and the band close the loop.
@@ -159,6 +169,9 @@ and the band close the loop.
 - The whole-file panes show the stage files with the blocks washed; Columns
   keeps four panes in one row; Base appears only for a diff3 fixture; the
   conflicted row's menu resolves every block to one side in one press.
+- `L+I` writes both sides in order and Accept sends that text; a two-press
+  row opens the editor; typing in the Result remaps the following block
+  ranges (unit-tested), and Accept refuses while markers remain.
 - `Take all Local` / `Take all Incoming` resolve every block in one press;
   `Ctrl+Enter` accepts when the Result is complete.
 - Manual mode: edit the Result, Accept writes exactly that text; Reset returns
@@ -177,8 +190,7 @@ and the band close the loop.
 - **D2 — Shape. Settled 2026-11-14:** a custom conflict editor with the
   reference tool's feature set, not a resolve card and not a plain diff.
 - **D3 — Default layout. Settled by this plan:** Local | Incoming over Result,
-  with the toggle for three columns in phase 2; phase 1 shows one block at a
-  time.
-- **D4 — Result editing. Settled by this plan:** read-only assembly plus an
-  `Edit manually` toggle in phase 1; direct editing is phase 3.
+  with the toggle for columns on a wide pane.
+- **D4 — Result editing. Settled by this plan:** direct editing; the Result is
+  the text Accept writes, and block actions remap its ranges.
 - **D5 — Base pane. Settled by this plan:** phase 2 toggle, not phase 1.
