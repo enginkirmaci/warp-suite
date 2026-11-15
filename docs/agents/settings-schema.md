@@ -31,6 +31,9 @@ compatibility rules that must not drift.
 | `~/.warp/agent/ui.json` | warp-agent | versioned window/session state |
 | `~/.warp/agent/cache/models.json` | warp-agent | regenerable model catalog |
 | `~/.warp/notes/settings.json` | warp-notes | versioned window state |
+| `~/.warp/pomodoro/settings.json` | warp-pomodoro | versioned settings |
+| `~/.warp/pomodoro/history.json` | warp-pomodoro | versioned session history |
+| `~/.warp/pomodoro/state.json` | warp-pomodoro | regenerable live snapshot |
 | `~/.warp/ui.json` | warpui-kit-core | shared additive map |
 | `~/.warp/snapit/settings.json` | warp-snapit | versioned settings |
 | `~/.warp/snapit/excluded_applications.json` | warp-snapit | versioned exclusions |
@@ -51,7 +54,7 @@ compatibility rules that must not drift.
 
 Top level: `schema_version`, `nuget_local`, `repos`, `clipboard_password`,
 `snapit`, `keep_awake`, `opencode`, `deepseek`, `warp_agent`, `warp_notes`,
-`general`, `changes`, `workflow`, `notifications`.
+`pomodoro`, `general`, `changes`, `workflow`, `notifications`.
 
 - `nuget_local`: `enable_nuget` (true), `watch_folder` (null),
   `nuget_package_filter` (`*.nupkg`), `file_copy_delay_ms` (2000),
@@ -85,6 +88,10 @@ Top level: `schema_version`, `nuget_local`, `repos`, `clipboard_password`,
 - `warp_agent`: `enable_warp_agent` (true), `executable` (`warp-agent`),
   `harness` (`opencode`), `variant` (null).
 - `warp_notes`: `enable_warp_notes` (true), `executable` (`warp-notes`).
+- `pomodoro`: `enable_pomodoro` (true), `executable` (`warp-pomodoro`). The
+  section only routes the rail page and the launch; the timer's own durations,
+  long-break cycle, auto-start and notification settings live in
+  `~/.warp/pomodoro/settings.json`.
 - `general`: `start_minimized` (false), `start_at_boot` (false),
   `notes_store_path` (""), `show_tooltips` (true), `text_size` (null),
   `reduce_motion` (false).
@@ -159,6 +166,31 @@ The released flat `["provider/model"]` list is importer input only.
 `notes_scope`. The note paths are relative to the notes store root; `recent`
 is newest-first, `pinned` is the quick-open/tree pin list, and `store_path` is
 the standalone launch's chosen store (`--store` wins).
+
+## warp-pomodoro settings
+
+`schema_version`, `work_minutes` (25), `short_break_minutes` (5),
+`long_break_minutes` (15), `long_break_every` (4, clamped to 1..=12),
+`auto_start_breaks` (true), `auto_start_work` (false),
+`desktop_notifications` (true). Durations are whole minutes, 1..=180. The app
+clamps on load so a hand-edited file never produces a zero-length phase.
+
+## warp-pomodoro history
+
+`schema_version`, `sessions[]`: `kind` (`work`/`short_break`/`long_break`),
+`started_at`, `ended_at` (RFC 3339 local) and `seconds`. Only completed work
+sessions are stored; the list is capped at the last 500. The seven-day counts
+in the station page come from `state.json`, never from parsing this file.
+
+## warp-station Pomodoro snapshot
+
+`~/.warp/pomodoro/state.json` is the app's live snapshot and Warp Station's
+fallback when the door is down. `schema_version`, `phase`
+(`work`/`short_break`/`long_break`), `running`, `remaining_seconds`,
+`phase_seconds`, `long_break_every`, `completed_in_cycle`, `today_work`,
+`week_work`, `updated_at` (RFC 3339) and `version`. Disposable by design: a
+missing or stale file reads as "app not running"; deleting it loses no state
+the app cannot rebuild from its settings and history.
 
 ## Shared `ui.json`
 

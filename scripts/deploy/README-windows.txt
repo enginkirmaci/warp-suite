@@ -1,11 +1,12 @@
 warp-suite for Windows
 ======================
 
-This bundle contains the four warp-suite desktop apps:
+This bundle contains the five warp-suite desktop apps:
 
   apps\warp-station\warp-station.exe
   apps\warp-agent\warp-agent.exe
   apps\warp-notes\warp-notes.exe
+  apps\warp-pomodoro\warp-pomodoro.exe
   apps\warp-snapit\warp-snapit.exe
 
 Install

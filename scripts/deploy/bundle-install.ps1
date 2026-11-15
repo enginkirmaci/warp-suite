@@ -29,10 +29,11 @@ if (-not (Test-Path $appsRoot)) {
 }
 
 $apps = @(
-    @{ Name = 'Warp Station'; Exe = 'warp-station\warp-station.exe' },
-    @{ Name = 'Warp Agent';   Exe = 'warp-agent\warp-agent.exe' },
-    @{ Name = 'Warp Notes';   Exe = 'warp-notes\warp-notes.exe' },
-    @{ Name = 'Warp SnapIt';  Exe = 'warp-snapit\warp-snapit.exe' }
+    @{ Name = 'Warp Station';  Exe = 'warp-station\warp-station.exe' },
+    @{ Name = 'Warp Agent';    Exe = 'warp-agent\warp-agent.exe' },
+    @{ Name = 'Warp Notes';    Exe = 'warp-notes\warp-notes.exe' },
+    @{ Name = 'Warp Pomodoro'; Exe = 'warp-pomodoro\warp-pomodoro.exe' },
+    @{ Name = 'Warp SnapIt';   Exe = 'warp-snapit\warp-snapit.exe' }
 )
 
 New-Item -ItemType Directory -Force -Path $Prefix, $stateDir, $menuDir | Out-Null

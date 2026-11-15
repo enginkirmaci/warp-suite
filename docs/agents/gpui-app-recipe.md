@@ -2,10 +2,11 @@
 
 The annotated skeleton for a new app in this suite, extracted from the apps
 already here (`apps/warp-notes` is the closest whole example, then
-`apps/warp-station` and `apps/warp-agent`). Everything below is conventions they
-already follow — match them rather than inventing variants. `apps/warp-snapit`
-is the exception: a Windows-only Win32 binary that does not link the kit and
-does not follow this recipe.
+`apps/warp-station` and `apps/warp-agent`; `apps/warp-pomodoro` is the compact
+one, with the headless-state-machine split and a loopback door another app
+reads). Everything below is conventions they already follow — match them rather
+than inventing variants. `apps/warp-snapit` is the exception: a Windows-only
+Win32 binary that does not link the kit and does not follow this recipe.
 
 The blocks build together on **gpui-kit 0.9.0 + gpui-pre `=0.3.11`** (the pins
 in this checkout) and pass the gates; `logging.rs` and `paths.rs` are thin

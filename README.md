@@ -15,6 +15,7 @@ Currently in the suite:
 | warp-agent | [warp-agent](https://github.com/enginkirmaci/warp-agent) | Chat client over `opencode serve` and `dsh web` (Rust/GPUI) |
 | warp-snapit | [warp-snapit](https://github.com/enginkirmaci/warp-snapit) | Rust port of the SnapIt zone snapper (Windows-only, portable zip) |
 | warp-notes | [warp-notes](https://github.com/enginkirmaci/warp-notes) | Per-repo markdown notes with a live editor (Rust/GPUI) |
+| warp-pomodoro | [warp-pomodoro](https://github.com/enginkirmaci/warp-pomodoro) | Pomodoro focus timer with a live Station rail page (Rust/GPUI) |
 | warp-android-scribe | [warp-android-scribe](https://github.com/enginkirmaci/warp-android-scribe) | Android dictation IME with a full QWERTY keyboard over Superwhisper or Hex (Kotlin/Compose + Rust bridge) |
 
 The C#/.NET SnapIt repo ([enginkirmaci/SnapIt](https://github.com/enginkirmaci/SnapIt))
@@ -60,7 +61,8 @@ extract it, and run `install.cmd`. It installs under
 with one shortcut per app, and records what it wrote for `uninstall.cmd`.
 
 The same ZIP is portable: run the executables under `apps\` directly without
-installing. It contains Warp Station, Warp Agent, Warp Notes and Warp SnapIt.
+installing. It contains Warp Station, Warp Agent, Warp Notes, Warp Pomodoro and
+Warp SnapIt.
 
 ## Build and deploy locally
 
@@ -165,8 +167,20 @@ together. When one changes, update the other side in the **same** commit.
   older `~/.devtools/notes`) moves to `~/notes` on whichever app runs first.
   Missing warp-notes binary = the notes surfaces fail with a toast, nothing
   else breaks.
+- **Pomodoro timer** (`~/.warp/pomodoro`):
+  [warp-pomodoro](https://github.com/enginkirmaci/warp-pomodoro) owns
+  `settings.json`, `history.json` and the live `state.json` snapshot, and while
+  it runs it publishes the family's token-authenticated door (`ipc.port` +
+  `ipc.token`) with `ping`, `status`, `start`, `pause`, `reset`, `skip` and
+  `focus`. Warp Station's rail page is the only client: it polls `status` once
+  a second while it is on screen, falls back to `state.json` when the app is
+  closed, starts a session by launching `warp-pomodoro --start`, and never
+  toasts over a closed app. A second launch forwards `focus` and exits. The
+  durations, the long-break cycle, auto-start and notifications live in the
+  app's own settings; Warp Station keeps only `pomodoro.enable_pomodoro` and
+  `pomodoro.executable`.
 - **Per-user layout** (`~/.warp`): every app's own data sits in its own
-  folder — `station/`, `agent/`, `notes/` — beside the SnapIt settings in
+  folder — `station/`, `agent/`, `notes/`, `pomodoro/` — beside the SnapIt settings in
   `snapit/`, the shared `ui.json` at the root and one `logs/` for every
   app's rolling file. Station and agent keep regenerable caches in
   `<app>/cache/`; deleting one loses no user setting or repo tag. The notes

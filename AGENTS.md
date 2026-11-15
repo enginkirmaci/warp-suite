@@ -18,6 +18,7 @@ its own repository and Gradle build; its Rust bridge is not a member here.
 | warp-agent | `warp-agent` | [warp-agent](https://github.com/enginkirmaci/warp-agent) | Chat client over `opencode serve` and `dsh web` (Rust/GPUI) |
 | warp-snapit | `warp-snapit` | [warp-snapit](https://github.com/enginkirmaci/warp-snapit) | Windows-only zone snapper (Win32, no GPUI/kit) |
 | warp-notes | `warp-notes` | [warp-notes](https://github.com/enginkirmaci/warp-notes) | Per-repo markdown notes with a live editor (Rust/GPUI) |
+| warp-pomodoro | `warp-pomodoro` | [warp-pomodoro](https://github.com/enginkirmaci/warp-pomodoro) | Pomodoro focus timer with a live Station rail page (Rust/GPUI) |
 | warp-android-scribe | `warp-android-scribe-bridge` | [warp-android-scribe](https://github.com/enginkirmaci/warp-android-scribe) | Android dictation IME with a full QWERTY keyboard over Superwhisper or Hex (Kotlin/Compose + Rust bridge) |
 
 ## Local setup
@@ -80,7 +81,11 @@ symlinked build work.
   its own manifest. Never add the real crates.io `gpui`; it is stale. Bump
   `gpui`, `gpui-pre-platform` where an app uses it, and `gpui-kit` together, or
   the linked build will not resolve.
-- [`suite.toml`](suite.toml) is the pin table: the kit tag and one tag per app.
+- [`suite.toml`](suite.toml) is the pin table: the newest published kit tag and
+  one tag per app. Each app's `Cargo.toml` pins the kit tag it was built
+  against, and moves its pin when it needs new kit API — a kit addition does
+  not force every app to rebuild and release, so the pin table may name a newer
+  kit than some apps carry (the local `[patch]` build always uses `kits/`).
   Each app's `app.toml` carries its build knobs (`package`, `linux_skip`,
   `icon_prefix`, `scalable_svg`).
   [`scripts/meta/manifest.py`](scripts/meta/manifest.py) reads both.
@@ -203,8 +208,21 @@ suite pin table and each app's CI carry the pair.
   surfaces fail with a toast; nothing else breaks. The hidden
   `<store>/.warp-notes/` folder is warp-notes' own (Trash, later templates);
   it is not a note folder and every walker skips dot directories.
+- **Pomodoro timer** (`~/.warp/pomodoro`): warp-pomodoro owns `settings.json`,
+  `history.json` and the live `state.json` snapshot; while it runs it also
+  publishes the family's token-authenticated door (`ipc.port` + `ipc.token`)
+  with `ping`, `status`, `start`, `pause`, `reset`, `skip` and `focus`
+  commands, and a second launch forwards `focus` and exits. Warp Station's
+  Pomodoro section is the only client: it polls `status` once a second while
+  its section is on screen, falls back to `state.json` when the door is down,
+  launches `warp-pomodoro --start` for its Start verb, and never toasts over a
+  closed app. The snapshot fields, the door commands and the `--start` launch
+  are one contract — change both sides in the same window. Durations, the
+  long-break cycle, auto-start and notifications live in the app's settings,
+  never in Warp Station.
 - **Per-user layout** (`~/.warp`): each app has its own folder (`station/`,
-  `agent/`, `notes/`) beside `snapit/`, the shared `ui.json` at the root and
+  `agent/`, `notes/`, `pomodoro/`) beside `snapit/`, the shared `ui.json` at
+  the root and
   one shared `logs/`. Regenerable station/agent caches live under
   `<app>/cache/`; deleting one loses no user setting or repo tag. The notes
   content stays outside at `~/notes`.
@@ -212,8 +230,8 @@ suite pin table and each app's CI carry the pair.
   adopt the older folders.
 - **Settings and caches**: suite-owned JSON is versioned snake_case with a
   top-level `schema_version`; `docs/agents/settings-schema.md` is the contract.
-  Station, agent, notes and SnapIt import their pre-versioning files once; the
-  live store never normalizes keys.
+  Station, agent, notes, SnapIt and Pomodoro import their pre-versioning files
+  once; the live store never normalizes keys.
 - **Shared text size and palette** (`~/.warp/ui.json`): `text_size` is `small`,
   `normal`, `large` or `larger` (the old `compact` reads as normal); `palette`
   is `copper`, `plum`, `pine`, `blue` or `gray`. `warpui-kit-core` owns the

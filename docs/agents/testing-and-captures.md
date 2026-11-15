@@ -78,7 +78,7 @@ construction. Use them instead of clicking through a hidden window.
 
 | App | Variable | Values |
 | --- | --- | --- |
-| Warp Station | `WARP_STATION_PAGE` | `settings`, `summary`, `tools`, `about` |
+| Warp Station | `WARP_STATION_PAGE` | `settings`, `summary`, `pomodoro`, `tools`, `about` |
 | Warp Station | `WARP_STATION_LICENSE` | `1` opens About with the license card up |
 | Warp Station | `WARP_STATION_SHORTCUTS` | `1` opens the keyboard sheet on launch |
 | Warp Station | `WARP_STATION_SHEET` | tab label, case-insensitive: `Overview`, `Changes`, `History`, `Pull requests`, `Issues`, `Pipelines` |
@@ -88,10 +88,12 @@ construction. Use them instead of clicking through a hidden window.
 | Warp Station | `WARP_STATION_NOTES` | `1` to open the Notes panel on launch |
 | Warp Station | `WARP_STATION_NEW_PULL` | `1` to open the New pull request form on the first Pull requests draw |
 | Warp Station | `WARP_STATION_IPC_DIR` | override the agent-door directory |
+| Warp Station | `WARP_STATION_POMODORO_DIR` | override the Pomodoro app folder (door + `state.json`) |
 | warp-agent | `WARP_AGENT_PAGE` | `settings`, `settings-chat`, `settings-permissions`, `settings-server`, `about` |
 | warp-agent | `WARP_AGENT_SHORTCUTS` | `1` opens the keyboard sheet on launch |
 | warp-notes | `WARP_NOTES_PAGE` | `settings`, `about` |
 | warp-notes | `WARP_NOTES_SHORTCUTS` | `1` opens the keyboard sheet on launch |
+| warp-pomodoro | `WARP_POMODORO_PAGE` | `timer`, `history`, `about`, `settings` |
 
 The hooks are read once at launch; unset means the app's normal default. They
 exist for captures and automation, not as user-facing settings.

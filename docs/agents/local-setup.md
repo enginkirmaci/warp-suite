@@ -17,6 +17,7 @@ and kit together: one lockfile, one target directory, one gpui compile.
 ├── warp-station/
 ├── warp-agent/
 ├── warp-notes/
+├── warp-pomodoro/
 ├── warp-snapit/
 └── warp-android-scribe/        # Gradle project + Rust bridge (own repo)
 ```
@@ -44,6 +45,7 @@ gh repo clone enginkirmaci/warp-suite
 gh repo clone enginkirmaci/warp-station
 gh repo clone enginkirmaci/warp-agent
 gh repo clone enginkirmaci/warp-notes
+gh repo clone enginkirmaci/warp-pomodoro
 gh repo clone enginkirmaci/warp-snapit
 gh repo clone enginkirmaci/warp-android-scribe
 
@@ -61,7 +63,8 @@ cargo metadata --no-deps --format-version 1 |
 ```
 
 Step 4 must list `warp-station`, `warp-station-core`, `warp-agent`,
-`warp-notes`, `warp-snapit` and the six `warpui-kit-*` crates.
+`warp-notes`, `warp-pomodoro`, `warp-snapit` and the six `warpui-kit-*`
+crates.
 
 ## Daily commands
 

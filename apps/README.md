@@ -8,6 +8,7 @@ apps/warp-station -> ../../warp-station
 apps/warp-agent   -> ../../warp-agent
 apps/warp-notes   -> ../../warp-notes
 apps/warp-snapit  -> ../../warp-snapit
+apps/warp-pomodoro -> ../../warp-pomodoro
 ```
 
 The directory itself only carries this file; the links are gitignored. With
