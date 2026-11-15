@@ -43,6 +43,14 @@
             "preLaunchTask": "cargo build (warp-notes)"
         },
         {
+            "name": "Rust: warp-pomodoro (Linux — gdb)",
+            "type": "gdb",
+            "request": "launch",
+            "target": "${workspaceFolder}/.build/target/debug/warp-pomodoro",
+            "cwd": "${workspaceFolder}",
+            "preLaunchTask": "cargo build (warp-pomodoro)"
+        },
+        {
             "name": "Rust: warp-station (Windows — cppvsdbg)",
             "type": "cppvsdbg",
             "request": "launch",
@@ -68,6 +76,15 @@
             "cwd": "${workspaceFolder}",
             "console": "integratedTerminal",
             "preLaunchTask": "cargo build (warp-notes)"
+        },
+        {
+            "name": "Rust: warp-pomodoro (Windows — cppvsdbg)",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/.build/target/debug/warp-pomodoro.exe",
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "preLaunchTask": "cargo build (warp-pomodoro)"
         },
         {
             "name": "Rust: warp-snapit (Windows — cppvsdbg)",
