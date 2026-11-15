@@ -59,18 +59,24 @@ fn the_clipboard_line_is_one_line() {
         BUILD.version_line(station),
         "Warp Station 0.1.0 (build 42 · 1b7d006) · dev"
     );
-    assert_eq!(BUILD.suite_line(), "Warp Suite 0.1.0 · dev · 4 apps");
+    assert_eq!(BUILD.suite_line(), "Warp Suite 0.1.0 · dev · 5 apps");
 }
 
 #[test]
-fn the_suite_is_the_four_members_in_order() {
+fn the_suite_is_the_five_members_in_order() {
     let ids: Vec<AppId> = about::SUITE.iter().map(|app| app.id).collect();
     assert_eq!(
         ids,
-        vec![AppId::Station, AppId::Agent, AppId::Notes, AppId::Snapit]
+        vec![
+            AppId::Station,
+            AppId::Agent,
+            AppId::Notes,
+            AppId::Snapit,
+            AppId::Pomodoro
+        ]
     );
     let keys: Vec<&str> = about::SUITE.iter().map(|app| app.key()).collect();
-    for key in ["station", "agent", "notes", "snapit"] {
+    for key in ["station", "agent", "notes", "snapit", "pomodoro"] {
         assert!(keys.contains(&key), "missing key {key}");
     }
     // SnapIt is the headless one: hosted, and its license lives in its own app.
@@ -202,7 +208,7 @@ fn the_colophon_follows_the_rows(cx: &mut TestAppContext) {
     cx.run_until_parked();
     cx.update(|window, cx| drop(window.draw(cx)));
 
-    let last_row = cx.debug_bounds("about-row-snapit").expect("the last row");
+    let last_row = cx.debug_bounds("about-row-pomodoro").expect("the last row");
     let note = cx.debug_bounds("about-note").expect("the colophon");
     let list = cx.debug_bounds("about-list").expect("the list");
     let row_bottom = last_row.origin.y + last_row.size.height;

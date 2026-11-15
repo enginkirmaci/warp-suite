@@ -6,7 +6,7 @@
 //! card and a Legal card. The table lives here so a new app, a new blurb or a
 //! copyright change is one edit for the whole family.
 //!
-//! SnapIt has no window of its own: it is the fourth row on every screen, and
+//! SnapIt has no window of its own: it is the headless row on every screen, and
 //! its primary returns to Station's Tools on Windows and is absent elsewhere.
 //! The chassis is [`shell`]'s, the ink is [`palette`]'s, so a palette or text
 //! size switch moves this screen with the rest of the family.
@@ -39,6 +39,7 @@ pub enum AppId {
     Agent,
     Notes,
     Snapit,
+    Pomodoro,
 }
 
 impl AppId {
@@ -49,6 +50,7 @@ impl AppId {
             AppId::Agent => "agent",
             AppId::Notes => "notes",
             AppId::Snapit => "snapit",
+            AppId::Pomodoro => "pomodoro",
         }
     }
 }
@@ -80,7 +82,7 @@ impl SuiteApp {
 }
 
 /// The family, in the list's order.
-pub const SUITE: [SuiteApp; 4] = [
+pub const SUITE: [SuiteApp; 5] = [
     SuiteApp {
         id: AppId::Station,
         name: "Warp Station",
@@ -129,6 +131,18 @@ pub const SUITE: [SuiteApp; 4] = [
         binary: "warp-snapit",
         license_path: "apps/warp-snapit/LICENSE",
     },
+    SuiteApp {
+        id: AppId::Pomodoro,
+        name: "Warp Pomodoro",
+        short: "Pomodoro",
+        role: "Focus timer",
+        blurb: "Work and break lengths, a long-break cycle and today's count in one \
+                small window. Station's rail shows the live timer and starts or pauses it.",
+        runtime: "Rust · GPUI",
+        hosted: false,
+        binary: "warp-pomodoro",
+        license_path: "apps/warp-pomodoro/LICENSE",
+    },
 ];
 
 /// The suite's legal line: the apps are GPL-3.0, the shared kits MIT.
@@ -148,7 +162,7 @@ pub struct Build {
 }
 
 impl Build {
-    /// The list head's line: `Warp Suite 0.1.0 · dev · 4 apps`.
+    /// The list head's line: `Warp Suite 0.1.0 · dev · 5 apps`.
     pub fn suite_line(&self) -> String {
         format!(
             "Warp Suite {} · {} · {} apps",
@@ -262,6 +276,7 @@ fn mark_bytes(id: AppId) -> &'static [u8] {
         AppId::Agent => include_bytes!("../assets/marks/agent.svg"),
         AppId::Notes => include_bytes!("../assets/marks/notes.svg"),
         AppId::Snapit => include_bytes!("../assets/marks/snapit.svg"),
+        AppId::Pomodoro => include_bytes!("../assets/marks/pomodoro.svg"),
     }
 }
 
@@ -298,7 +313,7 @@ pub fn list(
     for member in SUITE.iter() {
         rows = rows.child(row(member, selected, current, build, on_pick.clone()));
     }
-    // the colophon follows the rows, not the pane: four rows is a short list
+    // the colophon follows the rows, not the pane: five rows is a short list
     // and the design keeps the note right under them
     rows = rows.child(suite_note());
 

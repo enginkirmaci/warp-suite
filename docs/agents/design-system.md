@@ -605,9 +605,9 @@ window-wide list cursor and no window-level arrow handler.
 Every GPUI app carries **About above Settings** at the bottom of the rail, and
 all three draw the same screen from `warpui_kit_core::about`:
 
-- the list holds the four suite members — Station, Agent, Notes and the
-  headless SnapIt — and the row for the app you are in carries a `This app`
-  tag;
+- the list holds the suite members — Station, Agent, Notes, the headless SnapIt
+  and the Pomodoro timer — and the row for the app you are in carries a
+  `This app` tag;
 - the detail is a hero (mark, channel tag, tagline, Repository / Changelog /
   Report an issue), a **Build** card (version, build, commit, channel, released,
   runtime) and a **Legal** card (GPL-3.0, copyright, `View license`);

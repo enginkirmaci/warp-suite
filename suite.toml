@@ -11,7 +11,7 @@ version = "0.1.0"
 build = 1
 
 [kits]
-tag = "kits-v0.1.11"
+tag = "kits-v0.1.40"
 
 [apps.warp-station]
 repo = "enginkirmaci/warp-station"
