@@ -8185,7 +8185,7 @@ dependencies = [
 
 [[package]]
 name = "warp-agent"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "anyhow",
  "async-channel",
@@ -8218,7 +8218,7 @@ dependencies = [
 
 [[package]]
 name = "warp-notes"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "anyhow",
  "chrono",
@@ -8239,7 +8239,7 @@ dependencies = [
 
 [[package]]
 name = "warp-pomodoro"
-version = "0.2.6"
+version = "0.2.7"
 dependencies = [
  "anyhow",
  "chrono",
@@ -8263,7 +8263,7 @@ dependencies = [
 
 [[package]]
 name = "warp-snapit"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "anyhow",
  "serde",
@@ -8275,7 +8275,7 @@ dependencies = [
 
 [[package]]
 name = "warp-station"
-version = "0.1.53"
+version = "0.1.54"
 dependencies = [
  "anyhow",
  "async-channel",
@@ -8303,7 +8303,7 @@ dependencies = [
 
 [[package]]
 name = "warp-station-core"
-version = "0.1.53"
+version = "0.1.54"
 dependencies = [
  "anyhow",
  "async-channel",
