@@ -1,8 +1,9 @@
 # A merge editor for stopped operations
 
 Status: phase 1 landed on 2026-11-16 — the headless read model and its fixture
-tests are in, with the core gates green. Phases 2–5 remain. §3 is the decided
-contract (D1–D12), §5 the proofs and which of them closed, §6 the phase order.
+tests — and phase 2 the same day: the Merge rail page, the conflict list and
+the two source panes. Phases 3–5 remain. §3 is the decided contract (D1–D12),
+§5 the proofs and which of them closed, §6 the phase order.
 
 ## 1. What the tool is, and what the app has today
 
@@ -175,3 +176,13 @@ conflicts for binary, delete/modify, too-large, special and unreadable paths.
 delete/modify, binary, diff3, zdiff3, custom marker size and 10k-line
 fixtures; the in-module tests cover the marker grammar and span location.
 `similar`, already in the tree through the diff kit, is the line diff.
+
+Phase 2: `src/ui/merge.rs` holds the rail page — a section that exists only
+while a probe reports a stopped operation, the repository switcher, the
+conflict list and the aligned Incoming/Current panes drawn from
+`TextMerge.rows` with one tint per conflict block. `src/ui/window.rs` gains
+`Section::Merge`, the conditional rail item and the section-fallback guard;
+`Probe.merge` and `StatusProbe.merge` feed `Store::merge_ops`; the page loads
+through `NetCommand::LoadMerge` / `UiEvent::MergeLoaded`, and
+`tests/merge_probe.rs` covers the page draw and the rail's appear/disappear
+rule. The `WARP_STATION_PAGE=merge` hook opens it for a capture.
