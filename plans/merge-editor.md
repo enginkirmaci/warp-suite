@@ -1,0 +1,177 @@
+# A merge editor for stopped operations
+
+Status: phase 1 landed on 2026-11-16 — the headless read model and its fixture
+tests are in, with the core gates green. Phases 2–5 remain. §3 is the decided
+contract (D1–D12), §5 the proofs and which of them closed, §6 the phase order.
+
+## 1. What the tool is, and what the app has today
+
+The app already knows an operation is stopped; it cannot act on it.
+
+- libgit2 status marks unmerged paths `CONFLICTED`, and Changes already lists
+  them with a `U` letter (`apps/warp-station/crates/warp-station-core/src/git/read.rs`).
+  No view resolves them.
+- Mutations go through the git CLI wrapper
+  (`apps/warp-station/crates/warp-station-core/src/git/cli.rs`): `add`, `reset`,
+  `commit`, `checkout`, `fetch`, `pull`, `push`. There is no `merge`, `rebase`,
+  `cherry-pick`, `--continue` or `--abort`, so a stopped operation always begins
+  and ends outside the app.
+- `git2 0.21` is already a dependency; `Index::conflicts()` yields base, ours
+  and theirs without shelling out.
+- The diff kit (`kits/warpui-kit-diff`) parses a unified patch into a two-way
+  document and renders it; it has no three-way model and no editing.
+- The editor layer re-exported by `gpui-component` is a real code editor with
+  range decorations, gutter decorations and an overview ruler; Settings already
+  drives it as `EditorState`.
+- `similar` 2 is already in the dependency tree (the diff kit diffs with it), so
+  line diffing needs no new dependency family.
+
+The reference is Visual Studio 2022's merge editor: Incoming and Current above
+an editable Result, per-block take actions, and a file counted resolved only
+when no conflict remains in it.
+
+## 2. Non-goals
+
+- Starting, committing, aborting or continuing the operation. Station resolves
+  files and stages them; `git commit`, `rebase --continue`,
+  `cherry-pick --continue` and `* --abort` stay where they are.
+- Word- or line-level shading inside a conflict block: one tint per block.
+- Partial staging, submodules and symlinks; whole-file actions cover whatever
+  has no text form.
+- A general three-way comparison of arbitrary revisions: the page exists only
+  while the index is unmerged.
+
+## 3. The contract
+
+- **D1 — three panes, full file, aligned.** Incoming and Current above, Result
+  below. Every pane shows the whole file, regions align row for row across
+  panes, and the two source panes scroll together. The base (`:1:`) is an input
+  to alignment, never a fourth pane.
+- **D2 — the Result is editable text, and the buffer is the resolution state.**
+  Take actions rewrite a region; after that the user types freely and undo/redo
+  is the editor's. A file is resolved when a re-parse of the buffer finds no
+  complete conflict block and no orphan marker line; an edit that leaves a
+  half-deleted marker therefore stays unresolved rather than counting clean.
+- **D3 — a block offers take incoming, take current, take both**, with both
+  orderings ("both" respects which side comes first), applied to the block's
+  region immediately and undoably.
+- **D4 — the Result seeds from the worktree file.** Opening a file reads it from
+  disk and parses its markers, so an edit made in another editor survives; the
+  side panes take ours and theirs from the index stages. A path whose stages are
+  gone (already staged by hand) is not offered for editing.
+- **D5 — labels follow the operation.** Merge: Current / Incoming. Rebase: Onto /
+  Your commit. Cherry-pick: Current / Picked commit. Revert: Current / Reverted
+  commit. Git's stage-2 and stage-3 names sit in a tooltip.
+- **D6 — the page exists only while an operation is stopped**, for any unmerged
+  index: merge, rebase, cherry-pick or revert. One page shows one repository at
+  a time, with a switcher row when several are stopped. The operation comes from
+  git2's repository state, not from sniffing `.git` paths.
+- **D7 — saving is unconditional, staging is gated.** Save writes the worktree.
+  Stage is disabled while the file has an unresolved block, showing the count;
+  when it runs it is `git add -- <path>`, which also clears the unmerged entry.
+- **D8 — non-text conflicts are whole-file rows.** Binary, delete/modify, add/add
+  and rename conflicts get a row with Take ours / Take theirs; the pick checks
+  out that side (or removes the path for a delete) and stages immediately.
+- **D9 — recovery is reload only.** Reload re-reads the worktree and discards the
+  buffer; there is no abort button.
+- **D10 — no completion card.** When the last unmerged entry clears, the page
+  disappears; committing or continuing stays with the user.
+- **D11 — block tint only.** One background per block; no word or line diff
+  inside it.
+- **D12 — the surface is a rail page**, not a replacement for the diff pane.
+  Changes keeps its two-way diff and gains a row that jumps to the Merge page for
+  a `U` file.
+
+## 4. Read model and surface
+
+### 4.1 Core model
+
+`MergeState` per repository: the operation kind and its label pair, and the
+files. A text file carries its path, its conflict blocks (base/ours/theirs/
+result ranges), and aligned rows for the whole file. A non-text file carries a
+kind and two actions.
+
+Alignment is two pairwise line maps, base↔ours and base↔theirs, composed into
+one row map; marker regions fix block boundaries, and the composition decides
+which clean regions sit beside each other. `similar` supplies the sequence
+diff. The model lives in `warp-station-core` so probes run headless, with the
+diff kit untouched — it stays the two-way renderer it is.
+
+Detection uses `Index::conflicts()` for the stages and git2's repository state
+for the operation; precedence when several markers coexist is proof 5.
+Parsing covers git's marker grammar: `merge`, `diff3` and `zdiff3` styles,
+`merge.conflictStyle`, `merge.markerSize`, and custom labels.
+
+### 4.2 Surface
+
+- Rail section `Merge`, present only while some repository is stopped.
+- Header: repository, operation label, unresolved count, switcher when several
+  repositories are mid-operation.
+- File list: text files with per-file unresolved counts; non-text rows below.
+- Body: Incoming and Current as read-only editors with line numbers and block
+  tints, one shared vertical scroll; Result below as an editable editor with
+  each block's actions pinned at its first row.
+- Toolbar: Reload, Save, Stage with the gate and count; the file path.
+- States: dirty buffer on file switch asks before discarding; the page closes if
+  the operation ends elsewhere; a worktree change on disk prompts when the
+  buffer is dirty and reloads silently when it is not; a failed stage says why
+  and refreshes instead of retrying.
+
+### 4.3 Keyboard
+
+The focused pane owns its navigation, per the suite rule. Next/previous conflict
+moves within the Result and the source panes follow it; nothing is bound at the
+window level.
+
+## 5. Proofs before the first slice
+
+1. **Decorations.** In the pinned `gpui-base`, how a range tint is added,
+   whether it survives edits to the buffer, and whether a decoration can carry a
+   click action or the actions need a gutter or an overlay.
+2. **Marker grammar.** Fixtures for `merge`, `diff3`, `zdiff3`, a custom
+   `markerSize`, and custom labels; the orphan-marker policy from D2.
+3. **Alignment cost.** Two diffs plus composition on a 10k-line file; decide the
+   cap or the virtualization before the panes are drawn.
+4. **Staging.** `git add` on a conflicted path clears the unmerged entry; the
+   error shape when the worktree changed under us.
+5. **Operation detection.** git2's repository-state variants and their
+   precedence when a rebase directory and a cherry-pick head coexist.
+6. **Probe harness.** Store and view through `lib.rs`, fixture repositories
+   under a scratch `HOME`.
+
+Proofs 2, 3, 5 and 6 closed with phase 1: the marker and operation fixtures are
+`tests/merge_conflicts.rs`, a 10k-line file reads in about 16 ms in a debug
+build, `MergeOperation::of_state` maps git2's repository states, and the
+fixtures build real repositories under the system temp dir. Proofs 1
+(decorations) and 4 (staging) clear with phases 3 and 4, where they are used.
+
+## 6. Phases
+
+1. Core read model: operation detection, text and non-text conflict listing,
+   marker parsing, blocks, aligned rows; unit and probe tests over fixture
+   repositories. No UI.
+2. Page shell: rail visibility, repository switcher, file list, the two source
+   panes from the model, the vanished and empty states.
+3. Result editor: seeding, block tints, take actions, unresolved count, Save,
+   reload, dirty guard.
+4. Staging: the gate, `git add`, non-text rows, disappearance, external-change
+   handling.
+5. Polish: conflict navigation keys, accessible names, motion, a capture.
+
+## 7. Open work
+
+- Word or line shading inside blocks if the tint proves too coarse.
+- An optional base pane.
+- Shortcut-sheet entries and a `?` row.
+- A size cap for very large files, decided by proof 3.
+
+## 8. Landed (phase 1)
+
+`warp-station-core/src/git/merge.rs`: `MergeSession` and `MergeOperation`
+(state-driven, with the operation-aware side labels), `TextMerge` with the
+parsed blocks and the block-by-block source row alignment, and whole-file
+conflicts for binary, delete/modify, too-large, special and unreadable paths.
+`tests/merge_conflicts.rs` drives real merge, rebase, cherry-pick,
+delete/modify, binary, diff3, zdiff3, custom marker size and 10k-line
+fixtures; the in-module tests cover the marker grammar and span location.
+`similar`, already in the tree through the diff kit, is the line diff.
