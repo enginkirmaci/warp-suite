@@ -25,6 +25,8 @@ consumer rules are in [`docs/agents/domain.md`](docs/agents/domain.md).
 | **plan** | A working design file at `plans/<topic>.md`, deleted once the work lands. |
 | **bridge** | The warp-android-scribe service on the NAS: turns the phone's `/transcribe` request into Superwhisper or Hex calls. |
 | **version facts** | Each repository's `version.toml` line plus the values stamped into the binary (About, `--version`, the Windows file version, `/health`). |
+| **rail** | The fixed-width file column beside a diff pane — the Changes file list, a History commit's files, and a pull request's Files tab. A rail is a focusable list with its own cursor. |
+| **file tree** | Changed files grouped by the folders their paths share, folding and counting per folder. Synthesized from the changed paths only: it is a view of the change, not a repository explorer, and never lists an untouched file. |
 
 ## Not in this glossary
 

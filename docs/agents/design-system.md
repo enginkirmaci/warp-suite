@@ -599,8 +599,10 @@ window-wide list cursor and no window-level arrow handler.
   The host clears the order at the top of its render and each view registers
   its list only while it draws it, so a pane that is off screen (a stacked
   detail, a clean tree with no file column) is not a stop and the rightmost
-  list goes nowhere. A tree keeps `Left`/`Right` for collapse/expand and
-  opts into `Tab` alone.
+  list goes nowhere. A tree's folder rows keep `Left`/`Right` for
+  collapse/expand; a list that is also a pane (Warp Station's Changes files)
+  keeps the arrow pane move on its file rows, and a whole-surface tree
+  (notes) opts into `Tab` alone.
 - **Every app lists its keys.** The sheet is
   `warpui_kit_core::shortcuts::dialog` with the app's own groups; the app
   opens it (`?` and `Ctrl+/` are the family habit) and moves focus onto the
@@ -610,6 +612,31 @@ window-wide list cursor and no window-level arrow handler.
 - **The cursor is accessible.** Rows carry `a11y_tree_item`/`aria_selected`
   and the list exposes a name, so a probe can move the cursor without a
   pointer.
+
+## File trees
+
+A file list that shows changed files groups them under the folders their paths
+share. The tree is synthesized from the changed paths only: it is a view of a
+change, never a repository explorer, and an untouched file has no row.
+
+- **One row per chain.** A run of folders that each hold one child folder
+  becomes one row (`src/ui`), so a deep path does not cost a row per segment.
+  Folders sort before files, both case-insensitive by name.
+- **A folder row is a control, not a file.** It carries a chevron, the compact
+  name and the changed-file count, and it is a `TreeItem` with its expanded
+  state in the accessibility tree. It is a cursor stop, never the diff's
+  selection: folding it, or pressing it, leaves the diff pane on its file.
+- **Keys stay with the row kind.** `Left`/`Right` fold and unfold on a folder
+  row (then step to the parent or the first child) and `Enter` toggles it; on
+  a file row the arrows keep the pane move. `Up`/`Down`/`Home`/`End`/page keys
+  walk every visible row, folders included.
+- **Folds are session state**, cleared when the repository or the commit
+  changes. Nothing about a fold is written to disk.
+- **One switch.** `files.tree_view` (default on) chooses the tree, or the flat
+  list with the directory beside the name, for every file list at once. The
+  Changes head carries the toggle; no other list adds one.
+- **The rails are read-only.** The History commit rail and the PR/Azure Files
+  rails draw the same rows without verbs.
 
 ## The About screen
 

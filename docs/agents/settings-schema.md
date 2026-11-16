@@ -54,7 +54,7 @@ compatibility rules that must not drift.
 
 Top level: `schema_version`, `nuget_local`, `repos`, `clipboard_password`,
 `snapit`, `keep_awake`, `opencode`, `deepseek`, `warp_agent`, `warp_notes`,
-`pomodoro`, `general`, `changes`, `workflow`, `notifications`.
+`pomodoro`, `general`, `changes`, `files`, `workflow`, `notifications`.
 
 - `nuget_local`: `enable_nuget` (true), `watch_folder` (null),
   `nuget_package_filter` (`*.nupkg`), `file_copy_delay_ms` (2000),
@@ -98,6 +98,11 @@ Top level: `schema_version`, `nuget_local`, `repos`, `clipboard_password`,
 - `changes`: `diff_view` (`unified` default, `split`) and `diff_wrap`
   (false). The last layout and word-wrap choices from the diff header; global,
   not per repository. An unknown layout string reads unified.
+- `files`: `tree_view` (true). The one switch every file list reads — the
+  Changes list, the History commit rail, and the PR and Azure Files rails.
+  `true` groups changed files under the folders their paths share; `false` is
+  the flat list with the directory beside the name, as it was before the tree.
+  There is no per-surface override.
 - `workflow`: `auto_advance` (false; the master for the two screen advances),
   `open_pull_request_after_push` (true; open the Create PR step after a successful
   push/publish), `open_pipelines_after_merge` (true; run the Pipelines watch
