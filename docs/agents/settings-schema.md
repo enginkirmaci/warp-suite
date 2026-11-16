@@ -172,8 +172,15 @@ the standalone launch's chosen store (`--store` wins).
 `schema_version`, `work_minutes` (25), `short_break_minutes` (5),
 `long_break_minutes` (15), `long_break_every` (4, clamped to 1..=12),
 `auto_start_breaks` (true), `auto_start_work` (false),
-`desktop_notifications` (true). Durations are whole minutes, 1..=180. The app
-clamps on load so a hand-edited file never produces a zero-length phase.
+`desktop_notifications` (true), `sound_enabled` (true), `sound_path` (""; a
+WAV/OGG outside the app folder, empty = the bundled chime), `window_mode`
+(`full` default / `mini`), `always_on_top` (true; the mini card's pin),
+`bounds_full` / `bounds_mini` (null, or `{x, y, w, h}` in window pixels,
+clamped to at least 260×88 and dropped when the box is broken). Durations are
+whole minutes, 1..=180. The app clamps on load so a hand-edited file never
+produces a zero-length phase or an unusable window. `window_mode` and the
+boxes are UI state kept in the app's own versioned settings; the door and the
+`state.json` snapshot carry none of it.
 
 ## warp-pomodoro history
 

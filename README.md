@@ -15,7 +15,7 @@ Currently in the suite:
 | warp-agent | [warp-agent](https://github.com/enginkirmaci/warp-agent) | Chat client over `opencode serve` and `dsh web` (Rust/GPUI) |
 | warp-snapit | [warp-snapit](https://github.com/enginkirmaci/warp-snapit) | Rust port of the SnapIt zone snapper (Windows-only, portable zip) |
 | warp-notes | [warp-notes](https://github.com/enginkirmaci/warp-notes) | Per-repo markdown notes with a live editor (Rust/GPUI) |
-| warp-pomodoro | [warp-pomodoro](https://github.com/enginkirmaci/warp-pomodoro) | Pomodoro focus timer with a live Station rail page (Rust/GPUI) |
+| warp-pomodoro | [warp-pomodoro](https://github.com/enginkirmaci/warp-pomodoro) | Pomodoro focus timer with a live Station rail page, a countdown ring and a mini always-on-top card (Rust/GPUI) |
 | warp-android-scribe | [warp-android-scribe](https://github.com/enginkirmaci/warp-android-scribe) | Android dictation IME with a full QWERTY keyboard over Superwhisper or Hex (Kotlin/Compose + Rust bridge) |
 
 The C#/.NET SnapIt repo ([enginkirmaci/SnapIt](https://github.com/enginkirmaci/SnapIt))
@@ -176,8 +176,9 @@ together. When one changes, update the other side in the **same** commit.
   a second while it is on screen, falls back to `state.json` when the app is
   closed, starts a session by launching `warp-pomodoro --start`, and never
   toasts over a closed app. A second launch forwards `focus` and exits. The
-  durations, the long-break cycle, auto-start and notifications live in the
-  app's own settings; Warp Station keeps only `pomodoro.enable_pomodoro` and
+  durations, the long-break cycle, auto-start, notifications, the alert sound
+  and the window mode (full dashboard or mini card) live in the app's own
+  settings; Warp Station keeps only `pomodoro.enable_pomodoro` and
   `pomodoro.executable`.
 - **Per-user layout** (`~/.warp`): every app's own data sits in its own
   folder — `station/`, `agent/`, `notes/`, `pomodoro/` — beside the SnapIt settings in

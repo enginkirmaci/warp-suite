@@ -94,6 +94,7 @@ construction. Use them instead of clicking through a hidden window.
 | warp-notes | `WARP_NOTES_PAGE` | `settings`, `about` |
 | warp-notes | `WARP_NOTES_SHORTCUTS` | `1` opens the keyboard sheet on launch |
 | warp-pomodoro | `WARP_POMODORO_PAGE` | `timer`, `history`, `about`, `settings` |
+| warp-pomodoro | `WARP_POMODORO_MODE` | `full`, `mini` (the launch mode) |
 
 The hooks are read once at launch; unset means the app's normal default. They
 exist for captures and automation, not as user-facing settings.
