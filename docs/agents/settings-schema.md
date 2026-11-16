@@ -176,7 +176,9 @@ the standalone launch's chosen store (`--store` wins).
 WAV/OGG outside the app folder, empty = the bundled chime), `window_mode`
 (`full` default / `mini`), `always_on_top` (true; the mini card's pin),
 `bounds_full` / `bounds_mini` (null, or `{x, y, w, h}` in window pixels,
-clamped to at least 260×88 and dropped when the box is broken). Durations are
+clamped to at least 260×88 and dropped when the box is broken; the mini box
+is also dropped above 720×420, so a compositor-reported tiled size cannot
+become the card's box). Durations are
 whole minutes, 1..=180. The app clamps on load so a hand-edited file never
 produces a zero-length phase or an unusable window. `window_mode` and the
 boxes are UI state kept in the app's own versioned settings; the door and the
