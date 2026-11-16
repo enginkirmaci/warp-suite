@@ -5,6 +5,12 @@ repositories next to it. On a developer machine `warp-suite/apps/` is a set of
 symlinks into those checkouts, so the root workspace still resolves every app
 and kit together: one lockfile, one target directory, one gpui compile.
 
+The one target directory is `.build/target`, and on a developer machine it is
+a **symlink** to a fast local disk (`~/.cache/warp-suite/target` here) because
+the suite's build is I/O-bound; see
+[`build-times.md`](build-times.md) before moving it, wiping it or wondering why
+a package selector took minutes.
+
 > The split is complete: the apps live in their own repositories and `apps/`
 > holds only symlinks. `scripts/dev/link-apps.sh` is the only writer of those
 > links; it reports a real directory instead of replacing it.

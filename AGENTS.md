@@ -107,6 +107,12 @@ cargo fmt --all
 cargo clippy --all-targets -p warpui-kit-core -- -D warnings
 ```
 
+One package selector links every test target that package owns (Warp Station
+has 23 probes): iterate with `--test <probe>`, and read
+[`docs/agents/build-times.md`](docs/agents/build-times.md) before treating a
+slow build as normal - the target dir, the probe count and the build script
+rules there are what keep the loop short.
+
 There is no kit CI workflow; run the gate locally before changing a kit:
 
 - `cargo fmt --all --check`.
@@ -489,6 +495,8 @@ Single-context: `GLOSSARY.md` and `docs/adr/` at the repo root. See
   versioned snake_case settings/cache contract.
 - [`docs/agents/versioning.md`](docs/agents/versioning.md) — `version.toml`,
   the PATCH rules, the hook, Windows/Android facts and the release flow.
+- [`docs/agents/build-times.md`](docs/agents/build-times.md) — where a
+  `cargo test` spends its time, the NVMe target dir and the short-loop rules.
 - [`docs/agents/local-setup.md`](docs/agents/local-setup.md) — the sibling
   checkouts, the `apps/` symlinks and the one-workspace local build.
 - [`plans/`](plans/) — working design plans and proposals, one file per topic;
