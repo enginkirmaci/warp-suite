@@ -1,9 +1,10 @@
 # A merge editor for stopped operations
 
-Status: phases 1–4 landed on 2026-11-16: the headless read model, the Merge
-rail page, the editable Result with block takes and Save/Reload, and the
-staging gate with whole-file takes. Phase 5 remains. §3 is the decided contract
-(D1–D12), §5 the proofs and which of them closed, §6 the phase order.
+Status: phases 1–5 landed on 2026-11-16: the headless read model, the Merge
+rail page, the editable Result with block takes and Save/Reload, the staging
+gate with whole-file takes, and the keyboard and accessibility pass. §3 is the
+decided contract (D1–D12), §5 the proofs and which of them closed, §6 the phase
+order.
 
 ## 1. What the tool is, and what the app has today
 
@@ -207,3 +208,10 @@ re-probes that repository, and the page shows a resolved state between the
 last stage and the probe. A worktree change on disk is followed: a clean buffer
 reloads silently, a dirty one shows a Reload note. Whole-file rows carry
 take-ours / take-theirs buttons.
+
+Phase 5: the conflict strip owns a focus handle, and Alt+Up / Alt+Down walk its
+blocks with the active row tinted; the index is clamped after every re-parse.
+The take buttons carry accessible names that say which conflict they act on
+(`neutral_button_named`), the shortcut sheet gained a Merge group, and the merge
+probe exercises the keyboard walk. No capture was taken: the documented
+hidden-window recipe drives the live desktop, which this session leaves alone.
