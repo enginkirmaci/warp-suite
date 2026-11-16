@@ -1,9 +1,9 @@
 # A merge editor for stopped operations
 
-Status: phases 1–3 landed on 2026-11-16: the headless read model, the Merge
-rail page with its source panes, and the editable Result with block takes,
-Save/Reload and the dirty-buffer guard. Phases 4–5 remain. §3 is the decided
-contract (D1–D12), §5 the proofs and which of them closed, §6 the phase order.
+Status: phases 1–4 landed on 2026-11-16: the headless read model, the Merge
+rail page, the editable Result with block takes and Save/Reload, and the
+staging gate with whole-file takes. Phase 5 remains. §3 is the decided contract
+(D1–D12), §5 the proofs and which of them closed, §6 the phase order.
 
 ## 1. What the tool is, and what the app has today
 
@@ -196,3 +196,14 @@ so the header, the file row and the toolbar follow the text. Save writes the
 worktree, Reload re-reads it, and a file or repository switch is refused while
 the buffer is dirty. `tests/merge_probe.rs` drives a take and a save against a
 fixture file.
+
+Phase 4: `Probe.merge` names the operation only while the index still has
+unmerged paths, so the rail item and the page leave as soon as the last path is
+staged. `cli::take_side` resolves a whole-file conflict — `checkout --ours` /
+`--theirs` followed by `git add` (checkout alone leaves the index conflicted),
+or `git rm` for the side that deleted the path. The page stages a resolved
+buffer through `NetCommand::MergeAction`; the store reloads the session and
+re-probes that repository, and the page shows a resolved state between the
+last stage and the probe. A worktree change on disk is followed: a clean buffer
+reloads silently, a dirty one shows a Reload note. Whole-file rows carry
+take-ours / take-theirs buttons.
