@@ -438,7 +438,10 @@ mockup, and use the shared helper where one exists.
 - **Settings rows:** `settings::{row, row_with_desc, stack_row, switch_row,
   switch_row_with_desc, subhead, rows}` — a 60-high row, label and optional
   description left, control right, `border_light()` rule between rows, no card
-  around them. Switches use the kit's 36×20 `Switch`.
+  around them. Switches use the kit's 36×20 `Switch`. A section's first block
+  runs under the section title and `subhead` marks each topic after it; the
+  rows a switch masters stay on screen, indented under it, and dim while it is
+  off — never removed.
 - **Nested scrollers:** a scroller inside another (a fold in the chat
   transcript, a menu over a list) takes the wheel itself while it has content
   left and lets the step chain out only when it is hard against the edge in
