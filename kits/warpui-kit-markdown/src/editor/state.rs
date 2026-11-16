@@ -12,7 +12,7 @@ use super::ops::{self, Change, Selection};
 use super::theme::LiveColors;
 use crate::live::{
     InlineObjectKind, LiveBlock, LiveBlockKind, LiveDocument, LiveLineKind, Property,
-    is_external_url, parse_document,
+    is_external_url, parse_document, toggle_task_at,
 };
 use gpui::prelude::*;
 use gpui::{
@@ -721,19 +721,26 @@ impl LiveEditorState {
 
     /// The code between a block's fences: the closing fence's start bounds
     /// it when the block is closed, otherwise it runs to the document end.
+    /// A line's range stops before its `\r`, so the body starts at the next
+    /// line's range, never at the opening fence's end plus one.
     fn block_code(&self, block: usize) -> SharedString {
         let block = &self.doc.blocks[block];
         let first = &self.doc.lines[block.lines.start];
         let last = &self.doc.lines[block.lines.end - 1];
+        let body_start = self
+            .doc
+            .lines
+            .get(block.lines.start + 1)
+            .map_or(first.range.end, |line| line.range.start);
         let (start, end) = if last.kind == LiveLineKind::Fence && block.lines.len() >= 2 {
-            (first.range.end + 1, last.range.start)
+            (body_start, last.range.start)
         } else {
-            (first.range.end + 1, last.range.end)
+            (body_start, last.range.end)
         };
         let start = start.min(self.text.len());
         let end = end.max(start).min(self.text.len());
         self.text[start..end]
-            .trim_end_matches('\n')
+            .trim_end_matches(['\n', '\r'])
             .to_string()
             .into()
     }
@@ -1790,6 +1797,7 @@ impl LiveEditorState {
         };
         self.goal_x = None;
         self.restart_blink(cx);
+        self.publish_read_only_selection(cx);
         cx.notify();
     }
 
@@ -2710,16 +2718,11 @@ impl LiveEditorState {
             let change = ops::toggle_property(&self.text, range, self.selection);
             return self.apply(change, Group::Single, cx);
         }
-        let mark = if self.text[range.clone()] == *"[ ]" {
-            "[x]"
-        } else {
-            "[ ]"
+        // the parser owns the box shape (`[X]`, `[x]`, `[ ]`): the splice is
+        // the same 3-for-3 replacement the click helper documents
+        let Some(text) = toggle_task_at(&self.text, range.start) else {
+            return;
         };
-        let text = format!(
-            "{}{mark}{}",
-            &self.text[..range.start],
-            &self.text[range.end..]
-        );
         self.apply(
             Change {
                 text,

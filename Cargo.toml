@@ -35,7 +35,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.48"
+version = "0.2.49"
 edition = "2024"
 # Apps inherit GPL-3.0; every kit overrides this with "MIT" in its own
 # manifest. The publishable kits inherit the suite URL the same way.
@@ -65,6 +65,7 @@ anyhow = "1"
 async-channel = "2"
 futures-util = "0.3"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp"] }
+markdown = "1"
 rust-embed = "8"
 serde = "1"
 serde_json = "1"
@@ -83,6 +84,7 @@ winresource = "0.1"
 [patch."https://github.com/enginkirmaci/warp-suite"]
 warpui-kit-core = { path = "kits/warpui-kit-core" }
 warpui-kit-diff = { path = "kits/warpui-kit-diff" }
+warpui-kit-markdown = { path = "kits/warpui-kit-markdown" }
 warpui-kit-picker = { path = "kits/warpui-kit-picker" }
 warpui-kit-platform = { path = "kits/warpui-kit-platform" }
 warpui-kit-build = { path = "kits/warpui-kit-build" }

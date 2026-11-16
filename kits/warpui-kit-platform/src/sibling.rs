@@ -12,6 +12,9 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
+/// How long a sibling gets to answer `--version`.
+const VERSION_DEADLINE: Duration = Duration::from_secs(2);
+
 /// The executable's file name on this platform.
 pub fn exe_name(app: &str) -> String {
     #[cfg(windows)]
@@ -63,7 +66,8 @@ pub struct VersionInfo {
 /// Every suite app answers `--version` as `<name> <version> (<commit>) · <channel>`
 /// before it opens a window, so this is the one fact source that works for a
 /// binary this process did not compile. `None` means missing, a failed exit or
-/// an unreadable line.
+/// an unreadable line — or a child whose output never arrives before the
+/// deadline.
 pub fn version(app: &str) -> Option<VersionInfo> {
     version_from(&binary(app)?)
 }
@@ -76,7 +80,30 @@ fn version_from(binary: &Path) -> Option<VersionInfo> {
         .stderr(Stdio::null())
         .spawn()
         .ok()?;
-    let deadline = Instant::now() + Duration::from_secs(2);
+    let deadline = Instant::now() + VERSION_DEADLINE;
+    // Read stdout on its own thread. A descendant that inherits the pipe keeps
+    // writing it after the child is gone, so waiting for EOF here would block
+    // forever; the thread sends what it reads and this side stops at the
+    // deadline.
+    let mut pipe = child.stdout.take()?;
+    let (sender, reader) = std::sync::mpsc::channel();
+    let _ = std::thread::spawn(move || {
+        use std::io::Read as _;
+
+        let mut buffer = [0u8; 1024];
+        loop {
+            match pipe.read(&mut buffer) {
+                Ok(0) => break,
+                Ok(read) => {
+                    if sender.send(buffer[..read].to_vec()).is_err() {
+                        break;
+                    }
+                }
+                Err(err) if err.kind() == std::io::ErrorKind::Interrupted => {}
+                Err(_) => break,
+            }
+        }
+    });
     loop {
         match child.try_wait() {
             Ok(Some(status)) if status.success() => break,
@@ -96,8 +123,28 @@ fn version_from(binary: &Path) -> Option<VersionInfo> {
             }
         }
     }
-    let output = child.wait_with_output().ok()?;
-    let stdout = String::from_utf8_lossy(&output.stdout);
+    // The child is gone, so the bytes it wrote are all there is; wait only for
+    // its first line, not for the pipe to close.
+    let mut stdout = Vec::new();
+    loop {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        match reader.recv_timeout(remaining) {
+            Ok(bytes) => {
+                stdout.extend_from_slice(&bytes);
+                if stdout.contains(&b'\n') {
+                    break;
+                }
+            }
+            // EOF: the last line may have no terminator, so parse what arrived
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
+            }
+        }
+    }
+    let stdout = String::from_utf8_lossy(&stdout);
     parse_version_line(stdout.lines().next()?)
 }
 
@@ -261,6 +308,31 @@ mod tests {
                 commit: "abc1234".into(),
                 channel: "dev".into(),
             })
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_pipe_holder_after_the_child_exits_does_not_block_the_probe() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("warp-fake");
+        // the shell is done at once, but the background sleep inherits stdout
+        // and keeps the pipe open: waiting for EOF would take the whole sleep
+        std::fs::write(&path, "#!/bin/sh\nsleep 30 &\nprintf 'line\\n'\n").expect("write script");
+        let mut permissions = std::fs::metadata(&path).expect("metadata").permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&path, permissions).expect("chmod");
+
+        let started = Instant::now();
+        // "line" is not a version line, but it must be read and rejected
+        // rather than waiting on the pipe holder
+        assert_eq!(version_from(&path), None);
+        assert!(
+            started.elapsed() < Duration::from_secs(1),
+            "the probe waited on the pipe holder for {:?}",
+            started.elapsed()
         );
     }
 }

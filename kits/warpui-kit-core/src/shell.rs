@@ -219,7 +219,8 @@ pub fn rail_item(
     rail_item_inked(id, icon_path, label, selected, palette::accent_ink())
 }
 
-/// [`rail_item`] in an accent the user picked: an app with presets passes its own.
+/// [`rail_item`] in an accent the user picked: an app whose accent differs
+/// passes its own.
 pub fn rail_item_inked(
     id: impl Into<ElementId>,
     icon_path: &str,

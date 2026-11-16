@@ -74,8 +74,8 @@ pub struct DiffHunk {
     pub new_start: u32,
     /// New-file line count the header declares.
     ///
-    /// The renderer never draws the header; this is parsed for callers that
-    /// navigate hunks and for the parser's own tests.
+    /// The renderer never draws the header; the parser uses both declared
+    /// counts to know where the hunk ends.
     pub new_count: u32,
     pub rows: Vec<DiffRow>,
 }
@@ -151,6 +151,14 @@ impl DiffDocument {
         let lines: Vec<&str> = normalized.split('\n').collect();
         let mut current: Option<DiffFile> = None;
         let mut in_hunk = false;
+        // Rows the open hunk's header still declares on each side. A hunk ends
+        // when both are consumed, so a `---`/`+++` pair that is really two rows
+        // inside it cannot be read as a file header.
+        let mut remaining_old = 0u32;
+        let mut remaining_new = 0u32;
+        // Whether the open hunk's header parsed its counts; a malformed header
+        // keeps the old line-count behaviour.
+        let mut counted = false;
         let mut old = 1u32;
         let mut new = 1u32;
         let mut i = 0;
@@ -176,11 +184,14 @@ impl DiffDocument {
             }
             // A file header is the `---`/`+++` pair, not any line that starts
             // with `---`: inside a hunk that prefix is a deleted line whose
-            // content begins with `--`.
+            // content begins with `--`. A hunk whose declared counts are not
+            // yet consumed is still that hunk, so rows win over a header until
+            // the counts say it is over.
             if line.starts_with("--- ")
                 && lines
                     .get(i + 1)
                     .is_some_and(|next| next.starts_with("+++ "))
+                && (!in_hunk || !counted)
             {
                 if current.as_ref().is_none_or(|file| !file.hunks.is_empty()) {
                     flush(&mut doc, &mut current);
@@ -190,13 +201,14 @@ impl DiffDocument {
                 let plus = lines[i + 1];
                 file.new_path = header_path(&plus[4..]).map(str::to_string);
                 in_hunk = false;
+                counted = false;
                 i += 2;
                 continue;
             }
             if line.starts_with("@@") {
                 let file = current.get_or_insert_with(DiffFile::default);
-                let (old_start, new_start, new_count) =
-                    parse_hunk_header(line).unwrap_or((1, 1, 1));
+                let header = parse_hunk_header(line);
+                let (old_start, old_count, new_start, new_count) = header.unwrap_or((1, 1, 1, 1));
                 file.hunks.push(DiffHunk {
                     header: line.trim_end().to_string(),
                     old_start,
@@ -206,7 +218,10 @@ impl DiffDocument {
                 });
                 old = old_start;
                 new = new_start;
-                in_hunk = true;
+                remaining_old = old_count;
+                remaining_new = new_count;
+                counted = header.is_some();
+                in_hunk = remaining_old > 0 || remaining_new > 0;
                 i += 1;
                 continue;
             }
@@ -271,6 +286,13 @@ impl DiffDocument {
                         });
                         file.removed += 1;
                         old += 1;
+                    }
+                }
+                if counted {
+                    remaining_old = remaining_old.saturating_sub(u32::from(kind != RowKind::Add));
+                    remaining_new = remaining_new.saturating_sub(u32::from(kind != RowKind::Del));
+                    if remaining_old == 0 && remaining_new == 0 {
+                        in_hunk = false;
                     }
                 }
                 i += 1;
@@ -381,20 +403,25 @@ fn header_path(rest: &str) -> Option<&str> {
     )
 }
 
-/// `@@ -old[,n] +new[,n] @@ ...`.
-fn parse_hunk_header(line: &str) -> Option<(u32, u32, u32)> {
+/// `@@ -old[,n] +new[,n] @@ ...`: the starts plus both declared row counts.
+fn parse_hunk_header(line: &str) -> Option<(u32, u32, u32, u32)> {
     let rest = line.strip_prefix("@@ -")?;
     let plus = rest.find(" +")?;
-    let old = rest[..plus].split(',').next()?.trim().parse().ok()?;
-    let tail = &rest[plus + 2..];
-    let end = tail.find(" @@")?;
-    let mut numbers = tail[..end].split(',');
-    let new = numbers.next()?.trim().parse().ok()?;
-    let count = numbers
+    let mut old_numbers = rest[..plus].split(',');
+    let old = old_numbers.next()?.trim().parse().ok()?;
+    let old_count = old_numbers
         .next()
         .and_then(|count| count.trim().parse().ok())
         .unwrap_or(1);
-    Some((old, new, count))
+    let tail = &rest[plus + 2..];
+    let end = tail.find(" @@")?;
+    let mut new_numbers = tail[..end].split(',');
+    let new = new_numbers.next()?.trim().parse().ok()?;
+    let new_count = new_numbers
+        .next()
+        .and_then(|count| count.trim().parse().ok())
+        .unwrap_or(1);
+    Some((old, old_count, new, new_count))
 }
 
 /// The deletion and addition indices of the change block starting at `start`
@@ -937,6 +964,24 @@ mod tests {
         assert_eq!(rows[1].kind, RowKind::Context);
         assert_eq!(rows[1].text, "");
         assert_eq!(rows.len(), 4, "context, blank context, delete, add");
+    }
+
+    /// A deleted line whose text begins with `--` and an added one beginning
+    /// with `++` read exactly like a `---`/`+++` file header. The hunk's
+    /// declared counts win: both stay rows and no second file appears.
+    #[test]
+    fn a_header_pair_inside_a_hunk_stays_rows() {
+        let doc = DiffDocument::parse("--- a/f\n+++ b/f\n@@ -1 +1 @@\n--- x\n+++ y\n");
+        assert_eq!(doc.files.len(), 1);
+        let file = &doc.files[0];
+        assert_eq!(file.path(), Some("f"));
+        let rows = &file.hunks[0].rows;
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].kind, RowKind::Del);
+        assert_eq!(rows[0].text, "-- x");
+        assert_eq!(rows[1].kind, RowKind::Add);
+        assert_eq!(rows[1].text, "++ y");
+        assert_eq!((file.added, file.removed), (1, 1));
     }
 
     /// A CRLF pair is the same text twice, not a change: `from_lines` used to

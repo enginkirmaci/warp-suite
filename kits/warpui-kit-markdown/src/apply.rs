@@ -213,7 +213,8 @@ fn toggle_line_prefix(text: &str, start: usize, length: usize, prefix: &str) -> 
         consumed += replaced.chars().count();
         out.push_str(&replaced);
     }
-    let new_len = consumed.saturating_sub(new_start.unwrap_or(line_start));
+    let new_len =
+        consumed.saturating_sub(new_start.unwrap_or(line_start).saturating_sub(line_start));
     out.extend(chars[line_end..].iter());
     MarkdownEditResult {
         text: out,
@@ -334,86 +335,6 @@ fn toggle_numbered(text: &str, start: usize, length: usize) -> MarkdownEditResul
     }
 }
 
-/// Enter inside a list item continues the list (empty item ends it).
-pub fn continue_list(text: &str, caret: usize) -> Option<(String, usize)> {
-    let chars: Vec<char> = text.chars().collect();
-    let caret = caret.min(chars.len());
-    let line_start = chars[..caret]
-        .iter()
-        .rposition(|&c| c == '\n')
-        .map(|i| i + 1)
-        .unwrap_or(0);
-    let line: String = chars[line_start..caret].iter().collect();
-    let trimmed = line.trim_start_matches(' ');
-    let indent = &line[..line.len() - trimmed.len()];
-
-    let markers: &[(&str, bool)] = &[
-        ("- ", false),
-        ("* ", false),
-        ("+ ", false),
-        ("> ", false),
-        ("- [ ] ", true),
-        ("- [x] ", true),
-    ];
-    for (marker, _is_task) in markers {
-        if let Some(rest) = trimmed.strip_prefix(marker) {
-            if rest.trim().is_empty() {
-                // empty item: remove it (and the newline before it) and end
-                // the list
-                let cut = if line_start > 0 {
-                    line_start - 1
-                } else {
-                    line_start
-                };
-                let without = format!(
-                    "{}{}",
-                    &text[..char_index(text, cut)],
-                    &text[char_index(text, caret)..]
-                );
-                let new_caret = cut;
-                return Some((without, new_caret));
-            }
-            let insertion = format!("\n{indent}{marker}");
-            let new_caret = caret + insertion.chars().count();
-            let at = char_index(text, caret);
-            return Some((
-                format!("{}{insertion}{}", &text[..at], &text[at..]),
-                new_caret,
-            ));
-        }
-    }
-    // ordered list: "1. " with any number
-    if let Some(numbered) = trimmed
-        .split_once(". ")
-        .or_else(|| trimmed.split_once(") "))
-        .filter(|(n, _)| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()))
-    {
-        let n: u64 = numbered.0.parse().ok()?;
-        let rest = numbered.1;
-        if rest.trim().is_empty() {
-            let cut = if line_start > 0 {
-                line_start - 1
-            } else {
-                line_start
-            };
-            let without = format!(
-                "{}{}",
-                &text[..char_index(text, cut)],
-                &text[char_index(text, caret)..]
-            );
-            return Some((without, cut));
-        }
-        let insertion = format!("\n{indent}{}. ", n + 1);
-        let new_caret = caret + insertion.chars().count();
-        let at = char_index(text, caret);
-        return Some((
-            format!("{}{insertion}{}", &text[..at], &text[at..]),
-            new_caret,
-        ));
-    }
-    None
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -470,18 +391,5 @@ mod tests {
     fn numbered_replaces_stale_markers_not_stacks() {
         let on = markdown_apply("numbered", "1. alpha\n1. beta", 0, 15);
         assert_eq!(on.text, "1. alpha\n2. beta");
-    }
-
-    #[test]
-    fn list_continuation_and_termination() {
-        let (text, caret) = continue_list("- first item", 12).unwrap();
-        assert_eq!(text, "- first item\n- ");
-        assert_eq!(caret, 15);
-
-        let (text, _) = continue_list("- first item\n- ", 15).unwrap();
-        assert_eq!(text, "- first item");
-
-        let (text, _) = continue_list("1. one", 6).unwrap();
-        assert_eq!(text, "1. one\n2. ");
     }
 }

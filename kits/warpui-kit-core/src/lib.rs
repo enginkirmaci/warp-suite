@@ -3,8 +3,8 @@
 //! One palette, one font stack, one set of shared control helpers for the
 //! desktop clients built on [gpui-kit](https://crates.io/crates/gpui-kit):
 //!
-//! - [`palette`] — the switchable ramps (Copper, Plum, Pine, Blue), one hue
-//!   per entity, the accent preset system and the syntax highlight theme
+//! - [`palette`] — the switchable ramps (Copper, Plum, Pine, Blue, Gray), one hue
+//!   per entity, the live accent family and the syntax highlight theme
 //! - [`fonts`] — the bundled Inter and JetBrains Mono faces, font resolution
 //!   and the type scale
 //! - [`scale`] — the UI scale every app shares: one text size setting and
@@ -74,10 +74,7 @@ pub use icon::{icon, icon_data};
 pub use kit::apply_kit_theme;
 #[cfg(feature = "media")]
 pub use media::{decode_png_render, mime_for_path};
-pub use palette::{
-    ACCENT_PRESETS, AccentColors, AccentPreset, highlight_theme, normalize_accent, rgba_hex,
-    rgba_u32, selection, tint,
-};
+pub use palette::{AccentColors, highlight_theme, rgba_hex, rgba_u32, selection, tint};
 pub use scale::{
     adopt_palette, adopt_text_size, follow_palette, follow_ui_scale, palette_control, palette_key,
     set_palette, set_text_size, text_size_control,

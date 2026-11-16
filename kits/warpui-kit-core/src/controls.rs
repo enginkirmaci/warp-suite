@@ -16,7 +16,7 @@ use gpui::{
 };
 
 /// The button looks: the accent fill, and the two quiet ones, which are the
-/// design's one outlined control. Primary carries the preset's on-accent text
+/// design's one outlined control. Primary carries the accent's on-accent text
 /// color.
 pub enum BtnKind {
     Primary(gpui::Rgba),

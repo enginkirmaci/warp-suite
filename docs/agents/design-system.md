@@ -518,6 +518,14 @@ Two kinds of text. The line is what the surface *is*, not how long it is.
   - **System note** is a status by role (Labels) that keeps the content path so
     its text, notably error text, stays selectable and copyable; a real-view
     probe covers that Copy menu. Do not give a note an editor by accident.
+  - **Warp Station's PR and Azure pull bodies and comments** take the
+    wrong-cost rule above: the thread is a volatile list of small remote
+    comments, and one editor each is the wrong cost. They are the one place
+    that path is fed text this app did not author, so every `TextView::markdown`
+    there goes through `ui/markdown.rs::text_view_markdown`, which asks
+    `warpui_kit_markdown::renders_as_markdown` first and falls back to plain
+    prose — a parser panic inside gpui's layout would take the window down. A
+    unit test in that file pins the input the parser cannot parse.
 
   The transcript's other content surfaces — assistant text, the user message,
   reasoning, and a question's text and resolution — use the read-only
@@ -606,7 +614,7 @@ window-wide list cursor and no window-level arrow handler.
 ## The About screen
 
 Every GPUI app carries **About above Settings** at the bottom of the rail, and
-all four draw the same screen from `warpui_kit_core::about`:
+every one of them draws the same screen from `warpui_kit_core::about`:
 
 - the list holds only the members installed next to this binary or on `PATH`,
   each row with that binary's own version; the row for the app you are in
@@ -618,9 +626,16 @@ all four draw the same screen from `warpui_kit_core::about`:
 - the detail owns one filled primary: `Release notes` on the current app,
   `Open <app>` on a sibling, and `Open controls` (Station) or `Open Station`
   (a sibling) for SnapIt. SnapIt's row appears only when its binary is
-  installed; on Linux it says `Windows only` and has no primary;
+  installed, which off Windows means never, and it has no primary there;
 - `Copy version` writes the selected member's line,
   `Warp Station 0.1.8 (d904edc) · dev` — one line, the format support asks for.
+
+The scan that fills the list runs a process per sibling, so it never runs in
+render: the app seeds the list with `about::current_member(..)` (no process
+probe) so its own row and the primary draw on the first frame, starts
+`about::detect_installed` once on the background executor, and assigns the
+members when they land. Opening About again shows the list it already has; a
+re-probe on every rail click would freeze the window behind a slow sibling.
 
 The marks are monochrome `currentColor` SVGs in
 `kits/warpui-kit-core/assets/marks/`, so the accent tints them and they follow
@@ -640,7 +655,7 @@ the version the row promises.
 
 ## Where a change goes
 
-- A new color or tone: `palette.rs` — add it to `Ramp` (with a value in all four
+- A new color or tone: `palette.rs` — add it to `Ramp` (with a value in all five
   presets) and a reader if it is part of the live surface system, or to the
   fixed semantic block if it means one thing. Update the contrast test.
 - A new size: `fonts.rs`, and only if no existing step fits.

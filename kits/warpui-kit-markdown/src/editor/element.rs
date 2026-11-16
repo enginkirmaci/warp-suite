@@ -5,7 +5,7 @@
 //!
 //! Layout and design language follow Obsidian's default theme: a centered
 //! readable column, quiet faint syntax, accent bars and checkboxes; every
-//! color comes from [`LiveColors`], so the app's preset owns the look.
+//! color comes from [`LiveColors`], so the app's accent owns the look.
 
 use super::display::{Band, Decor};
 use super::frame::{

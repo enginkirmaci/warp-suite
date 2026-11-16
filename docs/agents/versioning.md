@@ -48,8 +48,9 @@ which the pre-commit hook keeps in step with `version.toml`; a plain
 
 `warpui_kit_platform::sibling` decides what "installed" means: the executable
 next to the running binary first, then `PATH`. About probes each installed
-sibling's `--version` once per open and keeps the version, commit and channel
-it printed; the running app's facts come from its own build script.
+sibling's `--version` once per app start, on a background thread, and keeps the
+version, commit and channel it printed; the running app's facts come from its
+own build script, so its row exists on the first frame before that scan lands.
 
 ## One-time setup per clone
 

@@ -62,17 +62,16 @@ pub fn sanitize_entry_name(name: &str, enforce_markdown_extension: bool) -> Opti
 }
 
 /// The search scans a small per-repo file budget (the notes page uses 2000,
-/// the global search 40 per repo); `file_cap` is that budget.
+/// the global search 40 per repo); `file_cap` is the number of files the walk
+/// visits at most. The budget counts scanned files, not hits: a term that
+/// rarely matches must not content-read the whole folder to prove it.
 pub fn search_capped(repo_notes_root: &Path, term: &str, file_cap: usize) -> Vec<NotesSearchHit> {
     if !repo_notes_root.is_dir() || term.trim().is_empty() {
         return Vec::new();
     }
     let term = term.trim();
     let mut hits = Vec::new();
-    for path in enumerate_note_files(repo_notes_root) {
-        if hits.len() >= file_cap {
-            break;
-        }
+    for path in enumerate_note_files(repo_notes_root, file_cap) {
         let file_name = path
             .file_name()
             .map(|n| n.to_string_lossy().to_string())
@@ -107,15 +106,24 @@ pub fn search_capped(repo_notes_root: &Path, term: &str, file_cap: usize) -> Vec
     hits
 }
 
-fn enumerate_note_files(root: &Path) -> Vec<PathBuf> {
+/// The note files under `root` in walk order, at most `limit` of them: the
+/// search budget bounds the walk itself, so a large folder is not materialised
+/// to be mostly ignored.
+fn enumerate_note_files(root: &Path, limit: usize) -> Vec<PathBuf> {
     let mut files = Vec::new();
     let mut queue = std::collections::VecDeque::new();
     queue.push_back(root.to_path_buf());
     while let Some(current) = queue.pop_front() {
+        if files.len() >= limit {
+            break;
+        }
         let Ok(entries) = std::fs::read_dir(&current) else {
             continue;
         };
         for entry in entries.flatten() {
+            if files.len() >= limit {
+                break;
+            }
             let name = entry.file_name().to_string_lossy().to_string();
             match entry.file_type() {
                 Ok(t) if t.is_dir() => {
@@ -143,12 +151,13 @@ fn read_excerpt(path: &Path, term: &str) -> Option<String> {
             continue;
         };
         // the offset was found in the lowercased copy, whose byte length can
-        // differ (İ U+0130 lowercases to 3 bytes) — walk back onto the
-        // original line's char boundaries before slicing (see
-        // code_search::excerpt_around for the same pattern)
-        let mut start = index.saturating_sub(40);
+        // differ (İ U+0130 lowercases to 3 bytes) and even exceed the original
+        // line — clamp it, then walk back onto the original line's char
+        // boundaries before slicing (see code_search::excerpt_around for the
+        // same pattern)
+        let mut start = index.saturating_sub(40).min(line.len());
         while start > 0 && !line.is_char_boundary(start) {
-            start += 1;
+            start -= 1;
         }
         let mut end = (start + 160).min(line.len());
         while end < line.len() && !line.is_char_boundary(end) {
@@ -218,6 +227,48 @@ mod tests {
         assert!(hits.iter().all(|h| h.path.starts_with(&root)));
 
         let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn the_file_budget_counts_scanned_files_not_hits() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join("sub")).unwrap();
+        // the walk visits the root's own file before it descends, so a budget
+        // of one is spent on the non-match and the note under sub/ is never
+        // read — the old hit-counted budget read both and found the needle
+        std::fs::write(root.join("plain.md"), "nothing here\n").unwrap();
+        std::fs::write(root.join("sub/note.md"), "a needle in the body\n").unwrap();
+
+        assert!(search_capped(root, "needle", 1).is_empty());
+
+        // the same folder with the normal budget still finds the note
+        let hits = search_capped(root, "needle", 40);
+        assert_eq!(hits.len(), 1);
+        assert!(hits[0].excerpt.contains("needle"));
+    }
+
+    #[test]
+    fn the_walk_stops_at_the_budget() {
+        let tmp = tempfile::tempdir().unwrap();
+        for index in 0..10 {
+            std::fs::write(tmp.path().join(format!("note-{index}.md")), "body\n").unwrap();
+        }
+        assert_eq!(enumerate_note_files(tmp.path(), 3).len(), 3);
+        assert_eq!(enumerate_note_files(tmp.path(), 40).len(), 10);
+    }
+
+    #[test]
+    fn excerpt_stays_on_char_boundaries_when_the_lowercase_is_longer() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("wide.md");
+        let line = format!("{} needle", '\u{130}'.to_string().repeat(50));
+        std::fs::write(&path, line).unwrap();
+
+        // every İ lowercases to three bytes, so the match offset lands past the
+        // end of the original line: the walk must clamp instead of running on
+        let excerpt = read_excerpt(&path, "needle").expect("the term is in the file");
+        assert!(excerpt.starts_with('…'), "{excerpt}");
     }
 
     #[test]

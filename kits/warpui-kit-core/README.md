@@ -8,7 +8,7 @@ Five palettes ship from the warp-suite-v3 design — Copper (the default), Plum,
 
 | Module | Contents |
 | --- | --- |
-| `palette` | Surface/text ramps, accent presets, entity hues, diff washes, syntax highlight theme |
+| `palette` | Surface/text ramps, the live accent family, entity hues, diff washes, syntax highlight theme |
 | `fonts` | The bundled Inter and JetBrains Mono faces, font resolution, the type scale (`FontTokens` plus one getter per step), kit field sizes |
 | `scale` | The shared text size (`~/.warp/ui.json`), its `text_size_control()`, and `follow_ui_scale(cx, on_change)` for live changes |
 | `shell` | The one window shape: `title_bar`, `rail`, `tab_strip`, `list_pane`, `detail_pane` and their tabs and rows |
@@ -23,11 +23,11 @@ Five palettes ship from the warp-suite-v3 design — Copper (the default), Plum,
 ## Usage
 
 ```rust
-use warpui_kit_core::{apply_kit_theme, font_tokens, normalize_accent, AccentColors, BACKGROUND, WINDOW_CHROME};
+use warpui_kit_core::{apply_kit_theme, font_tokens, palette, BACKGROUND, WINDOW_CHROME};
 
 fn apply_theme(cx: &mut gpui_kit::App) {
     apply_kit_theme(
-        AccentColors::for_preset(normalize_accent(None)),
+        palette::current_ramp().accent_colors(),
         &font_tokens(None, 1.0),
         WINDOW_CHROME, // or BACKGROUND — the sidebar step is the caller's call
         cx,

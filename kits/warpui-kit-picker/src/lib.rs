@@ -173,10 +173,10 @@ pub type RefreshFn = Box<dyn Fn(&mut App)>;
 /// the action completed (the confirm click) — the shell then dismisses the
 /// popup itself, so the app never re-enters the picker from its own listener.
 pub type TrailingFn = Box<dyn Fn(&str, &mut App) -> bool>;
-/// A right-click on a row, with the pointer in window coordinates. The shell
-/// dismisses itself after the call; the host opens its own menu there — the
-/// rows are built inside a scrolling list, so a menu drawn as a child of the
-/// row would be clipped by the panel.
+/// A right-click on a row, with the pointer in window coordinates. The host
+/// opens its own menu there and owns the close: the popup deliberately stays
+/// up under it — the rows are built inside a scrolling list, so a menu drawn as
+/// a child of the row would be clipped by the panel.
 pub type SecondaryFn = Rc<dyn Fn(&str, gpui::Point<gpui::Pixels>, &mut Window, &mut App)>;
 
 /// The `provider/name` split of a catalog model id (`""` when unsplit).
@@ -342,7 +342,8 @@ impl FilteredPicker {
     }
 
     /// A right-click on a row: the host gets the row's value and the pointer
-    /// position and opens its context menu; the shell dismisses the popup.
+    /// position and opens its context menu; the popup stays up for it, so the
+    /// host closes the picker itself when its menu is done.
     pub fn set_on_secondary(&mut self, f: SecondaryFn) -> &mut Self {
         self.on_secondary = Some(f);
         self
@@ -446,6 +447,9 @@ impl FilteredPicker {
                 let state = state.clone();
                 state.update(cx, |state, cx| state.set_value(value, window, cx));
                 self.open = false;
+                if let Some(close) = &self.on_dismiss {
+                    close(cx);
+                }
             }
             PickerTarget::Callback(pick) => {
                 // a pick closes the dropdown and resets the filter, so the

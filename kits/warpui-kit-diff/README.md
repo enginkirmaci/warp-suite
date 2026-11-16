@@ -5,14 +5,10 @@ Zed-style unified diff and line-numbered code rendering for [gpui-kit](https://c
 ## Usage
 
 ```rust
-use warpui_kit_diff::{render_code, render_diff, sniff_lang, DiffDocument};
+use warpui_kit_diff::{render_code, render_diff, sniff_lang};
 
 // a patch: gutter, +/- marker, two-tone washes, token colors
 let patch_view = render_diff(patch_text, Some(tool_file_path), font_detail, window, cx);
-
-// the same drawing from an already parsed patch
-let doc = DiffDocument::parse(patch_text);      // pure, unit-testable
-let view = render_document(&doc, Some(path), font_detail, window, cx);
 
 // plain code: gutter + token colors, no washes
 let code_view = render_code(code_text, Some("rust"), color, font_detail, window, cx);
@@ -41,9 +37,9 @@ Colors come from `warpui-kit-core`'s palette; token colors from the kit's instal
 - `diff --git`, `index`, `---` and `+++` are hidden. A multi-file patch gets
   a file header row; the app's own header carries the path and counts for a
   single file.
-- `DiffDocument` is pure: no `Window`, no `App`, no theme. `render_diff`
-  parses and caches by patch text; callers with their own view state (folds,
-  scroll) should hold the document and call `render_document`.
+- `DiffDocument` is pure: no `Window`, no `App`, no theme. `render_diff` and
+  `render_diff_with_scroll` parse and cache by patch text, so a re-render of
+  an unchanged patch never reparses it.
 
 ## Selection
 
@@ -97,7 +93,8 @@ warpui-kit-diff = { path = "../warpui-kit-diff", features = [
 ] }
 ```
 
-`render_code` also exposes the markdown code-block highlighter (`shared_highlighter`) re-hosted on the kit's public `SyntaxHighlighter` API, for hosts that need per-instance override hooks.
+`highlight_buffer` exposes the same tree-sitter pass for hosts that draw their
+own gutter.
 
 ## Dependencies
 

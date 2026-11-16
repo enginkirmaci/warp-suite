@@ -1,6 +1,6 @@
 //! Maps the palette onto gpui-kit's shadcn-style theme tokens so kit
 //! components (Input/Textarea/TextView/popovers) render in the family colors.
-//! The accent family and font tokens are parameters so a settings-page preset
+//! The accent family and font tokens are parameters so a settings-page palette
 //! swap can re-run the mapping (`Theme::update` refreshes every window). Call
 //! after [`gpui_kit::init`], before opening windows.
 

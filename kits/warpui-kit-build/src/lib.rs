@@ -89,7 +89,11 @@ pub fn emit(app: AppInfo) {
 
 #[cfg(windows)]
 fn windows_resources(app: &AppInfo) {
-    let version = env!("CARGO_PKG_VERSION");
+    // cargo sets this for the package whose build script runs, which is the
+    // app; `env!` here would expand when this crate is compiled and stamp
+    // warpui-kit-build's own version on every binary instead.
+    let version = std::env::var("CARGO_PKG_VERSION")
+        .unwrap_or_else(|_| env!("CARGO_PKG_VERSION").to_string());
     let mut parts = version.split('.').map(|part| part.parse::<u64>());
     let major = parts.next().and_then(Result::ok).unwrap_or(0);
     let minor = parts.next().and_then(Result::ok).unwrap_or(0);
@@ -116,8 +120,8 @@ fn windows_resources(app: &AppInfo) {
     resource.set("CompanyName", COMPANY);
     resource.set("LegalCopyright", COPYRIGHT);
     resource.set("OriginalFilename", app.original_filename);
-    resource.set("FileVersion", version);
-    resource.set("ProductVersion", version);
+    resource.set("FileVersion", &version);
+    resource.set("ProductVersion", &version);
     if let Err(error) = resource.compile() {
         panic!("could not embed the Windows resource block: {error}");
     }

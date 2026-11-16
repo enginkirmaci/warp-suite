@@ -27,7 +27,7 @@ impl Hash for Px {
     }
 }
 
-/// A color by role, so views stay comparable and follow the app's preset.
+/// A color by role, so views stay comparable and follow the app's accent.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Ink {
     Text,

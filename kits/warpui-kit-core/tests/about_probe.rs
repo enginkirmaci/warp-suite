@@ -119,13 +119,13 @@ fn the_suite_is_the_five_members_in_order() {
     // SnapIt is the headless one: hosted, and its license lives in its own app.
     let snapit = about::app(AppId::Snapit);
     assert!(snapit.hosted);
-    assert_eq!(snapit.license_path, "apps/warp-snapit/LICENSE");
-    // One workspace, one repository: every link is built from it.
+    assert_eq!(snapit.repo, "https://github.com/enginkirmaci/warp-snapit");
+    // The suite links come from the kit's repository; a license links into the
+    // app's own repository, where its LICENSE lives.
     assert!(about::repository().contains("github.com"));
-    assert!(
-        Link::License
-            .url(about::app(AppId::Notes))
-            .ends_with("/apps/warp-notes/LICENSE")
+    assert_eq!(
+        Link::License.url(about::app(AppId::Notes)),
+        "https://github.com/enginkirmaci/warp-notes/blob/main/LICENSE"
     );
     assert!(
         Link::Repository

@@ -125,6 +125,13 @@ impl Render for Host {
 #[gpui_kit::gpui::test]
 fn field_pick_writes_the_target_and_closes(cx: &mut TestAppContext) {
     cx.update(gpui_kit::init);
+    let dismissals: Arc<std::sync::Mutex<usize>> = Arc::default();
+    let close: DismissFn = {
+        let dismissals = dismissals.clone();
+        Box::new(move |_cx: &mut App| {
+            *dismissals.lock().unwrap() += 1;
+        })
+    };
     let (handle, cx) = cx.add_window_view(|window, cx| {
         let field = cx.new(|cx| InputState::new(window, cx).placeholder("target"));
         let picker = cx.new(|cx| {
@@ -135,7 +142,7 @@ fn field_pick_writes_the_target_and_closes(cx: &mut TestAppContext) {
                 window,
                 cx,
             );
-            picker.observe_entity(&field, cx);
+            picker.set_on_dismiss(close);
             picker
         });
         picker.update(cx, |p, cx| p.observe_entity(&field, cx));
@@ -162,11 +169,16 @@ fn field_pick_writes_the_target_and_closes(cx: &mut TestAppContext) {
         host.field.read(cx).value().trim().to_string()
     });
     assert_eq!(value, "openai/gpt", "the pick lands in the target field");
+    assert_eq!(
+        *dismissals.lock().unwrap(),
+        1,
+        "a field pick dismisses through the owner too"
+    );
 }
 
 /// A right-click on a row hands its value and the pointer to the host's
-/// secondary callback and closes the popup, so the host can open its own
-/// context menu at that point.
+/// secondary callback and leaves the popup up, so the host's context menu
+/// hangs over the list it belongs to; the host owns the close.
 #[gpui_kit::gpui::test]
 fn secondary_click_routes_the_row_and_keeps_the_popup(cx: &mut TestAppContext) {
     cx.update(gpui_kit::init);

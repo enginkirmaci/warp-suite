@@ -74,8 +74,8 @@ pub struct SuiteApp {
     pub hosted: bool,
     /// The executable stem a sibling launch spawns.
     pub binary: &'static str,
-    /// The app's LICENSE in the suite repository.
-    pub license_path: &'static str,
+    /// The app's own repository, which carries its LICENSE.
+    pub repo: &'static str,
 }
 
 impl SuiteApp {
@@ -97,7 +97,7 @@ pub const SUITE: [SuiteApp; 5] = [
         runtime: "Rust · GPUI",
         hosted: false,
         binary: "warp-station",
-        license_path: "apps/warp-station/LICENSE",
+        repo: "https://github.com/enginkirmaci/warp-station",
     },
     SuiteApp {
         id: AppId::Agent,
@@ -109,7 +109,7 @@ pub const SUITE: [SuiteApp; 5] = [
         runtime: "Rust · GPUI",
         hosted: false,
         binary: "warp-agent",
-        license_path: "apps/warp-agent/LICENSE",
+        repo: "https://github.com/enginkirmaci/warp-agent",
     },
     SuiteApp {
         id: AppId::Notes,
@@ -121,7 +121,7 @@ pub const SUITE: [SuiteApp; 5] = [
         runtime: "Rust · GPUI",
         hosted: false,
         binary: "warp-notes",
-        license_path: "apps/warp-notes/LICENSE",
+        repo: "https://github.com/enginkirmaci/warp-notes",
     },
     SuiteApp {
         id: AppId::Snapit,
@@ -133,7 +133,7 @@ pub const SUITE: [SuiteApp; 5] = [
         runtime: "Rust · Windows",
         hosted: true,
         binary: "warp-snapit",
-        license_path: "apps/warp-snapit/LICENSE",
+        repo: "https://github.com/enginkirmaci/warp-snapit",
     },
     SuiteApp {
         id: AppId::Pomodoro,
@@ -145,7 +145,7 @@ pub const SUITE: [SuiteApp; 5] = [
         runtime: "Rust · GPUI",
         hosted: false,
         binary: "warp-pomodoro",
-        license_path: "apps/warp-pomodoro/LICENSE",
+        repo: "https://github.com/enginkirmaci/warp-pomodoro",
     },
 ];
 
@@ -192,6 +192,22 @@ pub fn detect_installed(current: AppId, build: &Build) -> Vec<Member> {
     })
 }
 
+/// The running app's member: its own build facts and no process probe, so a
+/// render path may build it before the asynchronous scan lands.
+pub fn current_member(current: AppId, build: &Build) -> Member {
+    member_from_build(*app(current), build)
+}
+
+fn member_from_build(app: SuiteApp, build: &Build) -> Member {
+    Member {
+        app,
+        version: build.version.to_string(),
+        commit: build.commit.to_string(),
+        channel: build.channel.to_string(),
+        released: Some(build.released.to_string()),
+    }
+}
+
 fn detect_installed_with(
     current: AppId,
     build: &Build,
@@ -201,13 +217,7 @@ fn detect_installed_with(
         .iter()
         .filter_map(|app| {
             if app.id == current {
-                return Some(Member {
-                    app: *app,
-                    version: build.version.to_string(),
-                    commit: build.commit.to_string(),
-                    channel: build.channel.to_string(),
-                    released: Some(build.released.to_string()),
-                });
+                return Some(member_from_build(*app, build));
             }
             let facts = probe(app.binary)?;
             Some(Member {
@@ -237,6 +247,9 @@ pub fn selected_member(members: &[Member], selected: AppId, current: AppId) -> O
 /// The suite's legal line: the apps are GPL-3.0, the shared kits MIT.
 pub const COPYRIGHT: &str = "© 2026 Engin Kirmaci";
 pub const LICENSE: &str = "GPL-3.0";
+/// The `warpui-kit-*` line's version, read from this crate's manifest: the
+/// Legal card names the shared design language, not the selected app.
+pub const KIT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// The build an app was compiled from. Each app fills it from its own
 /// `build.rs` through [`build_info!`]; the kit cannot hold the values because
@@ -332,7 +345,7 @@ impl Link {
             Link::Repository => repository().to_string(),
             Link::Changelog => format!("{}/releases", repository()),
             Link::Issues => format!("{}/issues/new", repository()),
-            Link::License => format!("{}/blob/main/{}", repository(), app.license_path),
+            Link::License => format!("{}/blob/main/LICENSE", app.repo),
         }
     }
 }
@@ -488,11 +501,7 @@ pub fn detail(
                         .flex_wrap()
                         .gap_4()
                         .child(build_card(member).flex_1().min_w(px(shell::scaled(320.))))
-                        .child(
-                            legal_card(member, on_link)
-                                .flex_1()
-                                .min_w(px(shell::scaled(320.))),
-                        ),
+                        .child(legal_card(on_link).flex_1().min_w(px(shell::scaled(320.)))),
                 ),
         );
 
@@ -669,10 +678,7 @@ fn row(member: &Member, selected: AppId, current: AppId, on_pick: PickFn) -> gpu
                         .text_ellipsis()
                         .child(member.app.role),
                 )
-                .when(member.app.id == current, |row| row.child(tag("This app")))
-                .when(member.app.id == AppId::Snapit && !cfg!(windows), |row| {
-                    row.child(tag("Windows only"))
-                }),
+                .when(member.app.id == current, |row| row.child(tag("This app"))),
         )
 }
 
@@ -845,7 +851,7 @@ fn build_card(member: &Member) -> Div {
         )
 }
 
-fn legal_card(member: &Member, on_link: LinkFn) -> Div {
+fn legal_card(on_link: LinkFn) -> Div {
     card().child(card_head("Legal", None)).child(
         div()
             .px_4()
@@ -863,7 +869,7 @@ fn legal_card(member: &Member, on_link: LinkFn) -> Div {
                     .pt_2()
                     .text_size(px(fonts::font_meta()))
                     .text_color(palette::text_muted())
-                    .child(format!("Shared design language {}", member.version))
+                    .child(format!("Shared design language {KIT_VERSION}"))
                     .child(link_row(Link::License, on_link)),
             ),
     )
@@ -1063,5 +1069,20 @@ mod tests {
             members[0].version_line(),
             "Warp Station 0.1.51 (51c13d0) · dev"
         );
+    }
+
+    #[test]
+    fn the_current_member_matches_the_scans_own_row() {
+        let member = current_member(AppId::Agent, &BUILD);
+        assert_eq!(member.app.id, AppId::Agent);
+        assert_eq!(member.version, "0.1.51");
+        assert_eq!(member.commit, "51c13d0");
+        assert_eq!(member.channel, "dev");
+        assert_eq!(member.released.as_deref(), Some("2026-11-16"));
+
+        // the scan builds the running app's row from the same helper, so the
+        // rendered first frame and the probed list cannot drift
+        let scanned = detect_installed_with(AppId::Agent, &BUILD, |_| None);
+        assert_eq!(scanned[0].version_line(), member.version_line());
     }
 }

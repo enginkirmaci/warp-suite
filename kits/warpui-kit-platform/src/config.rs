@@ -199,17 +199,12 @@ where
         }
     }
 
-    /// Serialize writers through `<path>.json.lock` (or `.lock` for a file
-    /// without a `.json` suffix). Shared files use this; per-app files have
-    /// one owner and do not need it.
+    /// Serialize writers through a sidecar lock at `<path>.lock`: the file name
+    /// plus `.lock`, appended rather than replacing the extension, so `a.txt`
+    /// and `a.md` never share a lock. Shared files use this; per-app files
+    /// have one owner and do not need it.
     pub fn with_lock(mut self) -> Self {
         self.lock = true;
-        self
-    }
-
-    /// Override the schema version this store writes and accepts.
-    pub fn with_version(mut self, version: u32) -> Self {
-        self.version = version;
         self
     }
 
@@ -495,7 +490,14 @@ impl<V> FromIterator<(String, V)> for KeyMap<V> {
 /// a filesystem that refuses it still gets the atomic write, matching the
 /// shared `ui.json` writer this replaces.
 fn with_lock<T>(path: &Path, write: impl FnOnce() -> Result<T, Error>) -> Result<T, Error> {
-    let lock_path = path.with_extension("json.lock");
+    let lock_path = match path.file_name() {
+        Some(name) => {
+            let mut name = name.to_os_string();
+            name.push(".lock");
+            path.with_file_name(name)
+        }
+        None => path.with_extension("lock"),
+    };
     let _ = fs::create_dir_all(lock_path.parent().unwrap_or(Path::new(".")));
     let lock = fs::OpenOptions::new()
         .create(true)
@@ -667,6 +669,18 @@ mod tests {
             .unwrap();
         assert!(dir.join("settings.json.lock").is_file());
         assert!(path.is_file());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_lock_name_appends_instead_of_replacing_the_extension() {
+        let dir = scratch("lock-name");
+        Store::<Doc>::new(dir.join("a.txt"))
+            .with_lock()
+            .save(&Doc::default())
+            .unwrap();
+        assert!(dir.join("a.txt.lock").is_file());
+        assert!(!dir.join("a.json.lock").exists());
         let _ = fs::remove_dir_all(&dir);
     }
 

@@ -51,16 +51,6 @@ pub fn render_read_only_document(editor: &Entity<LiveEditorState>, cx: &App) -> 
     render_at(editor, cx, fonts::font_body(), false)
 }
 
-/// [`render_read_only_document`] at another type step (a note preview keeps
-/// the note size).
-pub fn render_read_only_document_at(
-    editor: &Entity<LiveEditorState>,
-    cx: &App,
-    text_size: f32,
-) -> AnyElement {
-    render_at(editor, cx, text_size, false)
-}
-
 /// [`render_read_only_document`] for a document embedded in a bounded card (a
 /// modal): the card is already the reading measure, so the engine's column and
 /// its generous top margin only add blank space around the text.

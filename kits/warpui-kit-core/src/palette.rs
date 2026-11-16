@@ -36,7 +36,7 @@ pub fn rgba_u32(rgb: u32) -> Rgba {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Ramp {
     pub key: &'static str,
-    /// The preset's label for the settings control.
+    /// The palette's label for the settings control.
     pub label: &'static str,
     pub well: Rgba,
     pub chrome: Rgba,
@@ -70,15 +70,14 @@ impl Ramp {
         ]
     }
 
-    /// The accent family as the preset system's [`AccentColors`], so a palette
-    /// and an accent preset drive the same code.
+    /// The accent family as the [`AccentColors`] the theme takes, so a palette
+    /// switch and an explicit accent drive the same code.
     pub fn accent_colors(&self) -> AccentColors {
         AccentColors {
             accent: self.accent,
             text: self.accent_ink,
             dim: self.accent_soft,
             on: self.on_accent,
-            success_dim: self.accent_soft,
         }
     }
 }
@@ -277,8 +276,7 @@ pub fn selection(accent: &AccentColors) -> Rgba {
 
 /// The default accent: copper, for the single filled action. Fills only: text
 /// (the live markdown highlighter, links, active pills) reads [`ACCENT_INK`];
-/// apps with a preset switch pass their [`AccentColors`] to
-/// [`crate::kit::apply_kit_theme`].
+/// the theme takes the live palette's [`AccentColors`].
 pub const ACCENT: Rgba = rgba_hex(0xEE9A5FFF);
 /// Dark ink: text on the copper accent.
 pub const ON_ACCENT: Rgba = rgba_hex(0x24140AFF);
@@ -291,122 +289,28 @@ pub const ACCENT_BORDER: Rgba = rgba_hex(0xF5AC78FF);
 /// A keycap's edge on a filled accent.
 pub const ON_ACCENT_BORDER: Rgba = rgba_hex(0x00000038);
 
-/// One named accent family. The first preset is the default
-/// ([`normalize_accent`] fallback): copper, so a saved "blue" lands on it.
-pub struct AccentPreset {
-    pub key: &'static str,
-    /// rgb hex, one shared by accent + success
-    pub accent: u32,
-    /// rgb hex of the accent as ink (text, links, focus ring): the fill
-    /// itself when it clears AA on the ramp, else a lighter sibling
-    pub text: u32,
-    pub dim: u32,
-    pub on: u32,
-    pub success_dim: u32,
-}
-
-pub const ACCENT_PRESETS: [AccentPreset; 8] = [
-    AccentPreset {
-        key: "copper",
-        accent: 0xEE9A5F,
-        text: 0xF2A877,
-        dim: 0x43301F,
-        on: 0x24140A,
-        success_dim: 0x43301F,
-    },
-    AccentPreset {
-        key: "green",
-        accent: 0x4AC265,
-        text: 0x4AC265,
-        dim: 0x223322,
-        on: 0x0C140C,
-        success_dim: 0x1D3122,
-    },
-    AccentPreset {
-        key: "amber",
-        accent: 0xE8A348,
-        text: 0xE8A348,
-        dim: 0x33270F,
-        on: 0x171006,
-        success_dim: 0x382B12,
-    },
-    AccentPreset {
-        key: "salmon",
-        accent: 0xF47067,
-        text: 0xF68A82,
-        dim: 0x38201D,
-        on: 0x1A0B09,
-        success_dim: 0x3B2523,
-    },
-    AccentPreset {
-        key: "gray",
-        accent: 0xA8A8A8,
-        text: 0xA8A8A8,
-        dim: 0x262626,
-        on: 0x101010,
-        success_dim: 0x2F2F2F,
-    },
-    AccentPreset {
-        key: "silver",
-        accent: 0xC9C9C9,
-        text: 0xC9C9C9,
-        dim: 0x303030,
-        on: 0x141010,
-        success_dim: 0x383838,
-    },
-    AccentPreset {
-        key: "graphite",
-        accent: 0x7A7A7A,
-        text: 0xADADAD,
-        dim: 0x1F1F1F,
-        on: 0x0E0E0E,
-        success_dim: 0x292929,
-    },
-    AccentPreset {
-        key: "charcoal",
-        accent: 0x505050,
-        text: 0xADADAD,
-        dim: 0x1A1A1A,
-        on: 0x0C0C0C,
-        success_dim: 0x232323,
-    },
-];
-
-pub fn normalize_accent(accent: Option<&str>) -> &'static AccentPreset {
-    ACCENT_PRESETS
-        .iter()
-        .find(|p| Some(p.key) == accent)
-        .unwrap_or(&ACCENT_PRESETS[0])
-}
-
-/// The live accent family; swapped by the settings page.
+/// The accent family the theme takes; a palette switch swaps it.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct AccentColors {
     pub accent: Rgba,
     pub text: Rgba,
     pub dim: Rgba,
     pub on: Rgba,
-    pub success_dim: Rgba,
 }
 
 impl AccentColors {
-    pub fn for_preset(preset: &AccentPreset) -> Self {
-        Self {
-            accent: rgba_hex((preset.accent << 8) | 0xFF),
-            text: rgba_hex((preset.text << 8) | 0xFF),
-            dim: rgba_hex((preset.dim << 8) | 0xFF),
-            on: rgba_hex((preset.on << 8) | 0xFF),
-            success_dim: rgba_hex((preset.success_dim << 8) | 0xFF),
-        }
-    }
-
-    /// The default family: the copper preset.
+    /// The default family: copper, the values the published constants carry.
     pub fn default_colors() -> Self {
-        Self::for_preset(&ACCENT_PRESETS[0])
+        Self {
+            accent: ACCENT,
+            text: ACCENT_INK,
+            dim: ACCENT_SOFT,
+            on: ON_ACCENT,
+        }
     }
 }
 
-// ---- fixed semantic colors (never follow the accent preset) ----------------
+// ---- fixed semantic colors (never follow the accent) -----------------------
 // One hue per meaning, the same in every app, always beside an icon or a word.
 // Every hue clears AA up to the overlay step.
 
@@ -735,30 +639,14 @@ mod tests {
     }
 
     #[test]
-    fn every_preset_inks_legibly() {
-        for preset in &ACCENT_PRESETS {
-            let colors = AccentColors::for_preset(preset);
-            assert!(
-                contrast(colors.text, POPUP) >= 4.5,
-                "the {} preset's text is {:.2}:1 on a popup",
-                preset.key,
-                contrast(colors.text, POPUP)
-            );
-        }
-    }
-
-    #[test]
-    fn the_copper_preset_is_the_palette_accent() {
+    fn the_default_accent_colors_are_the_published_copper_constants() {
         let copper = AccentColors::default_colors();
         assert_eq!(copper.accent, ACCENT);
         assert_eq!(copper.text, ACCENT_INK);
         assert_eq!(copper.dim, ACCENT_SOFT);
         assert_eq!(copper.on, ON_ACCENT);
-    }
-
-    #[test]
-    fn a_saved_blue_lands_on_copper() {
-        assert_eq!(normalize_accent(Some("blue")).key, "copper");
+        // the live palette hands the theme the same family
+        assert_eq!(RAMPS[0].accent_colors(), copper);
     }
 
     /// Every palette must clear AA on every surface, and its steps must

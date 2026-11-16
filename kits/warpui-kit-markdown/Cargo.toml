@@ -33,6 +33,8 @@ gpui-kit = { workspace = true }
 
 anyhow = { workspace = true }
 log = "0.4"
+# the parser GPUI's TextView runs, mirrored so the guard below predicts it
+markdown = { workspace = true }
 unicode-segmentation = { workspace = true }
 
 [dev-dependencies]

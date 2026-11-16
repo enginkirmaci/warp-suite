@@ -178,11 +178,12 @@ WAV/OGG outside the app folder, empty = the bundled chime), `window_mode`
 `bounds_full` / `bounds_mini` (null, or `{x, y, w, h}` in window pixels,
 clamped to at least 260×88 and dropped when the box is broken; the mini box
 is also dropped above 720×420, so a compositor-reported tiled size cannot
-become the card's box). Durations are
-whole minutes, 1..=180. The app clamps on load so a hand-edited file never
-produces a zero-length phase or an unusable window. `window_mode` and the
-boxes are UI state kept in the app's own versioned settings; the door and the
-`state.json` snapshot carry none of it.
+become the card's box), `reduce_motion` (false; the ring draws no bloom and no
+pulse, and its words stay). Durations are whole minutes, 1..=1440 (a whole day
+is the ceiling). The app clamps on load so a hand-edited file never produces a
+zero-length phase or an unusable window. `window_mode`, the boxes and
+`reduce_motion` are UI state kept in the app's own versioned settings; the door
+and the `state.json` snapshot carry none of it.
 
 ## warp-pomodoro history
 
@@ -215,7 +216,7 @@ Native SnapIt files are snake_case and versioned like the rest of the suite:
   (`left`/`right`/`middle`/`x_button1`/`x_button2`), `hold_key`
   (`control`/`alt`/`shift`/`win`), `hold_key_behaviour`
   (`hold_to_enable`/`hold_to_disable`), `screens_layouts` (monitor → GUID),
-  `deactivated_screens`, `run_as_admin`, `theme`, …
+  `deactivated_screens`, `theme`, …
 - `excluded_applications.json`: `schema_version`, `applications[]` with
   `keyword`, `match_rule` (`contains`/`exact`/`wildcard`), `mouse`.
 - `layouts/*.json`: `schema_version`, `guid`, `name`, `size`
@@ -241,6 +242,14 @@ The old .NET-shaped `Settings.json`, `ExcludedApplicationSettings.json` and
 PascalCase layouts are importer input. They are read once, rewritten native,
 and the old file is retired. Warp Station's layout preview reads both shapes
 so it works before warp-snapit has run after an upgrade.
+
+warp-snapit's native documents are strict like every other app's
+(`deny_unknown_fields`), so a mistyped key is reported instead of ignored. The
+keys the schema has retired — `Version`, `EnableKeyboard`, `Keyboard`,
+`ShowMainWindow`, `AppTheme`, the five move shortcuts and the two layout
+shortcuts, `IsVersion3000MessageShown`, `CheckForNewVersion`, `RunAsAdmin` and
+`MouseHoverAnimation` — are stripped before the strict parse, so an older or
+.NET-era file still loads and is rewritten without them.
 ## Import rules
 
 - `SettingsService::at`, `AppSettings::load`, `UiState::load`,

@@ -1,6 +1,6 @@
 //! The editor's colors: nothing here is Obsidian's. Text, accent, link,
-//! selection and caret come from the kit theme, which the app maps its accent
-//! preset onto, so a preset swap recolors the editor on the next frame. The
+//! selection and caret come from the kit theme, which the app maps its palette
+//! accent onto, so a palette swap recolors the editor on the next frame. The
 //! fixed roles (faint ink, code wells, callout hues) are family palette tokens.
 
 use super::display::{Ink, Tone};

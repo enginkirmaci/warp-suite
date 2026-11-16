@@ -14,7 +14,7 @@ Two ways in, sharing one parser:
 | `editor` | The live editor: `LiveEditorState` (document, selection, undo, commands, find/replace) and the `LiveEditor` element |
 | `live` | Pure parser: `parse_document` for the line and block model, `parse` for a flat span list, `toggle_task_at` — a deliberately line-based CommonMark subset plus the Obsidian flavor (wikilinks, tags, highlights, callouts, footnotes, frontmatter); splits only at ASCII syntax bytes, so byte ranges never land inside a multi-byte character |
 | `highlighter` | The `InputHighlighter` that maps spans onto editor text styles with caret-line marker fading; install via `live_highlighter_factory(caret)` |
-| `apply` | The toolbar's pure string ops: `markdown_apply` (bold/italic/strike/code/codeblock/link/h1–h3/bullet/task/numbered/quote/hr) and `continue_list` |
+| `apply` | The toolbar's pure string ops: `markdown_apply` (bold/italic/strike/code/codeblock/link/h1–h3/bullet/task/numbered/quote/hr) |
 
 ## The live editor
 
@@ -54,7 +54,7 @@ that hand-off over when a host wants the click first (its own browser, a log,
 an in-app view). `[[wikilinks]]` and relative targets arrive as
 `LiveEditorEvent::OpenNote`, since only the host knows where its notes live.
 
-**Colors.** Nothing is hardcoded to Obsidian. Text, accent, link, selection and caret come from the kit theme, which `warpui_kit_core::apply_kit_theme` fills from the app's accent preset, so a preset swap recolors the editor on the next frame. The fixed roles are palette tokens: `TEXT_FAINT` syntax, `DIFF_BG` code wells, `CHIP` inline code, the semantic hues for callouts.
+**Colors.** Nothing is hardcoded to Obsidian. Text, accent, link, selection and caret come from the kit theme, which `warpui_kit_core::apply_kit_theme` fills from the live palette's accent, so a palette swap recolors the editor on the next frame. The fixed roles are palette tokens: `TEXT_FAINT` syntax, `DIFF_BG` code wells, `CHIP` inline code, the semantic hues for callouts.
 
 **Keys.** The editor's key context is `Input LiveEditor`, so movement, selection and clipboard keys are the kit's own bindings for each platform. The markdown ones (`secondary-b/i/k/l/d`, `secondary-shift-z`) bind themselves once per app in the `LiveEditor` context. Tab indents, Enter continues lists, typing `*`, `(`, `[` and friends auto-pairs or wraps the selection, Ctrl+F finds, Ctrl+H replaces.
 
@@ -81,7 +81,9 @@ state.set_highlighter_factory(live_highlighter_factory(caret), cx);
 // the editor's language must be set to LIVE_LANGUAGE for the factory to engage
 ```
 
-Task boxes render live; clicks toggle through `toggle_task_at(&text, byte)`.
+Task boxes render live; a click reaches `LiveEditorState::toggle_box`, which
+toggles through `toggle_task_at(&text, byte)` and applies the result as one
+undoable edit.
 
 ## License
 

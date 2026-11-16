@@ -624,26 +624,35 @@ fn replace_opens_on_its_shortcut(tcx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn colors_follow_the_apps_accent_preset(tcx: &mut TestAppContext) {
+fn colors_follow_the_apps_palette_accent(tcx: &mut TestAppContext) {
     tcx.update(gpui_kit::init);
     let tokens = warpui_kit_core::font_tokens(None, 1.);
-    let apply = |preset: &str, cx: &mut gpui::App| {
-        let accent = palette::AccentColors::for_preset(palette::normalize_accent(Some(preset)));
+    let apply = |ramp: &palette::Ramp, cx: &mut gpui::App| {
+        let accent = ramp.accent_colors();
         warpui_kit_core::apply_kit_theme(accent, &tokens, palette::surface(), cx);
         accent
     };
-    for preset in ["blue", "green", "amber", "salmon", "gray"] {
+    for ramp in &palette::RAMPS {
         tcx.update(|cx| {
-            let accent = apply(preset, cx);
+            let accent = apply(ramp, cx);
             let colors = LiveColors::from_theme(cx);
             let want: gpui::Hsla = accent.accent.into();
-            assert_eq!(colors.accent, want, "{preset}: bars and checkboxes");
-            assert_eq!(colors.link, accent.text.into(), "{preset}: links");
-            assert_eq!(colors.on_accent, accent.on.into(), "{preset}: checkmarks");
+            assert_eq!(colors.accent, want, "{}: bars and checkboxes", ramp.key);
+            assert_eq!(colors.link, accent.text.into(), "{}: links", ramp.key);
+            assert_eq!(
+                colors.on_accent,
+                accent.on.into(),
+                "{}: checkmarks",
+                ramp.key
+            );
             let selection: gpui::Hsla = palette::selection(&accent).into();
-            assert_eq!(colors.selection, selection, "{preset}: selection");
-            assert_eq!(colors.tag_wash.h, want.h, "{preset}: tags wash the accent");
-            // what never follows a preset comes from the family palette
+            assert_eq!(colors.selection, selection, "{}: selection", ramp.key);
+            assert_eq!(
+                colors.tag_wash.h, want.h,
+                "{}: tags wash the accent",
+                ramp.key
+            );
+            // what never follows the accent comes from the family palette
             assert_eq!(colors.faint, palette::text_muted().into());
             assert_eq!(colors.code_well, palette::well().into());
             assert_eq!(colors.text, palette::text().into());

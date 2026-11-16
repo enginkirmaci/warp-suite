@@ -1750,13 +1750,33 @@ fn parse_inlines(s: &str, offset: usize, base: MarkdownLiveKind, out: &mut LineO
         gaps.push(cursor..s.len());
     }
     let pairs = resolve_emphasis(s, &gaps);
+    // Index the accepted forest once. Rescanning every pair per nesting level
+    // made a line with many pairs cost O(pairs²) per level, on the path the
+    // editor runs per keystroke.
+    let mut children: Vec<Vec<usize>> = vec![Vec::new(); pairs.len() + 1];
+    let root = pairs.len();
+    let mut stack: Vec<usize> = Vec::new();
+    for (index, pair) in pairs.iter().enumerate() {
+        while let Some(&parent) = stack.last() {
+            if pair.open.start >= pairs[parent].close.end {
+                stack.pop();
+            } else {
+                break;
+            }
+        }
+        children[stack.last().copied().unwrap_or(root)].push(index);
+        stack.push(index);
+    }
     let mut runs: Vec<Inline> = Vec::new();
     flatten_pairs(
         &pairs,
+        &children,
+        root,
         0..s.len(),
         base,
         base.emphasis_flags(),
         &gaps,
+        0,
         &mut runs,
     );
 
@@ -2141,36 +2161,32 @@ fn right_flanking(prev: Option<char>, next: Option<char>) -> bool {
             || next.is_none_or(|n| n.is_whitespace() || n.is_ascii_punctuation()))
 }
 
-/// Emit the runs of an emphasis forest: segments between nested pairs take
-/// their enclosing pairs' emphasis; markers take Marker, owned by their pair.
-/// Segments only ever cover the non-atomic gaps, so atomic spans (code/links)
-/// stay intact.
+/// Nesting levels [`flatten_pairs`] descends before it draws the rest of the
+/// region as plain runs. Real documents nest a handful of levels; a hostile
+/// line can carry thousands, and the per-keystroke parse path must not exhaust
+/// the stack on one.
+const MAX_EMPHASIS_DEPTH: usize = 64;
+
+/// Emit the runs of the emphasis forest below `parent`: segments between
+/// nested pairs take their enclosing pairs' emphasis; markers take Marker,
+/// owned by their pair. Segments only ever cover the non-atomic gaps, so
+/// atomic spans (code/links) stay intact. Past [`MAX_EMPHASIS_DEPTH`] the
+/// region is emitted as plain runs instead of descending further.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the walk carries the indexed forest, the region it is emitting and the runs sink"
+)]
 fn flatten_pairs(
     pairs: &[EmphPair],
+    children: &[Vec<usize>],
+    parent: usize,
     region: Range<usize>,
     base: MarkdownLiveKind,
     flags: InlineEmphasis,
     gaps: &[Range<usize>],
+    depth: usize,
     runs: &mut Vec<Inline>,
 ) {
-    // children of this region: pairs inside it that are not contained in
-    // another pair inside it (their own recursion handles the nested ones)
-    let in_region = |p: &EmphPair| p.open.start >= region.start && p.close.end <= region.end;
-    let mut children: Vec<&EmphPair> = pairs
-        .iter()
-        .filter(|p| {
-            in_region(p)
-                && !pairs.iter().any(|q| {
-                    q != *p
-                        && in_region(q)
-                        && q.content.start <= p.content.start
-                        && p.content.end <= q.content.end
-                })
-        })
-        .collect();
-    children.sort_by_key(|p| p.open.start);
-
-    let mut cursor = region.start;
     let segment = |start: usize, end: usize, runs: &mut Vec<Inline>| {
         for gap in gaps {
             let from = gap.start.max(start);
@@ -2185,7 +2201,13 @@ fn flatten_pairs(
             }
         }
     };
-    for pair in children {
+    if depth >= MAX_EMPHASIS_DEPTH {
+        segment(region.start, region.end, runs);
+        return;
+    }
+    let mut cursor = region.start;
+    for &child in &children[parent] {
+        let pair = &pairs[child];
         segment(cursor, pair.open.start, runs);
         let owner = pair.owner.clone();
         runs.push(Inline {
@@ -2197,10 +2219,13 @@ fn flatten_pairs(
         let nested = flags.merge(pair.flags);
         flatten_pairs(
             pairs,
+            children,
+            child,
             pair.content.clone(),
             MarkdownLiveKind::emphasis(nested),
             nested,
             gaps,
+            depth + 1,
             runs,
         );
         runs.push(Inline {
@@ -2315,6 +2340,15 @@ mod tests {
         let text = "*one\ntwo*";
         assert_eq!(kind_at(text, 1), MarkdownLiveKind::Plain);
         assert_eq!(kind_at(text, 5), MarkdownLiveKind::Plain);
+    }
+
+    #[test]
+    fn a_pathologically_nested_line_parses_without_deepening_the_stack() {
+        // a run of 2 000 openers and closers nests a thousand emphasis pairs;
+        // the walk stops descending at the cap and draws the rest as plain
+        // runs instead of recursing once per level
+        let text = format!("{}deep{}", "*".repeat(2_000), "*".repeat(2_000));
+        assert_covered(&text);
     }
 
     #[test]

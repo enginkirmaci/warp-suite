@@ -71,7 +71,7 @@ pub use document::{
     DiffDocument, DiffFile, DiffHunk, DiffRow, HunkText, RowKind, SplitRow, lang_from_path,
     patch_from_hunks,
 };
-pub use highlight::{CodeBlockHighlighter, highlight_buffer, shared_highlighter};
+pub use highlight::highlight_buffer;
 use selectable::SelectableText;
 
 use std::cell::RefCell;
@@ -214,9 +214,10 @@ pub fn render_diff_with_scroll(
     )
 }
 
-/// Draw an already parsed patch. The app can keep the document alongside its
-/// view state and re-render without reparsing.
-pub fn render_document(
+/// Draw an already parsed patch. [`render_diff_with`] and
+/// [`render_diff_with_scroll`] parse and cache the text first, so a re-render of
+/// an unchanged patch reaches this without reparsing.
+fn render_document(
     doc: &DiffDocument,
     path_hint: Option<&str>,
     options: DiffOptions,
@@ -228,7 +229,6 @@ pub fn render_document(
     if doc.files.is_empty() {
         return div().into_any_element();
     }
-    let language = doc.language(path_hint);
     let hl_theme = gpui_kit::component::Theme::global(cx)
         .highlight_theme
         .clone();
@@ -265,7 +265,7 @@ pub fn render_document(
         if options.wrap {
             return render_split_wrapped(
                 file,
-                language,
+                path_hint,
                 &hl_theme,
                 paint_style,
                 number_style,
@@ -275,8 +275,8 @@ pub fn render_document(
             );
         }
         return render_split(
-            doc,
-            language,
+            file,
+            path_hint,
             &hl_theme,
             paint_style,
             number_style,
@@ -289,7 +289,7 @@ pub fn render_document(
     if options.wrap {
         return render_unified_wrapped(
             doc,
-            language,
+            path_hint,
             &hl_theme,
             paint_style,
             number_style,
@@ -299,7 +299,7 @@ pub fn render_document(
     }
     render_unified(
         doc,
-        language,
+        path_hint,
         &hl_theme,
         paint_style,
         number_style,
@@ -317,7 +317,7 @@ pub fn render_document(
 )]
 fn render_unified(
     doc: &DiffDocument,
-    language: Option<&'static str>,
+    path_hint: Option<&str>,
     hl_theme: &Arc<gpui_kit::component::highlighter::HighlightTheme>,
     paint_style: TextStyle,
     number_style: HighlightStyle,
@@ -331,7 +331,7 @@ fn render_unified(
         number_style,
         gutter_width,
     };
-    let lines = unified_lines(doc, language, hl_theme);
+    let lines = unified_lines(doc, path_hint, hl_theme);
     if lines.is_empty() {
         return div().into_any_element();
     }
@@ -365,8 +365,8 @@ fn render_unified(
     reason = "the render call carries the theme, paint and scroll inputs"
 )]
 fn render_split(
-    doc: &DiffDocument,
-    language: Option<&'static str>,
+    file: &DiffFile,
+    path_hint: Option<&str>,
     hl_theme: &Arc<gpui_kit::component::highlighter::HighlightTheme>,
     paint_style: TextStyle,
     number_style: HighlightStyle,
@@ -375,13 +375,13 @@ fn render_split(
     scroll: Option<&DiffScrollHandles>,
     fill_hatch: Background,
 ) -> AnyElement {
-    let gutter_width = split_gutter_width(&doc.files[0]);
+    let gutter_width = split_gutter_width(file);
     let paint = RowPaint {
         style: paint_style,
         number_style,
         gutter_width,
     };
-    let (left, right) = split_lines(&doc.files[0], language, hl_theme);
+    let (left, right) = split_lines(file, path_hint, hl_theme);
     if left.is_empty() {
         return div().into_any_element();
     }
@@ -429,11 +429,20 @@ fn render_split(
     }
 }
 
+/// The language a file's rows are highlighted with: its own path first, the
+/// caller's hint only as the fallback. A multi-file patch can mix languages, so
+/// the grammar is resolved per file inside the render loop.
+fn file_language(file: &DiffFile, path_hint: Option<&str>) -> Option<&'static str> {
+    file.path()
+        .and_then(lang_from_path)
+        .or_else(|| path_hint.and_then(lang_from_path))
+}
+
 /// The unified body's lines: file headers only for a multi-file patch, then
 /// one line per code row. Metadata and hunk headers take no rows.
 fn unified_lines(
     doc: &DiffDocument,
-    language: Option<&'static str>,
+    path_hint: Option<&str>,
     hl_theme: &Arc<gpui_kit::component::highlighter::HighlightTheme>,
 ) -> Vec<Line> {
     let mut lines = Vec::new();
@@ -449,6 +458,7 @@ fn unified_lines(
             lines.push(Line::state("No textual changes"));
             continue;
         }
+        let language = file_language(file, path_hint);
         for hunk in &file.hunks {
             let tokens = highlight_hunk(hunk, language, hl_theme);
             for (index, row) in hunk.rows.iter().enumerate() {
@@ -469,11 +479,12 @@ fn unified_lines(
 /// The paired columns of one file's split body.
 fn split_lines(
     file: &DiffFile,
-    language: Option<&'static str>,
+    path_hint: Option<&str>,
     hl_theme: &Arc<gpui_kit::component::highlighter::HighlightTheme>,
 ) -> (Vec<Line>, Vec<Line>) {
     let mut left = Vec::new();
     let mut right = Vec::new();
+    let language = file_language(file, path_hint);
     for hunk in &file.hunks {
         let tokens = highlight_hunk(hunk, language, hl_theme);
         for pair in hunk.split_rows() {
@@ -518,14 +529,14 @@ fn split_gutter_width(file: &DiffFile) -> usize {
 /// wraps at the code column; the gutter number stays on its first visual line.
 fn render_unified_wrapped(
     doc: &DiffDocument,
-    language: Option<&'static str>,
+    path_hint: Option<&str>,
     hl_theme: &Arc<gpui_kit::component::highlighter::HighlightTheme>,
     paint_style: TextStyle,
     number_style: HighlightStyle,
     font_detail: f32,
     scroll: Option<&DiffScrollHandles>,
 ) -> AnyElement {
-    let lines = unified_lines(doc, language, hl_theme);
+    let lines = unified_lines(doc, path_hint, hl_theme);
     if lines.is_empty() {
         return div().into_any_element();
     }
@@ -557,7 +568,7 @@ fn render_unified_wrapped(
 )]
 fn render_split_wrapped(
     file: &DiffFile,
-    language: Option<&'static str>,
+    path_hint: Option<&str>,
     hl_theme: &Arc<gpui_kit::component::highlighter::HighlightTheme>,
     paint_style: TextStyle,
     number_style: HighlightStyle,
@@ -565,7 +576,7 @@ fn render_split_wrapped(
     scroll: Option<&DiffScrollHandles>,
     fill_hatch: Background,
 ) -> AnyElement {
-    let (left, right) = split_lines(file, language, hl_theme);
+    let (left, right) = split_lines(file, path_hint, hl_theme);
     if left.is_empty() {
         return div().into_any_element();
     }
@@ -1687,9 +1698,10 @@ fn line_tokens(
     out
 }
 
-/// Lifts `   12\t`-style prefixes into (base number, stripped lines). Needs a
-/// tab separator and digits-only prefixes on most non-empty lines, so prose
-/// or tab-separated data never trips it.
+/// Lifts `   12\t`-style prefixes into (base number, stripped lines). The
+/// number column must be space-padded, as opencode's read tool writes it: an
+/// unpadded numeric first column is exactly what tab-separated data looks
+/// like, so lifting it would eat the table's first column.
 fn strip_line_numbers<'a>(lines: &[&'a str]) -> Option<(usize, Vec<&'a str>)> {
     let mut base: Option<usize> = None;
     let mut stripped = Vec::with_capacity(lines.len());
@@ -1702,6 +1714,9 @@ fn strip_line_numbers<'a>(lines: &[&'a str]) -> Option<(usize, Vec<&'a str>)> {
         }
         total += 1;
         let (prefix, rest) = line.split_once('\t')?;
+        if !prefix.starts_with(' ') {
+            return None;
+        }
         let prefix = prefix.trim();
         if prefix.is_empty() || !prefix.bytes().all(|b| b.is_ascii_digit()) {
             return None;
@@ -1767,6 +1782,33 @@ mod tests {
         // prose with a stray tab stays untouched
         assert_eq!(strip_line_numbers(&["col1\tcol2", "col3\tcol4"]), None);
         assert_eq!(strip_line_numbers(&["just one line\t1"]), None);
+    }
+
+    #[test]
+    fn tab_separated_data_keeps_its_first_column() {
+        // a table whose first column happens to be numeric is data, not a
+        // gutter: the number column is not padded
+        assert_eq!(strip_line_numbers(&["1\ta", "2\tb"]), None);
+        assert_eq!(
+            strip_line_numbers(&["   1\ta", "   2\tb"]),
+            Some((1, vec!["a", "b"]))
+        );
+    }
+
+    #[test]
+    fn each_file_in_a_multi_file_patch_keeps_its_own_language() {
+        let doc = DiffDocument::parse(
+            "--- a/src/lib.rs\n+++ b/src/lib.rs\n@@ -1 +1 @@\n-a\n+b\n\
+             --- a/tool.py\n+++ b/tool.py\n@@ -1 +1 @@\n-a\n+b\n",
+        );
+        assert_eq!(doc.files.len(), 2);
+        assert_eq!(file_language(&doc.files[0], None), Some("rust"));
+        assert_eq!(file_language(&doc.files[1], None), Some("python"));
+        // the document-level answer is the first file's, which is what
+        // coloured both of them before the loop resolved the grammar per file
+        assert_eq!(doc.language(None), Some("rust"));
+        // the hint fills in only for a file whose own path names no grammar
+        assert_eq!(file_language(&doc.files[1], Some("x.rs")), Some("python"));
     }
 
     #[test]

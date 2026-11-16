@@ -14,7 +14,7 @@ pub fn mime_for_path(name: &str) -> &'static str {
         "gif" => "image/gif",
         "webp" => "image/webp",
         "bmp" => "image/bmp",
-        "pdf" => "image/pdf",
+        "pdf" => "application/pdf",
         _ => "text/plain",
     }
 }

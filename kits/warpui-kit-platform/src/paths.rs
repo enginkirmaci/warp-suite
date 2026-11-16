@@ -10,6 +10,7 @@
 //! ├── station/     warp-station: settings, repo and model caches, prompts
 //! ├── agent/       warp-agent: settings, chat state, the door endpoint
 //! ├── notes/       warp-notes: its own settings
+//! ├── pomodoro/    warp-pomodoro: its settings, history and live snapshot
 //! └── snapit/      the SnapIt settings and layouts Warp Station reads
 //! ~/notes/         the notes store, one folder per repository
 //! ```
@@ -174,8 +175,10 @@ fn adopt_log_files(legacy: &Path, target: &Path) {
 /// flat `.md` notes at its root move over, and the app's own entries
 /// (`settings.json`, `ui.json`, `logs/`, anything dot-prefixed) stay where
 /// they are. A name collision keeps both sides and the legacy folder — user
-/// content is never overwritten or deleted. Returns whether the legacy folder
-/// is fully retired (false keeps it for the next pass).
+/// content is never overwritten or deleted. Returns whether the note content
+/// fully moved: `settings.json`, `ui.json` and `logs/` are deliberately left
+/// behind, so a clean pass still leaves the legacy folder in place; false
+/// means a collision kept both sides for the next pass.
 pub fn adopt_notes_store(legacy: &Path) -> bool {
     adopt_notes_at(legacy, &notes_store_root())
 }
