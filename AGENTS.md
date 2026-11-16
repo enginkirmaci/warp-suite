@@ -459,6 +459,23 @@ suite pin table and each app's CI carry the pair.
   auth there and must not be logged, committed or shared. Add Cloudflare
   Access/WAF before exposing it further.
 
+## Agent skills
+
+### Issue tracker
+
+Issues, tickets and specs live as local markdown under `.scratch/<feature>/`. See
+`docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The five canonical triage roles keep their own names, recorded as a `Status:`
+line in the ticket file. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: `GLOSSARY.md` and `docs/adr/` at the repo root. See
+`docs/agents/domain.md`.
+
 ## Docs map
 
 - [`README.md`](README.md) — the suite, build/deploy, cross-app contracts.
