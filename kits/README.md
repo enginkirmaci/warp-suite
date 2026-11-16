@@ -12,7 +12,7 @@ suite workspace (root `Cargo.toml`), not a workspace of their own; there is no
 | `warpui-kit-markdown` | the live markdown editor, span parser, highlighter, formatting ops, and the read-only document viewer (`read_only_document`) |
 | `warpui-kit-picker` | `FilteredPicker`: trigger, filter input, virtualized rows, overlay popups |
 | `warpui-kit-platform` | the gpui-free plumbing every app had re-grown: atomic file replace, file logging, the sibling-app launcher; the rust-embed-over-gpui-kit asset source rides behind the `assets` feature |
-| `warpui-kit-build` | build-script only (`[build-dependencies]`, never linked): reads `version.toml` and the `WARP_SUITE_*` env, stamps the About facts and the Windows resource block (file version, strings, icon); see `docs/agents/versioning.md` |
+| `warpui-kit-build` | build-script only (`[build-dependencies]`, never linked): reads the `WARP_SUITE_*` env, stamps the About facts and the Windows resource block (file version, strings, icon); see `docs/agents/versioning.md` |
 
 `render_diff_with_scroll` is the full-pane diff: pass a `DiffScrollHandles`
 and the kit owns the vertical viewport, the per-column horizontal viewports

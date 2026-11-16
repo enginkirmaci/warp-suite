@@ -612,21 +612,21 @@ all three draw the same screen from `warpui_kit_core::about`:
   and the Pomodoro timer — and the row for the app you are in carries a
   `This app` tag;
 - the detail is a hero (mark, channel tag, tagline, Repository / Changelog /
-  Report an issue), a **Build** card (version, build, commit, channel, released,
+  Report an issue), a **Build** card (version, commit, channel, released,
   runtime) and a **Legal** card (GPL-3.0, copyright, `View license`);
 - the detail owns one filled primary: `Release notes` on the current app,
   `Open <app>` on a sibling, and `Open controls` (Station) or `Open Station`
   (a sibling) for SnapIt. On Linux SnapIt's row says `Windows only` and has
   no primary;
-- `Copy version` writes `Warp Station 0.1.8 (build 42 · d904edc) · dev` — one line, the
+- `Copy version` writes `Warp Station 0.1.8 (d904edc) · dev` — one line, the
   format support asks for.
 
 The marks are monochrome `currentColor` SVGs in
 `kits/warpui-kit-core/assets/marks/`, so the accent tints them and they follow
 a palette switch like everything else. Build facts come from each app's
-`build.rs` calling `kits/warpui-kit-build`, which reads the exported
-`WARP_SUITE_*` variables or `version.toml`; `docs/agents/versioning.md` owns
-the rules.
+`build.rs` calling `kits/warpui-kit-build`, which stamps the package version
+and the exported `WARP_SUITE_*` variables; `docs/agents/versioning.md` owns the
+rules.
 it and reports `dev` rather than pretending to be a release. `View license`
 opens the app's own GPL text in a modal, embedded at build time and rendered
 through `warpui_kit_markdown`'s read-only document viewer — the GPL reads as

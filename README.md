@@ -219,14 +219,13 @@ together. When one changes, update the other side in the **same** commit.
   and has Local/Remote modes. The APK is sideloaded; the bridge is a systemd
   user service installed from `warp-android-scribe/deploy/`.
 
-- **Version and build facts**: each repository owns its `version.toml`. The
-  kit line moves PATCH on every warp-suite commit through its pre-commit hook;
-  each app line does the same in its own repository. Build counters move on
-  every build-script run in that repository, and `kits/warpui-kit-build`
-  stamps the app's own facts into each binary (About, `--version`, the Windows
-  file version, the bridge's `/health`). The APK reads its repository's file.
-  One `Copy version` line
-  (`Warp Station 0.1.8 (build 42 · d904edc) · dev`) is the family contract;
+- **Version facts**: each repository owns its `version.toml`. The kit line
+  moves PATCH on every warp-suite commit through its pre-commit hook; each app
+  line does the same in its own repository. `kits/warpui-kit-build` stamps the
+  app's version, commit, channel and released facts into each binary (About,
+  `--version`, the Windows file version, the bridge's `/health`). The APK reads
+  its repository's file. One `Copy version` line
+  (`Warp Station 0.1.8 (d904edc) · dev`) is the family contract;
   `docs/agents/versioning.md` is the rulebook.
 
 ## Adding an app

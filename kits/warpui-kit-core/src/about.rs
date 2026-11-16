@@ -155,7 +155,6 @@ pub const LICENSE: &str = "GPL-3.0";
 #[derive(Clone, Copy, Debug)]
 pub struct Build {
     pub version: &'static str,
-    pub build: &'static str,
     pub commit: &'static str,
     pub channel: &'static str,
     pub released: &'static str,
@@ -173,24 +172,23 @@ impl Build {
     }
 
     /// The clipboard contract, one line:
-    /// `Warp Station 0.1.0 (build 42 · 1b7d006) · dev`.
+    /// `Warp Station 0.1.0 (1b7d006) · dev`.
     pub fn version_line(&self, app: &SuiteApp) -> String {
         format!(
-            "{} {} (build {} · {}) · {}",
-            app.name, self.version, self.build, self.commit, self.channel
+            "{} {} ({}) · {}",
+            app.name, self.version, self.commit, self.channel
         )
     }
 }
 
 /// The build facts, read where they were stamped: **in the app crate**. Every
-/// suite `build.rs` sets these four, with `dev`/`unknown` fallbacks, so a plain
+/// suite `build.rs` sets these, with `dev`/`unknown` fallbacks, so a plain
 /// `cargo run` still compiles and says it is not a release.
 #[macro_export]
 macro_rules! build_info {
     () => {
         $crate::about::Build {
             version: env!("CARGO_PKG_VERSION"),
-            build: env!("WARP_SUITE_BUILD"),
             commit: env!("WARP_SUITE_COMMIT"),
             channel: env!("WARP_SUITE_CHANNEL"),
             released: env!("WARP_SUITE_RELEASED"),
@@ -755,7 +753,6 @@ fn build_card(member: &SuiteApp, build: &Build) -> Div {
                 .pt_2()
                 .pb_3()
                 .child(kv("Version", build.version.to_string()))
-                .child(kv("Build", build.build.to_string()))
                 .child(kv("Commit", build.commit.to_string()))
                 .child(kv("Channel", build.channel.to_string()))
                 .child(kv("Released", build.released.to_string()))
@@ -782,7 +779,6 @@ fn legal_card(build: &Build, on_link: LinkFn) -> Div {
                     .text_size(px(fonts::font_meta()))
                     .text_color(palette::text_muted())
                     .child(format!("Shared design language {}", build.version))
-                    .child(format!("Build {}", build.build))
                     .child(link_row(Link::License, on_link)),
             ),
     )

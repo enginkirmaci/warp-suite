@@ -7,7 +7,6 @@ use warpui_kit_core::about::{self, AppId, Build, Link};
 
 const BUILD: Build = Build {
     version: "0.1.0",
-    build: "42",
     commit: "1b7d006",
     channel: "dev",
     released: "2026-11-10",
@@ -57,7 +56,7 @@ fn the_clipboard_line_is_one_line() {
     let station = about::app(AppId::Station);
     assert_eq!(
         BUILD.version_line(station),
-        "Warp Station 0.1.0 (build 42 · 1b7d006) · dev"
+        "Warp Station 0.1.0 (1b7d006) · dev"
     );
     assert_eq!(BUILD.suite_line(), "Warp Suite 0.1.0 · dev · 5 apps");
 }

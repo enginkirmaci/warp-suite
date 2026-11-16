@@ -42,8 +42,8 @@ for a in ${selected[@]+"${selected[@]}"}; do
     printf '%s\n' "$known" | grep -qx "$a" || { echo "apps.toml has no [apps.$a]" >&2; exit 1; }
 done
 
-# The suite version, build counter, commit and channel. version.toml is the
-# source; a plain `cargo build` reads it through kits/warpui-kit-build too.
+# The suite version, commit and channel. version.toml is the source; the
+# pre-commit hook keeps Cargo.toml's package version in step with it.
 facts="$(python3 "$here/../meta/version.py" show --json)"
 version="$(json_get "$facts" version)"
 if [ -n "$version_arg" ] && [ "$version_arg" != "$version" ]; then
@@ -51,17 +51,11 @@ if [ -n "$version_arg" ] && [ "$version_arg" != "$version" ]; then
     exit 1
 fi
 
-# Every build script run consumes one build number. A CI job passes
-# WARP_SUITE_BUILD so the Linux and Windows artifacts of one tag agree.
-if [ -z "${WARP_SUITE_BUILD:-}" ]; then
-    WARP_SUITE_BUILD="$(python3 "$here/../meta/version.py" build bump)"
-fi
-facts="$(python3 "$here/../meta/version.py" show --json)"
 WARP_SUITE_VERSION="$version"
 WARP_SUITE_COMMIT="$(json_get "$facts" commit)"
 WARP_SUITE_CHANNEL="$(json_get "$facts" channel)"
 WARP_SUITE_RELEASED="$(json_get "$facts" released)"
-export WARP_SUITE_VERSION WARP_SUITE_BUILD WARP_SUITE_COMMIT WARP_SUITE_CHANNEL WARP_SUITE_RELEASED
+export WARP_SUITE_VERSION WARP_SUITE_COMMIT WARP_SUITE_CHANNEL WARP_SUITE_RELEASED
 
 if ! pkg-config --exists wayland-client xkbcommon 2>/dev/null; then
     echo "warning: wayland-client/xkbcommon dev packages missing - the build will likely fail" >&2
@@ -83,13 +77,12 @@ if git -C "$root" rev-parse HEAD >/dev/null 2>&1; then
     suite_sha="$(git -C "$root" rev-parse HEAD)"
     # the whole tree, not just apps/ and kits/: the deliverable also depends
     # on scripts/, apps.toml, Cargo.toml and Cargo.lock
-    # version.toml carries the uncommitted build counter by design: ignore it
-    dirty="$(git -C "$root" status --porcelain 2>/dev/null | grep -v ' version.toml$' || true)"
+    dirty="$(git -C "$root" status --porcelain 2>/dev/null || true)"
     [ -z "$dirty" ] || suite_sha="$suite_sha-dirty"
 fi
 
-printf 'suite %s build %s commit %s channel %s released %s\n' \
-    "$WARP_SUITE_VERSION" "$WARP_SUITE_BUILD" "$WARP_SUITE_COMMIT" \
+printf 'suite %s commit %s channel %s released %s\n' \
+    "$WARP_SUITE_VERSION" "$WARP_SUITE_COMMIT" \
     "$WARP_SUITE_CHANNEL" "${WARP_SUITE_RELEASED:-not released}" \
     > "$bundle/REVISIONS.txt"
 built=0

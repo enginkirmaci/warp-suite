@@ -1,17 +1,14 @@
 //! Build-script facts shared by every suite binary.
 //!
-//! `scripts/build/build.sh` and `scripts/build/build.ps1` export `WARP_SUITE_*`; a plain
-//! `cargo build` has none, so this reads `version.toml` at the repository root
-//! for the build counter and reports `dev` / `unknown` for what only a release
-//! build can know. The version itself is the package version: the pre-commit
-//! hook keeps `Cargo.toml` in step with `version.toml`, so `CARGO_PKG_VERSION`
-//! is the suite version.
+//! `scripts/build/build.sh` and `scripts/build/build.ps1` export `WARP_SUITE_*`;
+//! a plain `cargo build` has none, so this reports `dev` / `unknown` for what
+//! only a release build can know. The version itself is the package version:
+//! the pre-commit hook keeps `Cargo.toml` in step with `version.toml`, so
+//! `CARGO_PKG_VERSION` is the suite version.
 //!
 //! On Windows it also stamps the resource block: `FILEVERSION`/`PRODUCTVERSION`
-//! as `MAJOR.MINOR.PATCH.BUILD`, the product strings and the app icon. Explorer,
+//! as `MAJOR.MINOR.PATCH.0`, the product strings and the app icon. Explorer,
 //! shortcuts and installers then read the same facts the About screen shows.
-
-use std::path::{Path, PathBuf};
 
 /// The Legal card's copyright line. `warpui-kit-core` asserts this equals
 /// `about::COPYRIGHT`, so the Windows resource and the About screen cannot
@@ -52,7 +49,6 @@ impl AppInfo {
 }
 
 struct Facts {
-    build: String,
     commit: String,
     channel: String,
     released: String,
@@ -60,23 +56,10 @@ struct Facts {
 
 impl Facts {
     fn read() -> Self {
-        let source = version_file();
-        let build = env("WARP_SUITE_BUILD")
-            .or_else(|| {
-                source
-                    .as_deref()
-                    .and_then(read_build)
-                    .map(|b| b.to_string())
-            })
-            .unwrap_or_else(|| "0".to_string());
         let commit = env("WARP_SUITE_COMMIT").unwrap_or_else(|| "unknown".to_string());
         let channel = env("WARP_SUITE_CHANNEL").unwrap_or_else(|| "dev".to_string());
         let released = env("WARP_SUITE_RELEASED").unwrap_or_else(|| "not released".to_string());
-        if let Some(path) = &source {
-            println!("cargo:rerun-if-changed={}", path.display());
-        }
         Self {
-            build,
             commit,
             channel,
             released,
@@ -89,70 +72,35 @@ fn env(key: &str) -> Option<String> {
     std::env::var(key).ok().filter(|value| !value.is_empty())
 }
 
-/// The nearest `version.toml` above the crate being built. The apps sit two to
-/// four directories down; the walk stops before it could leave the checkout.
-fn version_file() -> Option<PathBuf> {
-    let mut dir = PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR")?);
-    for _ in 0..8 {
-        let candidate = dir.join("version.toml");
-        if candidate.is_file() {
-            return Some(candidate);
-        }
-        dir = dir.parent()?.to_path_buf();
-    }
-    None
-}
-
-fn read_build(path: &Path) -> Option<u64> {
-    let text = std::fs::read_to_string(path).ok()?;
-    for line in text.lines() {
-        let line = line.trim();
-        if line.starts_with('#') {
-            continue;
-        }
-        if let Some((key, value)) = line.split_once('=')
-            && key.trim() == "build"
-        {
-            return value.trim().parse().ok();
-        }
-    }
-    None
-}
-
 /// Emit the `WARP_SUITE_*` environment for the binary being built.
 ///
 /// Call this from a `build.rs`; it prints the `cargo:` directives itself.
 pub fn emit(app: AppInfo) {
     let facts = Facts::read();
-    println!("cargo:rustc-env=WARP_SUITE_BUILD={}", facts.build);
     println!("cargo:rustc-env=WARP_SUITE_COMMIT={}", facts.commit);
     println!("cargo:rustc-env=WARP_SUITE_CHANNEL={}", facts.channel);
     println!("cargo:rustc-env=WARP_SUITE_RELEASED={}", facts.released);
 
     #[cfg(windows)]
-    windows_resources(&app, &facts);
+    windows_resources(&app);
     #[cfg(not(windows))]
     let _ = app;
 }
 
 #[cfg(windows)]
-fn windows_resources(app: &AppInfo, facts: &Facts) {
+fn windows_resources(app: &AppInfo) {
     let version = env!("CARGO_PKG_VERSION");
     let mut parts = version.split('.').map(|part| part.parse::<u64>());
     let major = parts.next().and_then(Result::ok).unwrap_or(0);
     let minor = parts.next().and_then(Result::ok).unwrap_or(0);
     let patch = parts.next().and_then(Result::ok).unwrap_or(0);
-    let build = facts
-        .build
-        .parse::<u64>()
-        .unwrap_or_else(|_| panic!("WARP_SUITE_BUILD {:?} is not a number", facts.build));
-    if [major, minor, patch, build]
+    if [major, minor, patch]
         .into_iter()
         .any(|field| field > 0xffff)
     {
-        panic!("Windows FILEVERSION fields are 16 bit: {version} build {build}");
+        panic!("Windows FILEVERSION fields are 16 bit: {version}");
     }
-    let packed = (major << 48) | (minor << 32) | (patch << 16) | build;
+    let packed = (major << 48) | (minor << 32) | (patch << 16);
 
     let mut resource = winresource::WindowsResource::new();
     if let Some(icon) = app.icon {
@@ -168,8 +116,8 @@ fn windows_resources(app: &AppInfo, facts: &Facts) {
     resource.set("CompanyName", COMPANY);
     resource.set("LegalCopyright", COPYRIGHT);
     resource.set("OriginalFilename", app.original_filename);
-    resource.set("FileVersion", &format!("{version}.{build}"));
-    resource.set("ProductVersion", &format!("{version}.{build}"));
+    resource.set("FileVersion", version);
+    resource.set("ProductVersion", version);
     if let Err(error) = resource.compile() {
         panic!("could not embed the Windows resource block: {error}");
     }

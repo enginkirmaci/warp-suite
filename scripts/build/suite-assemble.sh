@@ -34,7 +34,6 @@ command -v zip >/dev/null || { echo "zip required" >&2; exit 1; }
 command -v unzip >/dev/null || { echo "unzip required" >&2; exit 1; }
 
 suite_version="$(python3 -c 'import sys,tomllib; print(tomllib.load(open(sys.argv[1],"rb"))["suite"]["version"])' "$root/suite.toml")"
-suite_build="$(python3 -c 'import sys,tomllib; print(tomllib.load(open(sys.argv[1],"rb")).get("suite",{}).get("build",0))' "$root/suite.toml")"
 [ "$version" = "$suite_version" ] || {
     echo "version mismatch: --version $version, suite.toml says $suite_version" >&2
     exit 1
@@ -85,7 +84,7 @@ done
 
 install -m755 "$root/scripts/deploy/bundle-install.sh" "$linux/bundle-install.sh"
 {
-    echo "suite $version build $suite_build commit $sha channel dev"
+    echo "suite $version commit $sha channel dev"
     echo "kits $("$py" "$manifest" pin kits tag)"
     for app in $apps; do
         echo "app $app $("$py" "$manifest" pin "$app" tag)"

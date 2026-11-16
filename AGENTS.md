@@ -240,14 +240,13 @@ suite pin table and each app's CI carry the pair.
   additive; a writer must not drop the key it does not own. Writes use a
   sidecar lock and an atomic rename. Reduced motion is per-app, not in this
   file.
-- **Version and build facts**: each repository owns its `version.toml`. The kit
-  line is warp-suite's; each app line is the app repository's. A pre-commit
-  hook bumps that line's PATCH on every commit (never resets); the
-  repository's build script bumps its build counter. `kits/warpui-kit-build`
-  stamps the app's own `WARP_BUILD` family into each binary (About,
-  `--version`, the Windows file version, the bridge's `/health`); the APK
-  reads its repository's file. The `Copy version` line is the family contract:
-  change the apps, the bridge, the build scripts and
+- **Version facts**: each repository owns its `version.toml`. The kit line is
+  warp-suite's; each app line is the app repository's. A pre-commit hook bumps
+  that line's PATCH on every commit (never resets); MINOR/MAJOR move by hand.
+  `kits/warpui-kit-build` stamps the app's version, commit, channel and
+  released facts into each binary (About, `--version`, the Windows file
+  version, the bridge's `/health`); the APK reads its repository's file. The
+  `Copy version` line is the family contract: change the apps, the bridge and
   `docs/agents/versioning.md` together.
 - **warp-android-scribe bridge** (the `warp-android-scribe` repository): LAN
   `http://<nas-lan>:8787` (UFW `<nas-subnet>`) and public
@@ -472,7 +471,7 @@ suite pin table and each app's CI carry the pair.
 - [`docs/agents/settings-schema.md`](docs/agents/settings-schema.md) — the
   versioned snake_case settings/cache contract.
 - [`docs/agents/versioning.md`](docs/agents/versioning.md) — `version.toml`,
-  the PATCH/build rules, the hook, Windows/Android facts and the release flow.
+  the PATCH rules, the hook, Windows/Android facts and the release flow.
 - [`docs/agents/local-setup.md`](docs/agents/local-setup.md) — the sibling
   checkouts, the `apps/` symlinks and the one-workspace local build.
 - [`plans/`](plans/) — working design plans and proposals, one file per topic;

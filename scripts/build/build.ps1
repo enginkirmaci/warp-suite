@@ -99,16 +99,6 @@ if ($Version -and $Version -ne $facts.version) {
 }
 $Version = $facts.version
 
-# Every build script run consumes one build number. A CI job passes
-# WARP_SUITE_BUILD so the Linux and Windows artifacts of one tag agree.
-if (-not $env:WARP_SUITE_BUILD) {
-    $bump = Invoke-Python @($versionPy, 'build', 'bump')
-    if ($bump.Code -ne 0) {
-        throw "version.py build bump failed (exit $($bump.Code)): $($bump.Lines -join ' ')"
-    }
-    $env:WARP_SUITE_BUILD = ($bump.Lines | Select-Object -Last 1)
-}
-$facts = Read-VersionFacts
 $env:WARP_SUITE_VERSION = $Version
 $env:WARP_SUITE_COMMIT = $facts.commit
 $env:WARP_SUITE_CHANNEL = $facts.channel
@@ -132,8 +122,7 @@ $sha = 'unknown'
 if (Test-Path (Join-Path $root '.git')) {
     try {
         $sha = (& git -C $root rev-parse HEAD 2>$null)
-        # version.toml carries the uncommitted build counter by design
-        $dirty = (& git -C $root status --porcelain 2>$null) | Where-Object { $_ -notmatch ' version\.toml$' }
+        $dirty = (& git -C $root status --porcelain 2>$null)
         if ($dirty) { $sha = "$sha-dirty" }
     } catch { }
 }
@@ -141,7 +130,7 @@ if (Test-Path (Join-Path $root '.git')) {
 New-Item -ItemType Directory -Force -Path $dist | Out-Null
 $released = if ($env:WARP_SUITE_RELEASED) { $env:WARP_SUITE_RELEASED } else { 'not released' }
 $revisions = @(
-    "suite $Version build $env:WARP_SUITE_BUILD commit $env:WARP_SUITE_COMMIT channel $env:WARP_SUITE_CHANNEL released $released"
+    "suite $Version commit $env:WARP_SUITE_COMMIT channel $env:WARP_SUITE_CHANNEL released $released"
 )
 
 foreach ($name in $appNames) {
