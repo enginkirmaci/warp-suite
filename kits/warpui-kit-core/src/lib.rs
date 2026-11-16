@@ -19,7 +19,7 @@
 //! - [`shortcuts`] — the keyboard-reference card: groups of key/description
 //!   rows over a scrim, with the app's own content
 //! - [`about`] — the About screen every app carries above Settings: the
-//!   family table, the marks, and the Build/Legal cards
+//!   installed family, the marks, and the Build/Legal cards
 //! - [`activity`] — the one window-activity line: the titlebar chip and the
 //!   OS title share it
 //! - [`a11y`] — the role/label trait every hand-rolled control passes through

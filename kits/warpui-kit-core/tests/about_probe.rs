@@ -1,9 +1,9 @@
-//! The About screen: the family table, the clipboard line, and the two panes
+//! The About screen: the installed member table, the clipboard line, and the two panes
 //! the shell expects. The apps host the same content, so this is where the
 //! shape is measured.
 
 use gpui::{Context, IntoElement, Render, TestAppContext, Window, div, prelude::*, px, size};
-use warpui_kit_core::about::{self, AppId, Build, Link};
+use warpui_kit_core::about::{self, AppId, Build, Link, Member};
 
 const BUILD: Build = Build {
     version: "0.1.0",
@@ -20,6 +20,37 @@ fn the_windows_copyright_matches_the_legal_card() {
 struct Page {
     selected: AppId,
     current: AppId,
+    members: Vec<Member>,
+}
+
+impl Page {
+    fn new(selected: AppId, current: AppId) -> Self {
+        Self {
+            selected,
+            current,
+            members: all_members(),
+        }
+    }
+}
+
+fn member(app: AppId, version: &str, commit: &str, released: Option<&str>) -> Member {
+    Member {
+        app: *about::app(app),
+        version: version.into(),
+        commit: commit.into(),
+        channel: "dev".into(),
+        released: released.map(str::to_string),
+    }
+}
+
+fn all_members() -> Vec<Member> {
+    vec![
+        member(AppId::Station, "0.1.0", "1b7d006", Some("2026-11-10")),
+        member(AppId::Agent, "0.1.4", "c0b868a", None),
+        member(AppId::Notes, "0.1.4", "ca22cdd", None),
+        member(AppId::Snapit, "0.1.4", "2b7f3c5", None),
+        member(AppId::Pomodoro, "0.2.5", "2ec12a8", None),
+    ]
 }
 
 impl Render for Page {
@@ -35,13 +66,13 @@ impl Render for Page {
                             432.,
                             self.selected,
                             self.current,
-                            &BUILD,
+                            &self.members,
                             |_, _, _, _| {},
                         ))
                         .child(about::detail(
                             self.selected,
                             self.current,
-                            &BUILD,
+                            &self.members,
                             "Open controls",
                             |_, _, _, _| {},
                             |_, _, _, _| {},
@@ -58,7 +89,14 @@ fn the_clipboard_line_is_one_line() {
         BUILD.version_line(station),
         "Warp Station 0.1.0 (1b7d006) · dev"
     );
-    assert_eq!(BUILD.suite_line(), "Warp Suite 0.1.0 · dev · 5 apps");
+    assert_eq!(
+        member(AppId::Station, "0.1.0", "1b7d006", Some("2026-11-10")).version_line(),
+        "Warp Station 0.1.0 (1b7d006) · dev"
+    );
+    assert_eq!(
+        member(AppId::Notes, "0.1.4", "ca22cdd", None).version_line(),
+        "Warp Notes 0.1.4 (ca22cdd) · dev"
+    );
 }
 
 #[test]
@@ -99,10 +137,7 @@ fn the_suite_is_the_five_members_in_order() {
 #[gpui_kit::gpui::test]
 fn the_two_panes_split_the_window(cx: &mut TestAppContext) {
     cx.update(gpui_kit::init);
-    let (_root, cx) = cx.add_window_view(|_, _| Page {
-        selected: AppId::Station,
-        current: AppId::Station,
-    });
+    let (_root, cx) = cx.add_window_view(|_, _| Page::new(AppId::Station, AppId::Station));
     cx.simulate_resize(size(px(1280.), px(900.)));
     cx.run_until_parked();
     cx.update(|window, cx| drop(window.draw(cx)));
@@ -122,10 +157,7 @@ fn the_two_panes_split_the_window(cx: &mut TestAppContext) {
 #[gpui_kit::gpui::test]
 fn every_member_has_a_row_and_the_current_app_is_the_primary(cx: &mut TestAppContext) {
     cx.update(gpui_kit::init);
-    let (_root, cx) = cx.add_window_view(|_, _| Page {
-        selected: AppId::Station,
-        current: AppId::Station,
-    });
+    let (_root, cx) = cx.add_window_view(|_, _| Page::new(AppId::Station, AppId::Station));
     cx.simulate_resize(size(px(1280.), px(900.)));
     cx.run_until_parked();
     cx.update(|window, cx| drop(window.draw(cx)));
@@ -143,6 +175,45 @@ fn every_member_has_a_row_and_the_current_app_is_the_primary(cx: &mut TestAppCon
     cx.debug_bounds("about-copy-version").expect("copy version");
 }
 
+#[gpui_kit::gpui::test]
+fn only_installed_members_have_rows(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+    let (_root, cx) = cx.add_window_view(|_, _| Page {
+        selected: AppId::Station,
+        current: AppId::Station,
+        members: vec![
+            member(AppId::Station, "0.1.0", "1b7d006", Some("2026-11-10")),
+            member(AppId::Notes, "0.1.4", "ca22cdd", None),
+        ],
+    });
+    cx.simulate_resize(size(px(1280.), px(900.)));
+    cx.run_until_parked();
+    cx.update(|window, cx| drop(window.draw(cx)));
+
+    cx.debug_bounds("about-row-station").expect("station row");
+    cx.debug_bounds("about-row-notes").expect("notes row");
+    cx.debug_bounds("about-version-station")
+        .expect("station version");
+    cx.debug_bounds("about-version-notes")
+        .expect("notes version");
+    for key in ["about-row-agent", "about-row-snapit", "about-row-pomodoro"] {
+        assert!(
+            cx.debug_bounds(key).is_none(),
+            "{key} is not installed and must not render"
+        );
+    }
+    for key in [
+        "about-version-agent",
+        "about-version-snapit",
+        "about-version-pomodoro",
+    ] {
+        assert!(
+            cx.debug_bounds(key).is_none(),
+            "{key} belongs to an app that is not installed"
+        );
+    }
+}
+
 /// The head's two verbs are one control shape: a filled primary and the quiet
 /// chip share the control height and sit on one baseline, so the fill is the
 /// only thing that tells them apart (a heavier label made the primary read as
@@ -150,10 +221,7 @@ fn every_member_has_a_row_and_the_current_app_is_the_primary(cx: &mut TestAppCon
 #[gpui_kit::gpui::test]
 fn the_head_actions_are_one_control_size(cx: &mut TestAppContext) {
     cx.update(gpui_kit::init);
-    let (_root, cx) = cx.add_window_view(|_, _| Page {
-        selected: AppId::Station,
-        current: AppId::Station,
-    });
+    let (_root, cx) = cx.add_window_view(|_, _| Page::new(AppId::Station, AppId::Station));
     cx.simulate_resize(size(px(1280.), px(900.)));
     cx.run_until_parked();
     cx.update(|window, cx| drop(window.draw(cx)));
@@ -173,10 +241,7 @@ fn the_head_actions_are_one_control_size(cx: &mut TestAppContext) {
 #[gpui_kit::gpui::test]
 fn snap_it_has_no_primary_on_linux(cx: &mut TestAppContext) {
     cx.update(gpui_kit::init);
-    let (_root, cx) = cx.add_window_view(|_, _| Page {
-        selected: AppId::Snapit,
-        current: AppId::Station,
-    });
+    let (_root, cx) = cx.add_window_view(|_, _| Page::new(AppId::Snapit, AppId::Station));
     cx.simulate_resize(size(px(1280.), px(900.)));
     cx.run_until_parked();
     cx.update(|window, cx| drop(window.draw(cx)));
@@ -199,10 +264,7 @@ fn snap_it_has_no_primary_on_linux(cx: &mut TestAppContext) {
 #[gpui_kit::gpui::test]
 fn the_colophon_follows_the_rows(cx: &mut TestAppContext) {
     cx.update(gpui_kit::init);
-    let (_root, cx) = cx.add_window_view(|_, _| Page {
-        selected: AppId::Station,
-        current: AppId::Station,
-    });
+    let (_root, cx) = cx.add_window_view(|_, _| Page::new(AppId::Station, AppId::Station));
     cx.simulate_resize(size(px(1280.), px(900.)));
     cx.run_until_parked();
     cx.update(|window, cx| drop(window.draw(cx)));

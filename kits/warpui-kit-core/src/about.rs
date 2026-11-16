@@ -1,21 +1,25 @@
-//! The About screen: the family in one list, the selected app in the detail.
+//! The About screen: the installed family in one list, the selected app in the
+//! detail.
 //!
 //! Every GPUI app carries About above Settings and draws the same screen. The
-//! list holds the suite's members — the row for the app you are in carries a
-//! `This app` tag — and the detail shows the selected one's identity, a Build
-//! card and a Legal card. The table lives here so a new app, a new blurb or a
-//! copyright change is one edit for the whole family.
+//! list holds the members installed on this machine — the row for the app you
+//! are in carries a `This app` tag — and each row shows that binary's own
+//! version. The detail shows the selected one's identity, a Build card and a
+//! Legal card. The table lives here so a new app, a new blurb or a copyright
+//! change is one edit for the whole family.
 //!
-//! SnapIt has no window of its own: it is the headless row on every screen, and
-//! its primary returns to Station's Tools on Windows and is absent elsewhere.
+//! SnapIt has no window of its own: it is a headless row where its binary is
+//! installed, and its primary returns to Station's Tools on Windows and is
+//! absent elsewhere.
 //! The chassis is [`shell`]'s, the ink is [`palette`]'s, so a palette or text
 //! size switch moves this screen with the rest of the family.
 //!
 //! ```ignore
 //! let build = warpui_kit_core::build_info!();
+//! let members = about::detect_installed(current, &build);
 //! shell::panes()
-//!     .child(about::list(width, selected, current, &build, on_pick))
-//!     .child(about::detail(selected, current, &build, "Open controls", on_action, on_link))
+//!     .child(about::list(width, selected, current, &members, on_pick))
+//!     .child(about::detail(selected, current, &members, "Open controls", on_action, on_link))
 //! ```
 
 use std::rc::Rc;
@@ -55,8 +59,8 @@ impl AppId {
     }
 }
 
-/// One member's fixed facts. Versions are not here: one workspace means one
-/// version for the whole suite, so they ride the [`Build`] the app passes.
+/// One member's fixed facts. Versions are per binary now, so they live on
+/// [`Member`], not here.
 #[derive(Clone, Copy, Debug)]
 pub struct SuiteApp {
     pub id: AppId,
@@ -145,6 +149,91 @@ pub const SUITE: [SuiteApp; 5] = [
     },
 ];
 
+/// One installed member: the static table entry plus the facts its binary
+/// reported. `released` is only known for the running app, whose build script
+/// stamped it; a sibling's `--version` line carries version, commit and channel.
+#[derive(Clone, Debug)]
+pub struct Member {
+    pub app: SuiteApp,
+    pub version: String,
+    pub commit: String,
+    pub channel: String,
+    pub released: Option<String>,
+}
+
+impl Member {
+    pub fn id(&self) -> AppId {
+        self.app.id
+    }
+
+    /// This member's support line:
+    /// `Warp Station 0.1.51 (51c13d0) · dev`.
+    pub fn version_line(&self) -> String {
+        version_line(&self.app, &self.version, &self.commit, &self.channel)
+    }
+}
+
+/// The installed members in the table's order: the running app from its own
+/// build facts, every other app that answers `--version` next to this binary or
+/// on `PATH`. A sibling that is present but cannot answer is logged and left
+/// out, so the list never offers a version it could not read.
+pub fn detect_installed(current: AppId, build: &Build) -> Vec<Member> {
+    detect_installed_with(current, build, |binary| {
+        if !warpui_kit_platform::sibling::installed(binary) {
+            return None;
+        }
+        match warpui_kit_platform::sibling::version(binary) {
+            Some(facts) => Some(facts),
+            None => {
+                tracing::warn!("about: {binary} is installed but did not answer --version");
+                None
+            }
+        }
+    })
+}
+
+fn detect_installed_with(
+    current: AppId,
+    build: &Build,
+    probe: impl Fn(&str) -> Option<warpui_kit_platform::sibling::VersionInfo>,
+) -> Vec<Member> {
+    SUITE
+        .iter()
+        .filter_map(|app| {
+            if app.id == current {
+                return Some(Member {
+                    app: *app,
+                    version: build.version.to_string(),
+                    commit: build.commit.to_string(),
+                    channel: build.channel.to_string(),
+                    released: Some(build.released.to_string()),
+                });
+            }
+            let facts = probe(app.binary)?;
+            Some(Member {
+                app: *app,
+                version: facts.version,
+                commit: facts.commit,
+                channel: facts.channel,
+                released: None,
+            })
+        })
+        .collect()
+}
+
+/// The member behind an id, when it is installed.
+pub fn member(members: &[Member], id: AppId) -> Option<&Member> {
+    members.iter().find(|member| member.id() == id)
+}
+
+/// The member a detail should show: the picked one, the running app when the
+/// pick is no longer installed, or the first installed row.
+pub fn selected_member(members: &[Member], selected: AppId, current: AppId) -> Option<&Member> {
+    member(members, selected)
+        .or_else(|| member(members, current))
+        .or_else(|| members.first())
+}
+
 /// The suite's legal line: the apps are GPL-3.0, the shared kits MIT.
 pub const COPYRIGHT: &str = "© 2026 Engin Kirmaci";
 pub const LICENSE: &str = "GPL-3.0";
@@ -161,24 +250,15 @@ pub struct Build {
 }
 
 impl Build {
-    /// The list head's line: `Warp Suite 0.1.0 · dev · 5 apps`.
-    pub fn suite_line(&self) -> String {
-        format!(
-            "Warp Suite {} · {} · {} apps",
-            self.version,
-            self.channel,
-            SUITE.len()
-        )
-    }
-
-    /// The clipboard contract, one line:
+    /// This binary's support line:
     /// `Warp Station 0.1.0 (1b7d006) · dev`.
     pub fn version_line(&self, app: &SuiteApp) -> String {
-        format!(
-            "{} {} ({}) · {}",
-            app.name, self.version, self.commit, self.channel
-        )
+        version_line(app, self.version, self.commit, self.channel)
     }
+}
+
+fn version_line(app: &SuiteApp, version: &str, commit: &str, channel: &str) -> String {
+    format!("{} {} ({}) · {}", app.name, version, commit, channel)
 }
 
 /// The build facts, read where they were stamped: **in the app crate**. Every
@@ -206,7 +286,7 @@ pub enum Action {
     /// Station's Tools › SnapIt page. On a sibling's About screen the app maps
     /// this to "open Station", which is the closest it can get to that page.
     SnapIt,
-    /// Put [`Build::version_line`] on the clipboard.
+    /// Put [`Member::version_line`] on the clipboard.
     CopyVersion,
 }
 
@@ -297,9 +377,11 @@ pub fn list(
     width: f32,
     selected: AppId,
     current: AppId,
-    build: &Build,
+    members: &[Member],
     on_pick: impl Fn(AppId, &ClickEvent, &mut Window, &mut App) + 'static,
 ) -> Div {
+    let selected =
+        selected_member(members, selected, current).map_or(current, |member| member.id());
     let on_pick: PickFn = Rc::new(on_pick);
     let mut rows = div()
         .id("about-list-scroll")
@@ -308,16 +390,16 @@ pub fn list(
         .overflow_y_scroll()
         .flex()
         .flex_col();
-    for member in SUITE.iter() {
-        rows = rows.child(row(member, selected, current, build, on_pick.clone()));
+    for member in members {
+        rows = rows.child(row(member, selected, current, on_pick.clone()));
     }
-    // the colophon follows the rows, not the pane: five rows is a short list
+    // the colophon follows the rows, not the pane: a short list
     // and the design keeps the note right under them
     rows = rows.child(suite_note());
 
     shell::list_pane(width)
         .debug_selector(|| "about-list".to_string())
-        .child(list_head(build))
+        .child(list_head(current, members))
         .child(rows)
 }
 
@@ -329,13 +411,15 @@ pub fn list(
 pub fn detail(
     selected: AppId,
     current: AppId,
-    build: &Build,
+    members: &[Member],
     snap_it_label: &'static str,
     on_action: impl Fn(Action, &ClickEvent, &mut Window, &mut App) + 'static,
     on_link: impl Fn(Link, &ClickEvent, &mut Window, &mut App) + 'static,
 ) -> Div {
-    let member = app(selected);
-    let is_current = selected == current;
+    let Some(member) = selected_member(members, selected, current) else {
+        return shell::detail_pane().debug_selector(|| "about-detail".to_string());
+    };
+    let is_current = member.id() == current;
     let on_action: ActionFn = Rc::new(on_action);
     let on_link: LinkFn = Rc::new(on_link);
 
@@ -347,7 +431,7 @@ pub fn detail(
             on_action.clone(),
             Action::ReleaseNotes,
         ));
-    } else if member.id == AppId::Snapit {
+    } else if member.app.id == AppId::Snapit {
         if cfg!(windows) {
             actions.push(primary(
                 "about-primary",
@@ -359,9 +443,9 @@ pub fn detail(
     } else {
         actions.push(primary(
             "about-primary",
-            format!("Open {}", member.short),
+            format!("Open {}", member.app.short),
             on_action.clone(),
-            Action::OpenApp(member.id),
+            Action::OpenApp(member.app.id),
         ));
     }
     let copy = on_action.clone();
@@ -396,20 +480,16 @@ pub fn detail(
                 .gap_4()
                 .w_full()
                 .max_w(px(shell::GRID_WIDTH))
-                .child(hero(member, build, on_link.clone()))
+                .child(hero(member, on_link.clone()))
                 .child(
                     div()
                         .flex()
                         .flex_row()
                         .flex_wrap()
                         .gap_4()
+                        .child(build_card(member).flex_1().min_w(px(shell::scaled(320.))))
                         .child(
-                            build_card(member, build)
-                                .flex_1()
-                                .min_w(px(shell::scaled(320.))),
-                        )
-                        .child(
-                            legal_card(build, on_link)
+                            legal_card(member, on_link)
                                 .flex_1()
                                 .min_w(px(shell::scaled(320.))),
                         ),
@@ -418,7 +498,7 @@ pub fn detail(
 
     shell::detail_pane()
         .debug_selector(|| "about-detail".to_string())
-        .child(head(member, build, actions))
+        .child(head(member, actions))
         .child(body)
 }
 
@@ -527,30 +607,29 @@ pub fn license_dialog(
 
 // ---- pieces ----------------------------------------------------------------
 
-fn row(
-    member: &'static SuiteApp,
-    selected: AppId,
-    current: AppId,
-    build: &Build,
-    on_pick: PickFn,
-) -> gpui::Stateful<Div> {
-    let is_selected = member.id == selected;
-    let id = ElementId::Name(SharedString::from(format!("about-row-{}", member.key())));
-    let selector = format!("about-row-{}", member.key());
+fn row(member: &Member, selected: AppId, current: AppId, on_pick: PickFn) -> gpui::Stateful<Div> {
+    let is_selected = member.id() == selected;
+    let app_id = member.id();
+    let id = ElementId::Name(SharedString::from(format!(
+        "about-row-{}",
+        member.app.key()
+    )));
+    let selector = format!("about-row-{}", member.app.key());
+    let version_selector = format!("about-version-{}", member.app.key());
     let pick = on_pick;
 
     shell::list_row(id, is_selected)
         .debug_selector(move || selector)
         .role(Role::Button)
-        .aria_label(member.name)
-        .on_click(move |event, window, cx| pick(member.id, event, window, cx))
+        .aria_label(member.app.name)
+        .on_click(move |event, window, cx| pick(app_id, event, window, cx))
         .child(
             div()
                 .flex()
                 .flex_row()
                 .items_center()
                 .gap_2()
-                .child(mark_box(member.id, 30., 18.))
+                .child(mark_box(member.app.id, 30., 18.))
                 .child(
                     div()
                         .flex_1()
@@ -561,14 +640,15 @@ fn row(
                         .overflow_hidden()
                         .whitespace_nowrap()
                         .text_ellipsis()
-                        .child(member.name),
+                        .child(member.app.name),
                 )
                 .child(
                     div()
+                        .debug_selector(move || version_selector)
                         .flex_shrink_0()
                         .text_size(px(fonts::font_row_meta()))
                         .text_color(palette::text_muted())
-                        .child(format!("Version {}", build.version)),
+                        .child(format!("Version {}", member.version)),
                 ),
         )
         .child(
@@ -587,16 +667,19 @@ fn row(
                         .overflow_hidden()
                         .whitespace_nowrap()
                         .text_ellipsis()
-                        .child(member.role),
+                        .child(member.app.role),
                 )
-                .when(member.id == current, |row| row.child(tag("This app")))
-                .when(member.id == AppId::Snapit && !cfg!(windows), |row| {
+                .when(member.app.id == current, |row| row.child(tag("This app")))
+                .when(member.app.id == AppId::Snapit && !cfg!(windows), |row| {
                     row.child(tag("Windows only"))
                 }),
         )
 }
 
-fn list_head(build: &Build) -> Div {
+fn list_head(current: AppId, members: &[Member]) -> Div {
+    let channel = member(members, current).map_or("dev", |member| member.channel.as_str());
+    let count = members.len();
+    let noun = if count == 1 { "app" } else { "apps" };
     div()
         .flex_shrink_0()
         .px_4()
@@ -616,7 +699,7 @@ fn list_head(build: &Build) -> Div {
                 .mt_0p5()
                 .text_size(px(fonts::font_meta()))
                 .text_color(palette::text_dim())
-                .child(build.suite_line()),
+                .child(format!("Warp Suite · {channel} · {count} {noun}")),
         )
 }
 
@@ -639,7 +722,7 @@ fn suite_note() -> Div {
         .child(format!("{COPYRIGHT} · {LICENSE} · kits MIT"))
 }
 
-fn head(member: &SuiteApp, build: &Build, actions: Vec<AnyElement>) -> Div {
+fn head(member: &Member, actions: Vec<AnyElement>) -> Div {
     let mut row = div()
         .flex()
         .flex_row()
@@ -671,28 +754,28 @@ fn head(member: &SuiteApp, build: &Build, actions: Vec<AnyElement>) -> Div {
                         .overflow_hidden()
                         .whitespace_nowrap()
                         .text_ellipsis()
-                        .child(format!("About {}", member.name)),
+                        .child(format!("About {}", member.app.name)),
                 )
                 .child(
                     div()
                         .mt_0p5()
                         .text_size(px(fonts::font_meta()))
                         .text_color(palette::text_dim())
-                        .child(format!("{} · {}", member.role, family(member, build))),
+                        .child(format!("{} · {}", member.app.role, family(member))),
                 ),
         )
         .child(row)
 }
 
-fn family(member: &SuiteApp, build: &Build) -> String {
-    if member.hosted {
+fn family(member: &Member) -> String {
+    if member.app.hosted {
         "Hosted by Warp Station".to_string()
     } else {
-        format!("Part of Warp Suite {}", build.version)
+        "Part of Warp Suite".to_string()
     }
 }
 
-fn hero(member: &SuiteApp, build: &Build, on_link: LinkFn) -> Div {
+fn hero(member: &Member, on_link: LinkFn) -> Div {
     let mut links = div()
         .flex()
         .flex_row()
@@ -713,7 +796,7 @@ fn hero(member: &SuiteApp, build: &Build, on_link: LinkFn) -> Div {
             .pt(px(shell::scaled(18.)))
             .px_4()
             .pb_4()
-            .child(mark_box(member.id, 56., 32.))
+            .child(mark_box(member.app.id, 56., 32.))
             .child(
                 div()
                     .flex_1()
@@ -727,40 +810,42 @@ fn hero(member: &SuiteApp, build: &Build, on_link: LinkFn) -> Div {
                             .flex_row()
                             .items_center()
                             .gap_2()
-                            .child(tag(build.channel)),
+                            .child(tag(member.channel.clone())),
                     )
                     .child(
                         div()
                             .text_size(px(fonts::font_name()))
                             .line_height(relative(1.5))
                             .text_color(palette::text_dim())
-                            .child(member.blurb),
+                            .child(member.app.blurb),
                     )
                     .child(links),
             ),
     )
 }
 
-fn build_card(member: &SuiteApp, build: &Build) -> Div {
+fn build_card(member: &Member) -> Div {
     card()
         .child(card_head(
             "Build",
-            Some(format!("{} channel", build.channel)),
+            Some(format!("{} channel", member.channel)),
         ))
         .child(
             div()
                 .px_4()
                 .pt_2()
                 .pb_3()
-                .child(kv("Version", build.version.to_string()))
-                .child(kv("Commit", build.commit.to_string()))
-                .child(kv("Channel", build.channel.to_string()))
-                .child(kv("Released", build.released.to_string()))
-                .child(kv("Runtime", member.runtime.to_string())),
+                .child(kv("Version", member.version.clone()))
+                .child(kv("Commit", member.commit.clone()))
+                .child(kv("Channel", member.channel.clone()))
+                .when_some(member.released.clone(), |card, released| {
+                    card.child(kv("Released", released))
+                })
+                .child(kv("Runtime", member.app.runtime.to_string())),
         )
 }
 
-fn legal_card(build: &Build, on_link: LinkFn) -> Div {
+fn legal_card(member: &Member, on_link: LinkFn) -> Div {
     card().child(card_head("Legal", None)).child(
         div()
             .px_4()
@@ -778,7 +863,7 @@ fn legal_card(build: &Build, on_link: LinkFn) -> Div {
                     .pt_2()
                     .text_size(px(fonts::font_meta()))
                     .text_color(palette::text_muted())
-                    .child(format!("Shared design language {}", build.version))
+                    .child(format!("Shared design language {}", member.version))
                     .child(link_row(Link::License, on_link)),
             ),
     )
@@ -891,7 +976,8 @@ fn mark_box(id: AppId, box_size: f32, glyph: f32) -> Div {
         .child(mark(id, glyph, palette::accent_ink()))
 }
 
-fn tag(label: &'static str) -> Div {
+fn tag(label: impl Into<SharedString>) -> Div {
+    let label = label.into();
     div()
         .flex_shrink_0()
         .flex()
@@ -927,4 +1013,55 @@ fn primary(
             move |event, window, cx| on_action(action, event, window, cx),
         ))
         .into_any_element()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use warpui_kit_platform::sibling::VersionInfo;
+
+    const BUILD: Build = Build {
+        version: "0.1.51",
+        commit: "51c13d0",
+        channel: "dev",
+        released: "2026-11-16",
+    };
+
+    fn facts(version: &str, commit: &str, channel: &str) -> VersionInfo {
+        VersionInfo {
+            version: version.into(),
+            commit: commit.into(),
+            channel: channel.into(),
+        }
+    }
+
+    #[test]
+    fn only_installed_members_are_listed() {
+        let members = detect_installed_with(AppId::Station, &BUILD, |binary| match binary {
+            "warp-notes" => Some(facts("0.1.4", "0b621c1", "dev")),
+            _ => None,
+        });
+        assert_eq!(
+            members.iter().map(Member::id).collect::<Vec<_>>(),
+            vec![AppId::Station, AppId::Notes]
+        );
+        assert_eq!(members[0].version, "0.1.51");
+        assert_eq!(members[0].released.as_deref(), Some("2026-11-16"));
+        assert_eq!(members[1].version, "0.1.4");
+        assert_eq!(members[1].commit, "0b621c1");
+        assert_eq!(members[1].released, None);
+    }
+
+    #[test]
+    fn a_missing_pick_falls_back_to_the_running_app() {
+        let members = detect_installed_with(AppId::Station, &BUILD, |_| None);
+        assert_eq!(
+            selected_member(&members, AppId::Agent, AppId::Station).map(Member::id),
+            Some(AppId::Station)
+        );
+        assert_eq!(
+            members[0].version_line(),
+            "Warp Station 0.1.51 (51c13d0) · dev"
+        );
+    }
 }

@@ -606,35 +606,36 @@ window-wide list cursor and no window-level arrow handler.
 ## The About screen
 
 Every GPUI app carries **About above Settings** at the bottom of the rail, and
-all three draw the same screen from `warpui_kit_core::about`:
+all four draw the same screen from `warpui_kit_core::about`:
 
-- the list holds the suite members — Station, Agent, Notes, the headless SnapIt
-  and the Pomodoro timer — and the row for the app you are in carries a
-  `This app` tag;
+- the list holds only the members installed next to this binary or on `PATH`,
+  each row with that binary's own version; the row for the app you are in
+  carries a `This app` tag;
 - the detail is a hero (mark, channel tag, tagline, Repository / Changelog /
-  Report an issue), a **Build** card (version, commit, channel, released,
-  runtime) and a **Legal** card (GPL-3.0, copyright, `View license`);
+  Report an issue), a **Build** card (version, commit, channel, released on the
+  running app, runtime) and a **Legal** card (GPL-3.0, copyright,
+  `View license`);
 - the detail owns one filled primary: `Release notes` on the current app,
   `Open <app>` on a sibling, and `Open controls` (Station) or `Open Station`
-  (a sibling) for SnapIt. On Linux SnapIt's row says `Windows only` and has
-  no primary;
-- `Copy version` writes `Warp Station 0.1.8 (d904edc) · dev` — one line, the
-  format support asks for.
+  (a sibling) for SnapIt. SnapIt's row appears only when its binary is
+  installed; on Linux it says `Windows only` and has no primary;
+- `Copy version` writes the selected member's line,
+  `Warp Station 0.1.8 (d904edc) · dev` — one line, the format support asks for.
 
 The marks are monochrome `currentColor` SVGs in
 `kits/warpui-kit-core/assets/marks/`, so the accent tints them and they follow
 a palette switch like everything else. Build facts come from each app's
 `build.rs` calling `kits/warpui-kit-build`, which stamps the package version
-and the exported `WARP_SUITE_*` variables; `docs/agents/versioning.md` owns the
-rules.
-it and reports `dev` rather than pretending to be a release. `View license`
+and the exported `WARP_SUITE_*` variables; a sibling's facts come from its own
+`--version` line. A plain `cargo run` reports `dev` rather than pretending to
+be a release. `docs/agents/versioning.md` owns the rules. `View license`
 opens the app's own GPL text in a modal, embedded at build time and rendered
 through `warpui_kit_markdown`'s read-only document viewer — the GPL reads as
 prose, at the family's type, selectable — so the license ships with the binary
 and the MIT kit carries none of it.
 
 SnapIt has no window of its own. It is a row on the other apps' screens, its
-`-V` prints the same build line, and Station's Tools › SnapIt page repeats
+`-V` prints the same version line, and Station's Tools › SnapIt page repeats
 the version the row promises.
 
 ## Where a change goes

@@ -31,8 +31,10 @@ Three independent lines, one per kind of repository:
 
 | Surface | Shows |
 |---|---|
-| `Copy version`, `<app> --version` | `Warp Station 0.1.1 (d904edc) · dev` |
-| About Build card | Version, Commit, Channel, Released, Runtime |
+| `Copy version` | the selected installed member's line |
+| `<app> --version` | `Warp Station 0.1.1 (d904edc) · dev` |
+| About list | only installed members, each with its own version |
+| About Build card | Version, Commit, Channel, Released (running app), Runtime |
 | Windows `FILEVERSION` / `PRODUCTVERSION` | `<version>.0`; 16-bit fields, revision 0 |
 | Android | `versionName` from the app `version.toml`; `versionCode` derived from it |
 | `GET /health` (bridge) | `version`, `commit`, `channel` |
@@ -43,6 +45,11 @@ scripts export; a plain `cargo build` has none, so it reports `dev` /
 `unknown` / `not released`. The version itself is always the package version,
 which the pre-commit hook keeps in step with `version.toml`; a plain
 `cargo build` in an app checkout therefore reports that app's version.
+
+`warpui_kit_platform::sibling` decides what "installed" means: the executable
+next to the running binary first, then `PATH`. About probes each installed
+sibling's `--version` once per open and keeps the version, commit and channel
+it printed; the running app's facts come from its own build script.
 
 ## One-time setup per clone
 
