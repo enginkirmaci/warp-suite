@@ -1,9 +1,9 @@
 # A merge editor for stopped operations
 
-Status: phase 1 landed on 2026-11-16 — the headless read model and its fixture
-tests — and phase 2 the same day: the Merge rail page, the conflict list and
-the two source panes. Phases 3–5 remain. §3 is the decided contract (D1–D12),
-§5 the proofs and which of them closed, §6 the phase order.
+Status: phases 1–3 landed on 2026-11-16: the headless read model, the Merge
+rail page with its source panes, and the editable Result with block takes,
+Save/Reload and the dirty-buffer guard. Phases 4–5 remain. §3 is the decided
+contract (D1–D12), §5 the proofs and which of them closed, §6 the phase order.
 
 ## 1. What the tool is, and what the app has today
 
@@ -186,3 +186,13 @@ conflict list and the aligned Incoming/Current panes drawn from
 through `NetCommand::LoadMerge` / `UiEvent::MergeLoaded`, and
 `tests/merge_probe.rs` covers the page draw and the rail's appear/disappear
 rule. The `WARP_STATION_PAGE=merge` hook opens it for a capture.
+
+Phase 3: the Result pane is an `EditorState` seeded from the worktree file and
+tinted per remaining block with range decorations. The conflict strip carries
+take-current / take-incoming / take-both (with a both-order toggle) and rewrites
+the buffer in place; the buffer is re-parsed after every edit through
+`buffer_conflicts` and `unresolved_count` — orphan marker fragments included —
+so the header, the file row and the toolbar follow the text. Save writes the
+worktree, Reload re-reads it, and a file or repository switch is refused while
+the buffer is dirty. `tests/merge_probe.rs` drives a take and a save against a
+fixture file.
