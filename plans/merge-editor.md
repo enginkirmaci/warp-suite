@@ -251,4 +251,7 @@ hidden-window recipe drives the live desktop, which this session leaves alone.
 
 The panes split the width in two and clip a long line at its column edge; the
 conflict strip is gone (the toolbar arrows and the panes' own Alt+↑/↓ cover
-navigation), so the Result gets the space.
+navigation), so the Result gets the space. Scroll offsets are gpui's negative
+convention everywhere (the window, the sync, the conflict jump), the emphasis
+parts of a changed row lay out inline, and the panes→Result sync is one-way so
+a re-compose never drags the panes.

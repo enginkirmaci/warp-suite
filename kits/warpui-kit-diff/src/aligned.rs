@@ -199,12 +199,17 @@ fn column(side: Side<'_>, gutter_w: gpui::Pixels, has_lead: bool) -> Div {
 /// The code cell, with the changed words carried on their own spans so the
 /// emphasis band sits behind the text without a second text layout.
 fn code(text: &str, emphasis: &[Range<usize>], bg: Option<Hsla>) -> AnyElement {
+    // the emphasis parts are laid out as one inline run: a block column here
+    // stacks them and the row shows only its first fragment
     let mut cell = div()
         .flex_1()
         .min_w_0()
         .px_2()
         .overflow_hidden()
         .whitespace_nowrap()
+        .flex()
+        .flex_row()
+        .items_center()
         .text_color(Hsla::from(palette::CODE_FG));
     let Some(bg) = bg.filter(|_| !emphasis.is_empty()) else {
         return cell.child(text.to_string()).into_any_element();
