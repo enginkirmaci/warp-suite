@@ -16,10 +16,6 @@ const DIGIT_W: f32 = 7.6;
 const LEAD_W: f32 = 22.0;
 /// The row height relative to the detail font: one mono line plus its gap.
 const ROW_SCALE: f32 = 1.6;
-/// One mono character's advance at the detail font: what sizes a column wide
-/// enough for its longest line so the body can scroll sideways instead of
-/// clipping the text.
-const CHAR_W: f32 = 0.62;
 
 /// Which column a leading cell belongs to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -47,10 +43,6 @@ pub struct AlignedOptions<'a> {
     /// Rows the caller left out above and below the slice it passed, so the
     /// body keeps the full height while only the window is drawn.
     pub padding: (usize, usize),
-    /// The widest line's character count across the whole file. A windowed
-    /// caller passes it so the column width does not shrink while scrolling
-    /// past a long line; `None` measures the slice.
-    pub max_chars: Option<usize>,
 }
 
 /// The height one row takes at `font_detail`; hosts that scroll the body
@@ -66,18 +58,13 @@ pub fn render_aligned(rows: &[AlignedRow<'_>], options: AlignedOptions<'_>) -> A
         lead,
         font_detail,
         padding,
-        max_chars,
     } = options;
     let mut lead = lead;
     let row_h = row_height(font_detail);
     let gutter_w = px(gutter_width(rows) as f32 * DIGIT_W + 14.);
-    let widest = max_chars.unwrap_or_else(|| max_line_chars(rows));
-    let code_w = px(widest as f32 * font_detail * CHAR_W + 16.);
-    let row_w = px(2. * (LEAD_W + f32::from(gutter_w)) + 1. + 2. * f32::from(code_w));
     let mut body = div()
         .debug_selector(|| "aligned-panes".into())
         .w_full()
-        .min_w(row_w)
         .flex()
         .flex_col()
         .font_family(fonts::code_font())
@@ -110,7 +97,6 @@ pub fn render_aligned(rows: &[AlignedRow<'_>], options: AlignedOptions<'_>) -> A
         body = body.child(
             div()
                 .w_full()
-                .min_w(row_w)
                 .flex()
                 .flex_row()
                 .items_stretch()
@@ -124,7 +110,6 @@ pub fn render_aligned(rows: &[AlignedRow<'_>], options: AlignedOptions<'_>) -> A
                         lead: lead_cell_left,
                     },
                     gutter_w,
-                    code_w,
                     lead.is_some(),
                 ))
                 .child(div().flex_shrink_0().w(px(1.)).bg(palette::hairline()))
@@ -137,7 +122,6 @@ pub fn render_aligned(rows: &[AlignedRow<'_>], options: AlignedOptions<'_>) -> A
                         lead: lead_cell_right,
                     },
                     gutter_w,
-                    code_w,
                     lead.is_some(),
                 )),
         );
@@ -146,20 +130,6 @@ pub fn render_aligned(rows: &[AlignedRow<'_>], options: AlignedOptions<'_>) -> A
         body = body.child(div().h(row_h * padding.1 as f32).flex_none());
     }
     body.into_any_element()
-}
-
-/// The longest line either side shows, in characters.
-fn max_line_chars(rows: &[AlignedRow<'_>]) -> usize {
-    rows.iter()
-        .flat_map(|row| {
-            [
-                row.left.map(|(_, text)| text.chars().count()),
-                row.right.map(|(_, text)| text.chars().count()),
-            ]
-        })
-        .flatten()
-        .max()
-        .unwrap_or(0)
 }
 
 fn gutter_width(rows: &[AlignedRow<'_>]) -> usize {
@@ -186,7 +156,7 @@ struct Side<'a> {
     lead: Option<AnyElement>,
 }
 
-fn column(side: Side<'_>, gutter_w: gpui::Pixels, code_w: gpui::Pixels, has_lead: bool) -> Div {
+fn column(side: Side<'_>, gutter_w: gpui::Pixels, has_lead: bool) -> Div {
     let mut cell = div()
         .flex_1()
         .min_w_0()
@@ -223,21 +193,17 @@ fn column(side: Side<'_>, gutter_w: gpui::Pixels, code_w: gpui::Pixels, has_lead
             ),
     );
     let text = side.line.map(|(_, text)| text).unwrap_or("");
-    cell.child(code(text, code_w, side.emphasis, side.emphasis_bg))
+    cell.child(code(text, side.emphasis, side.emphasis_bg))
 }
 
 /// The code cell, with the changed words carried on their own spans so the
 /// emphasis band sits behind the text without a second text layout.
-fn code(
-    text: &str,
-    code_w: gpui::Pixels,
-    emphasis: &[Range<usize>],
-    bg: Option<Hsla>,
-) -> AnyElement {
+fn code(text: &str, emphasis: &[Range<usize>], bg: Option<Hsla>) -> AnyElement {
     let mut cell = div()
         .flex_1()
-        .min_w(code_w)
+        .min_w_0()
         .px_2()
+        .overflow_hidden()
         .whitespace_nowrap()
         .text_color(Hsla::from(palette::CODE_FG));
     let Some(bg) = bg.filter(|_| !emphasis.is_empty()) else {
