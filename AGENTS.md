@@ -140,21 +140,6 @@ JAVA_HOME=/usr/lib/jvm/java-17-openjdk ANDROID_HOME=$HOME/tools/android-sdk \
   ./gradlew assembleDebug
 ```
 
-## Commits
-
-- When the task you were given is finished, stop and ask whether to commit.
-  That means: gates green on the crates you touched, no work left in the task,
-  then one short question — "commit?" — not a commit.
-- Never run `git commit` on your own initiative. Approving a plan, asking to
-  keep going, or a follow-up task is not a yes to commit; only an explicit
-  answer in the conversation is.
-- Name what the commit would hold when the tree is not clean. It usually
-  carries other sessions' work, and the owner decides whether it rides along.
-- Stage the paths the task touched, not `git add -A`, and leave every other
-  dirty file as it is.
-- Once approved, follow the repo's existing style: `feat(station): ...`,
-  `fix(agent): ...`, an English imperative subject.
-
 ## Cross-app contracts
 
 The apps talk to each other across repositories, and the interfaces below must
