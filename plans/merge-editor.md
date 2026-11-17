@@ -35,6 +35,9 @@ the side it came from, and the panes and the Result reconcile their scroll
 offsets every frame by line height, so a wheel on either surface takes the
 other with it. The aligned view sizes each column to its longest line and the
 panes scroll on both axes, so a long line is reachable instead of clipped.
+The panes also window their rows: only the viewport's rows (plus a small
+overscan) are built, the rest is padding, so a 10k-line file costs a few dozen
+row elements per frame.
 
 ## 1. What the tool is, and what the app has today
 
