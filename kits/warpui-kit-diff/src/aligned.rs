@@ -44,6 +44,13 @@ pub struct AlignedOptions<'a> {
     pub lead: Option<&'a mut dyn FnMut(AlignedSide, Option<u32>) -> Option<AnyElement>>,
     /// The detail font size the body renders at.
     pub font_detail: f32,
+    /// Rows the caller left out above and below the slice it passed, so the
+    /// body keeps the full height while only the window is drawn.
+    pub padding: (usize, usize),
+    /// The widest line's character count across the whole file. A windowed
+    /// caller passes it so the column width does not shrink while scrolling
+    /// past a long line; `None` measures the slice.
+    pub max_chars: Option<usize>,
 }
 
 /// The height one row takes at `font_detail`; hosts that scroll the body
@@ -55,11 +62,17 @@ pub fn row_height(font_detail: f32) -> gpui::Pixels {
 /// Draw the rows as two aligned columns under one body. The caller owns the
 /// scroller and the pane heads; this element is in flow and sizes to its rows.
 pub fn render_aligned(rows: &[AlignedRow<'_>], options: AlignedOptions<'_>) -> AnyElement {
-    let AlignedOptions { lead, font_detail } = options;
+    let AlignedOptions {
+        lead,
+        font_detail,
+        padding,
+        max_chars,
+    } = options;
     let mut lead = lead;
     let row_h = row_height(font_detail);
     let gutter_w = px(gutter_width(rows) as f32 * DIGIT_W + 14.);
-    let code_w = px(max_line_chars(rows) as f32 * font_detail * CHAR_W + 16.);
+    let widest = max_chars.unwrap_or_else(|| max_line_chars(rows));
+    let code_w = px(widest as f32 * font_detail * CHAR_W + 16.);
     let row_w = px(2. * (LEAD_W + f32::from(gutter_w)) + 1. + 2. * f32::from(code_w));
     let mut body = div()
         .debug_selector(|| "aligned-panes".into())
@@ -69,6 +82,9 @@ pub fn render_aligned(rows: &[AlignedRow<'_>], options: AlignedOptions<'_>) -> A
         .flex_col()
         .font_family(fonts::code_font())
         .text_size(px(font_detail));
+    if padding.0 > 0 {
+        body = body.child(div().h(row_h * padding.0 as f32).flex_none());
+    }
     for row in rows {
         let (left_emphasis, right_emphasis) = if row.changed {
             paired_word_emphasis(
@@ -125,6 +141,9 @@ pub fn render_aligned(rows: &[AlignedRow<'_>], options: AlignedOptions<'_>) -> A
                     lead.is_some(),
                 )),
         );
+    }
+    if padding.1 > 0 {
+        body = body.child(div().h(row_h * padding.1 as f32).flex_none());
     }
     body.into_any_element()
 }
