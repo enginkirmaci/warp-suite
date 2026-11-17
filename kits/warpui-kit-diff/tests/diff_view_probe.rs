@@ -297,6 +297,7 @@ impl Render for MenuHost {
                 gpui::ElementId::Name("diff-menu-probe".into()),
                 render_diff(&self.patch, Some("x.rs"), 13., window, cx),
                 Some(focus),
+                None,
             )))
     }
 }

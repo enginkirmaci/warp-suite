@@ -27,6 +27,6 @@ pub(crate) mod ops;
 pub(crate) mod state;
 pub(crate) mod theme;
 
-pub use element::LiveEditor;
+pub use element::{LiveEditor, MenuKeys};
 pub use state::{CodeBlock, LiveEditorEvent, LiveEditorState, read_only_selection_text};
 pub use theme::LiveColors;

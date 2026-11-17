@@ -231,6 +231,7 @@ fn a_drag_selects_text_in_a_bare_textarea(cx: &mut TestAppContext) {
 
 struct ReadOnly {
     anchor: Entity<TextMenuAnchor>,
+    copy_keys: Option<gpui::SharedString>,
 }
 
 impl Render for ReadOnly {
@@ -255,6 +256,7 @@ impl Render for ReadOnly {
                         gpui::ElementId::Name("readonly-menu".into()),
                         view,
                         Some(focus),
+                        self.copy_keys.clone(),
                     )),
             )
     }
@@ -265,7 +267,10 @@ fn the_read_only_menu_copies_the_selection(cx: &mut TestAppContext) {
     cx.update(gpui_kit::init);
     let root = cx.add_window(|window, cx| {
         let anchor = cx.new(TextMenuAnchor::new);
-        let view = cx.new(|_| ReadOnly { anchor });
+        let view = cx.new(|_| ReadOnly {
+            anchor,
+            copy_keys: None,
+        });
         gpui_kit::base::Root::new(view, window, cx)
     });
     let cx = VisualTestContext::from_window(*root.deref(), cx).into_mut();
@@ -292,6 +297,10 @@ fn the_read_only_menu_copies_the_selection(cx: &mut TestAppContext) {
     let after = cx.update(|window, cx| window.focused(cx));
     assert!(after.is_some(), "the menu took focus");
     assert_ne!(before, after, "focus moved from the surface to the menu");
+    assert!(
+        cx.debug_bounds("menu-key-Ctrl C").is_none(),
+        "a host that binds no copy key prints no keycap"
+    );
 
     // Click the Copy item, which sits inside the menu's content padding. The
     // press drops the window selection before the item runs, so this is the
@@ -307,6 +316,38 @@ fn the_read_only_menu_copies_the_selection(cx: &mut TestAppContext) {
     assert_eq!(
         copied, selected,
         "the menu copies the selection it opened on"
+    );
+}
+
+/// A host that answers Ctrl+C for the read-only selection passes the key, and
+/// the menu prints it at the Copy row's right edge.
+#[gpui_kit::gpui::test]
+fn the_read_only_menu_prints_the_hosts_copy_key(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+    let root = cx.add_window(|window, cx| {
+        let anchor = cx.new(TextMenuAnchor::new);
+        let view = cx.new(|_| ReadOnly {
+            anchor,
+            copy_keys: Some("Ctrl C".into()),
+        });
+        gpui_kit::base::Root::new(view, window, cx)
+    });
+    let cx = VisualTestContext::from_window(*root.deref(), cx).into_mut();
+    cx.run_until_parked();
+    let host = cx.debug_bounds("readonly-host").expect("the text draws");
+    let y = host.origin.y + px(8.);
+    drag(
+        cx,
+        point(host.origin.x + px(4.), y),
+        point(host.origin.x + px(300.), y),
+    );
+    let at = point(host.origin.x + px(150.), y);
+    cx.simulate_mouse_down(at, MouseButton::Right, Modifiers::default());
+    cx.simulate_mouse_up(at, MouseButton::Right, Modifiers::default());
+    cx.run_until_parked();
+    assert!(
+        cx.debug_bounds("menu-key-Ctrl C").is_some(),
+        "the Copy row prints the host's key"
     );
 }
 

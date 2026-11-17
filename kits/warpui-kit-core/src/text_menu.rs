@@ -10,7 +10,9 @@
 //! - [`menu`] builds the drawn context menu. Its Copy item carries the text
 //!   the window had selected when the menu opened: the press that activates an
 //!   item drops the window selection first, so a handler that read it at click
-//!   time would copy nothing.
+//!   time would copy nothing. The host passes the key it answers for that copy
+//!   (the surface takes no focus, so the shortcut is the host's): the row
+//!   prints it, and a host that binds none passes `None`.
 //! - [`attach`] wraps a selectable surface in the menu and the layout it
 //!   needs. It is a no-op when no host was installed, so a probe or a second
 //!   window without the host still renders.
@@ -24,10 +26,10 @@
 use gpui::prelude::*;
 use gpui::{
     AnyElement, App, ClipboardItem, Context, ElementId, Entity, FocusHandle, Global, IntoElement,
-    Render, Window, div, px,
+    Render, SharedString, Window, div, px,
 };
 use gpui_kit::base::TextSelection;
-use gpui_kit::component::menu::{ContextMenuExt as _, PopupMenu, PopupMenuItem};
+use gpui_kit::component::menu::{ContextMenuExt as _, PopupMenu};
 
 /// The zero-sized focus anchor a window renders once.
 pub struct TextMenuAnchor {
@@ -96,9 +98,12 @@ pub fn focus(cx: &App) -> Option<FocusHandle> {
 /// The drawn context menu: Copy, disabled while the window has no selection.
 ///
 /// `focus` is the focus the menu returns to; it must be the handle of a
-/// [`TextMenuAnchor`] rendered in the same window.
+/// [`TextMenuAnchor`] rendered in the same window. `copy_keys` is the keycap
+/// the host wants the row to print ("Ctrl C"), or `None` when it binds no
+/// keyboard copy for the read-only selection.
 pub fn menu(
     focus: FocusHandle,
+    copy_keys: Option<SharedString>,
 ) -> impl Fn(PopupMenu, &mut Window, &mut Context<PopupMenu>) -> PopupMenu + 'static {
     move |menu, window, cx| {
         // Take the text now, while the menu is built on the selection it was
@@ -106,13 +111,16 @@ pub fn menu(
         // selection before the item's handler runs.
         let text = TextSelection::selected_text(window, cx);
         let disabled = text.is_empty();
-        menu.action_context(focus.clone()).item(
-            PopupMenuItem::new("Copy")
-                .disabled(disabled)
-                .on_click(move |_, _, cx| {
+        let keys = copy_keys.clone();
+        menu.action_context(focus.clone())
+            .item(crate::controls::popup_menu_item(
+                "Copy",
+                keys,
+                disabled,
+                move |_, _, cx| {
                     cx.write_to_clipboard(ClipboardItem::new_string(text.clone()));
-                }),
-        )
+                },
+            ))
     }
 }
 
@@ -121,14 +129,18 @@ pub fn menu(
 /// `id` keeps the menu's element state separate per surface; rows rendered
 /// from one call site must not share it. A surface rendered without an
 /// installed host (no focus handle) still draws, just without the menu.
+/// `copy_keys` is forwarded to [`menu`].
 pub fn attach(
     id: impl Into<ElementId>,
     content: impl IntoElement,
     focus: Option<FocusHandle>,
+    copy_keys: Option<SharedString>,
 ) -> AnyElement {
     let wrapper = div().id(id).relative().child(content);
     match focus {
-        Some(focus) => wrapper.context_menu(menu(focus)).into_any_element(),
+        Some(focus) => wrapper
+            .context_menu(menu(focus, copy_keys))
+            .into_any_element(),
         None => wrapper.into_any_element(),
     }
 }

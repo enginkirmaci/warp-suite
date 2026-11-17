@@ -17,7 +17,7 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use warpui_kit_core::palette;
 use warpui_kit_markdown::{
-    LiveColors, LiveEditor, LiveEditorEvent, LiveEditorState, read_only_selection_text,
+    LiveColors, LiveEditor, LiveEditorEvent, LiveEditorState, MenuKeys, read_only_selection_text,
 };
 
 struct Probe {
@@ -64,6 +64,25 @@ impl Render for HostLinkProbe {
 struct HostMenuProbe {
     editor: Entity<LiveEditorState>,
     hits: Rc<Cell<usize>>,
+}
+
+/// A read-only surface whose host answers the copy keys itself, so it asks the
+/// menu to print them.
+struct MenuKeysProbe {
+    editor: Entity<LiveEditorState>,
+}
+
+impl Render for MenuKeysProbe {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div().size_full().child(
+            LiveEditor::new(&self.editor)
+                .read_only(true)
+                .menu_keys(MenuKeys {
+                    copy: Some("Ctrl C".into()),
+                    select_all: Some("Ctrl A".into()),
+                }),
+        )
+    }
 }
 
 impl Render for HostMenuProbe {
@@ -249,6 +268,29 @@ impl Harness {
         };
         this.settle();
         (this, hits)
+    }
+
+    /// A read-only surface whose menu prints the host's copy keys.
+    fn open_with_menu_keys(tcx: &mut TestAppContext, text: &str) -> Self {
+        tcx.update(gpui_kit::init);
+        let mut editor = None;
+        let handle = tcx.open_window(gpui::size(px(900.), px(700.)), |window, cx| {
+            let state = cx.new(|cx| {
+                let mut state = LiveEditorState::new(window, cx);
+                state.set_read_only(true, cx);
+                state.set_value(text.to_string(), window, cx);
+                state
+            });
+            editor = Some(state.clone());
+            MenuKeysProbe { editor: state }
+        });
+        let cx = VisualTestContext::from_window(handle.into(), tcx).into_mut();
+        let mut this = Self {
+            cx,
+            editor: editor.expect("the window was built"),
+        };
+        this.settle();
+        this
     }
 
     /// A read-only surface sized to its document by a host that scrolls
@@ -1333,4 +1375,74 @@ fn a_host_row_is_appended_to_the_read_only_menu(tcx: &mut TestAppContext) {
         h.cx.debug_bounds("host-menu-action").is_none(),
         "activating the row dismisses the menu"
     );
+}
+
+/// The editable menu's format rows are the editor's own bindings, so each one
+/// prints the key the editor answers to — the menu and the key cannot drift.
+#[gpui::test]
+fn the_editable_menu_prints_the_editor_keys(tcx: &mut TestAppContext) {
+    let mut h = Harness::open(tcx, "hello world¦");
+    let at = h.point_of(0);
+    h.cx.simulate_mouse_down(at, MouseButton::Right, Modifiers::default());
+    h.cx.simulate_mouse_up(at, MouseButton::Right, Modifiers::default());
+    h.settle();
+    for selector in [
+        "kbd:ctrl-x",
+        "kbd:ctrl-c",
+        "kbd:ctrl-v",
+        "kbd:ctrl-a",
+        "kbd:ctrl-b",
+        "kbd:ctrl-i",
+        "kbd:ctrl-k",
+        "kbd:ctrl-l",
+        "kbd:ctrl-d",
+    ] {
+        assert!(
+            h.cx.debug_bounds(selector).is_some(),
+            "the menu prints {selector}"
+        );
+    }
+}
+
+/// A read-only surface takes no focus, so its copy keys belong to the host: a
+/// host that binds them asks the menu to print them, and one that does not
+/// prints nothing.
+#[gpui::test]
+fn the_read_only_menu_prints_only_the_hosts_keys(tcx: &mut TestAppContext) {
+    let (mut h, _) = Harness::open_with_host_menu(tcx, "alpha beta gamma");
+    h.select(0..5);
+    let at = h.point_of(0);
+    h.cx.simulate_mouse_down(at, MouseButton::Right, Modifiers::default());
+    h.cx.simulate_mouse_up(at, MouseButton::Right, Modifiers::default());
+    h.settle();
+    assert!(
+        h.cx.debug_bounds("menu-key-Ctrl C").is_none(),
+        "the default read-only menu prints no key the host does not bind"
+    );
+
+    let mut h = Harness::open_with_menu_keys(tcx, "alpha beta gamma");
+    h.select(0..5);
+    let at = h.point_of(0);
+    h.cx.simulate_mouse_down(at, MouseButton::Right, Modifiers::default());
+    h.cx.simulate_mouse_up(at, MouseButton::Right, Modifiers::default());
+    h.settle();
+    assert!(
+        h.cx.debug_bounds("menu-key-Ctrl C").is_some(),
+        "the host's Copy key is printed"
+    );
+    assert!(
+        h.cx.debug_bounds("menu-key-Ctrl A").is_some(),
+        "the host's Select all key is printed"
+    );
+    // the keyed row still dispatches the editor's own Copy action
+    let copy =
+        h.cx.debug_bounds("menu-row-Copy")
+            .expect("the Copy row draws");
+    h.cx.simulate_click(copy.center(), Modifiers::default());
+    h.settle();
+    let copied =
+        h.cx.read_from_clipboard()
+            .and_then(|item| item.text())
+            .unwrap_or_default();
+    assert_eq!(copied, "alpha", "the keyed Copy row copies the selection");
 }

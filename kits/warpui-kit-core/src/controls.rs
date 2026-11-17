@@ -14,6 +14,7 @@ use gpui::{
     AnyElement, App, ClickEvent, Div, ElementId, FontWeight, Role, ScrollHandle, SharedString,
     Window, div, px,
 };
+use gpui_kit::component::menu::PopupMenuItem;
 
 /// The button looks: the accent fill, and the two quiet ones, which are the
 /// design's one outlined control. Primary carries the accent's on-accent text
@@ -80,9 +81,14 @@ pub fn button(
 }
 
 /// One context-menu row; destructive rows render in the danger color.
+///
+/// `keys` is the shortcut the app bound for the row, printed at the row's
+/// right edge as a keycap. Pass `None` for a row with no shortcut: the row
+/// must not invent a key the app does not answer to.
 pub fn menu_row(
     id: impl Into<ElementId>,
     label: impl Into<SharedString>,
+    keys: Option<SharedString>,
     destructive: bool,
     text_size: f32,
     on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
@@ -97,11 +103,67 @@ pub fn menu_row(
         .rounded_md()
         .text_size(px(text_size))
         .cursor_pointer()
+        .flex()
+        .items_center()
+        .justify_between()
+        .gap_3()
         .when(destructive, |d| d.text_color(palette::DANGER))
         .when(!destructive, |d| d.text_color(palette::text()))
         .hover(|s| s.bg(palette::HOVER))
         .on_click(on_click)
-        .child(label)
+        .child(div().min_w_0().truncate().child(label))
+        .children(keys.map(menu_keycap))
+        .into_any_element()
+}
+
+/// One `PopupMenu` row with an optional right-aligned keycap.
+///
+/// `gpui-component`'s [`PopupMenuItem`] prints a keycap only for an item bound
+/// to an action it can resolve a keybinding for. A menu that runs its rows
+/// through `on_click` (the read-only text menu, a host's own rows) gets the
+/// same column from this instead, with the shortcut the host actually binds.
+pub fn popup_menu_item(
+    label: impl Into<SharedString>,
+    keys: Option<SharedString>,
+    disabled: bool,
+    on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+) -> PopupMenuItem {
+    let label: SharedString = label.into();
+    PopupMenuItem::element(move |_, _| {
+        let selector = label.clone();
+        let mut row = div()
+            .id(ElementId::Name(format!("menu-item-{label}").into()))
+            .debug_selector(move || format!("menu-row-{selector}"))
+            .w_full()
+            .min_w_0()
+            .flex()
+            .items_center()
+            .justify_between()
+            .gap_3()
+            // An `ElementItem` carries no accessible name of its own, so the
+            // row names itself: the screen reader still reads one menuitem.
+            .role(Role::MenuItem)
+            .aria_label(label.clone())
+            .child(div().min_w_0().truncate().child(label.clone()));
+        if let Some(keys) = keys.clone() {
+            row = row.child(menu_keycap(keys));
+        }
+        row
+    })
+    .disabled(disabled)
+    .on_click(on_click)
+}
+
+/// The keycap at a menu row's right edge, tagged with its own key so a probe
+/// can assert the shortcut a row prints.
+fn menu_keycap(keys: SharedString) -> AnyElement {
+    div()
+        .flex_shrink_0()
+        .debug_selector({
+            let keys = keys.clone();
+            move || format!("menu-key-{keys}")
+        })
+        .child(crate::field::kbd(keys))
         .into_any_element()
 }
 

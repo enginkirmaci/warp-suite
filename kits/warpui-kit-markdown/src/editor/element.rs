@@ -33,6 +33,7 @@ use std::ops::Range;
 use std::panic::Location;
 use std::rc::Rc;
 use warpui_kit_core::A11y as _;
+use warpui_kit_core::controls::popup_menu_item;
 
 /// Quote bars and rules, in logical px.
 const BAR_WIDTH: f32 = 2.;
@@ -77,6 +78,7 @@ pub struct LiveEditor {
     fit_content: Option<bool>,
     code_overlay: Option<CodeOverlay>,
     host_menu: Option<HostMenu>,
+    menu_keys: MenuKeys,
     column: ColumnWidth,
     margin_x_em: Option<f32>,
     top_margin: TopMargin,
@@ -110,6 +112,20 @@ pub(crate) type CodeOverlay = Rc<dyn Fn(&CodeBlock) -> Option<AnyElement>>;
 /// editor's Copy / Select all.
 pub(crate) type HostMenu = Rc<dyn Fn(PopupMenu, &mut Window, &mut Context<PopupMenu>) -> PopupMenu>;
 
+/// The keycaps a read-only host wants printed beside the editor's Copy and
+/// Select all rows.
+///
+/// The read-only surface takes no focus, so those keys belong to the host: it
+/// answers Ctrl+C (or whatever it binds) for the selection itself, and only it
+/// can say so. A host that binds no such key leaves the field `None` and the
+/// row prints no keycap. The editable surface does not use this — its own
+/// keybindings already resolve into its menu.
+#[derive(Clone, Default)]
+pub struct MenuKeys {
+    pub copy: Option<SharedString>,
+    pub select_all: Option<SharedString>,
+}
+
 impl LiveEditor {
     pub fn new(state: &Entity<LiveEditorState>) -> Self {
         Self {
@@ -123,6 +139,7 @@ impl LiveEditor {
             fit_content: None,
             code_overlay: None,
             host_menu: None,
+            menu_keys: MenuKeys::default(),
             column: ColumnWidth::default(),
             margin_x_em: None,
             top_margin: TopMargin::default(),
@@ -231,6 +248,13 @@ impl LiveEditor {
         self.host_menu = Some(Rc::new(menu));
         self
     }
+
+    /// Print the host's keys beside the read-only menu's Copy and Select all
+    /// rows. See [`MenuKeys`].
+    pub fn menu_keys(mut self, keys: MenuKeys) -> Self {
+        self.menu_keys = keys;
+        self
+    }
 }
 
 impl RenderOnce for LiveEditor {
@@ -246,6 +270,7 @@ impl RenderOnce for LiveEditor {
             fit_content,
             code_overlay,
             host_menu,
+            menu_keys,
             column,
             margin_x_em,
             top_margin,
@@ -286,7 +311,15 @@ impl RenderOnce for LiveEditor {
         let hover_state = state.clone();
 
         if read_only {
-            return Self::render_read_only(state, aria_label, code_overlay, host_menu, window, cx);
+            return Self::render_read_only(
+                state,
+                aria_label,
+                code_overlay,
+                host_menu,
+                menu_keys,
+                window,
+                cx,
+            );
         }
 
         let label = aria_label.unwrap_or_else(|| "Note".into());
@@ -382,13 +415,22 @@ impl RenderOnce for LiveEditor {
             })
             .child(state::scrollbar(&scroll))
             .context_menu(move |menu, _, cx| {
+                // The format rows are the editor's own bindings: their keycaps
+                // resolve from the `LiveEditor` context while the surface is
+                // drawn, so a menu row and the key can never disagree.
                 let menu = menu
                     .action_context(menu_focus.clone())
                     .menu("Cut", Box::new(Cut))
                     .menu("Copy", Box::new(Copy))
                     .menu("Paste", Box::new(Paste))
                     .separator()
-                    .menu("Select all", Box::new(SelectAll));
+                    .menu("Select all", Box::new(SelectAll))
+                    .separator()
+                    .menu("Bold", Box::new(state::ToggleBold))
+                    .menu("Italic", Box::new(state::ToggleItalic))
+                    .menu("Insert link", Box::new(state::InsertLink))
+                    .menu("Toggle task", Box::new(state::ToggleTask))
+                    .menu("Delete line", Box::new(state::DeleteLine));
                 if menu_state.read(cx).menu_on_property() {
                     menu.separator()
                         .menu("Remove property", Box::new(state::RemoveProperty))
@@ -417,6 +459,7 @@ impl LiveEditor {
         label: Option<SharedString>,
         code_overlay: Option<CodeOverlay>,
         host_menu: Option<HostMenu>,
+        menu_keys: MenuKeys,
         window: &mut Window,
         cx: &mut App,
     ) -> AnyElement {
@@ -460,6 +503,10 @@ impl LiveEditor {
         });
 
         let menu_focus = focus.clone();
+        let copy_focus = focus.clone();
+        let select_focus = focus.clone();
+        let copy_key = menu_keys.copy.clone();
+        let select_key = menu_keys.select_all.clone();
         let hover_state = state.clone();
         div()
             .id(ElementId::View(state.entity_id()))
@@ -510,10 +557,40 @@ impl LiveEditor {
                     .on_action(window.listener_for(&state, LiveEditorState::select_all)),
             )
             .context_menu(move |menu, window, cx| {
-                let menu = menu
-                    .action_context(menu_focus.clone())
-                    .menu("Copy", Box::new(Copy))
-                    .menu("Select all", Box::new(SelectAll));
+                let mut menu = menu.action_context(menu_focus.clone());
+                // A host that answers the key itself gets a keycap; the row
+                // dispatches to the same action the old rows did, after
+                // moving focus to the editor's anchor so the handler runs.
+                menu = match copy_key.clone() {
+                    Some(keys) => {
+                        let target = copy_focus.clone();
+                        menu.item(popup_menu_item(
+                            "Copy",
+                            Some(keys),
+                            false,
+                            move |_, window, cx| {
+                                target.focus(window, cx);
+                                window.dispatch_action(Box::new(Copy), cx);
+                            },
+                        ))
+                    }
+                    None => menu.menu("Copy", Box::new(Copy)),
+                };
+                menu = match select_key.clone() {
+                    Some(keys) => {
+                        let target = select_focus.clone();
+                        menu.item(popup_menu_item(
+                            "Select all",
+                            Some(keys),
+                            false,
+                            move |_, window, cx| {
+                                target.focus(window, cx);
+                                window.dispatch_action(Box::new(SelectAll), cx);
+                            },
+                        ))
+                    }
+                    None => menu.menu("Select all", Box::new(SelectAll)),
+                };
                 match &host_menu {
                     Some(host) => host(menu, window, cx),
                     None => menu,

@@ -30,7 +30,9 @@ use std::cell::RefCell;
 use std::collections::VecDeque;
 
 pub use editor::read_only_selection_text;
-pub use editor::{CodeBlock, LiveColors, LiveEditor, LiveEditorEvent, LiveEditorState, note_key};
+pub use editor::{
+    CodeBlock, LiveColors, LiveEditor, LiveEditorEvent, LiveEditorState, MenuKeys, note_key,
+};
 pub use highlighter::{LIVE_LANGUAGE, live_highlighter_factory};
 pub use live::{MarkdownLiveKind, MarkdownLiveSpan, parse, parse_document, toggle_task_at};
 pub use read_only::{

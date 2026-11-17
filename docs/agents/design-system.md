@@ -386,8 +386,13 @@ mockup, and use the shared helper where one exists.
 - **Card:** `panel()`, `.border_1()`, `hairline()`, `.rounded_lg()`.
 - **Popover:** `controls::popover_card()` — `popup()`, `line_strong()` edge,
   8px radius, `.shadow_lg()`. A menu row is 32 high inside 4 padding, 14/500,
-  with its icon at 16 and any keycap right-aligned. warp-agent uses it; Warp
-  Station still draws its own menu chrome.
+  with its icon at 16 and any keycap right-aligned. `controls::menu_row` takes
+  that key as an `Option<SharedString>` and prints it, so a row never invents
+  a shortcut the app does not answer to; `controls::popup_menu_item` is the
+  same row for a `PopupMenu` item that runs through `on_click` (the kit's
+  read-only menus, a host's own rows), where `gpui-component` only prints a
+  key for action-bound items. warp-agent uses the helpers; Warp Station still
+  draws its own menu chrome.
 - **Dialog:** the scrim card every app draws for a blocking surface —
   `popup()`, `line_strong()` edge, 10px radius, one shadow. The header is 44
   high with the title at `font_brand` 15/600 and a quiet close; the footer
@@ -496,11 +501,17 @@ Use the core helper for new code rather than adding another copy.
   message — selects through the window's `TextSelectionLayer` instead. Give it
   the Copy menu: install `text_menu::install(cx)` once before the first frame,
   render the returned `TextMenuAnchor` at the root, and wrap the surface in
-  `text_menu::attach(id, element, text_menu::focus(cx))`. The menu is drawn by
-  GPUI, so it matches the family on every platform.
+  `text_menu::attach(id, element, text_menu::focus(cx), copy_keys)`. The menu
+  is drawn by GPUI, so it matches the family on every platform. `copy_keys` is
+  the key the host answers for the selection ("Ctrl C"), shown at the row's
+  right edge — or `None` when the host binds none, so the row prints nothing.
 - **The markdown editor** (`warpui-kit-markdown`) owns its own menu (Cut / Copy
-  / Paste / Select all while editing, Copy / Select all read-only). Do not
-  wrap a `LiveEditor` in `text_menu`; it would open two menus.
+  / Paste / Select all, then Bold / Italic / Link / Task / Delete line while
+  editing; Copy / Select all read-only). The editable rows are the editor's
+  own actions, so their keycaps come from its keybindings; a read-only host
+  passes the copy keys it answers for through `LiveEditor::menu_keys`, since
+  that surface takes no focus. Do not wrap a `LiveEditor` in `text_menu`; it
+  would open two menus.
 - **Keyboard copy** of a read-only selection is the host's. Neither surface
   takes focus, so Ctrl/Cmd+C never dispatches to it: the window's key handler
   copies the window selection (`TextSelection::selected_text`) or the
@@ -567,8 +578,8 @@ Rules that follow:
   (Cut/Copy/Paste/Select all while editing, Copy/Select all read-only); do not
   wrap it in `text_menu`. A host appends its own rows to a read-only editor's
   menu through `LiveEditor::host_menu`. A `TextView` or diff body takes
-  `text_menu::attach(…, text_menu::focus(cx))`. A label takes the row's action
-  menu (pin, rename, delete), not a Copy menu.
+  `text_menu::attach(…, text_menu::focus(cx), copy_keys)`. A label takes the
+  row's action menu (pin, rename, delete), not a Copy menu.
 - **An item's own actions extend the text menu, they do not replace it.** A
   chat bubble may add Edit/Reprompt/Fork, but Copy and Select all stay for a
   selection inside it, and Ctrl/Cmd+C copies the selection.
