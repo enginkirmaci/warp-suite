@@ -497,6 +497,21 @@ fn word_emphasis(old: &str, new: &str) -> (Vec<Range<usize>>, Vec<Range<usize>>)
     (trim_ranges(old, old_ranges), trim_ranges(new, new_ranges))
 }
 
+/// Word-level emphasis for a surface that pairs two rows itself (the merge
+/// editor's conflict panes), switched by the caller. The diff renderer keeps
+/// its own emphasis path above, so nothing about a rendered diff moves when a
+/// caller turns this off: the answer is two empty lists and no diff runs.
+pub fn paired_word_emphasis(
+    old: &str,
+    new: &str,
+    show: bool,
+) -> (Vec<Range<usize>>, Vec<Range<usize>>) {
+    if !show || old.is_empty() || new.is_empty() {
+        return (Vec::new(), Vec::new());
+    }
+    word_emphasis(old, new)
+}
+
 fn trim_ranges(text: &str, ranges: Vec<Range<usize>>) -> Vec<Range<usize>> {
     let mut merged: Vec<Range<usize>> = Vec::new();
     for range in ranges {

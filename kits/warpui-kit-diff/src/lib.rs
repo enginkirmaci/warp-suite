@@ -63,13 +63,15 @@
 //! crate's `tree-sitter-*` features forward to gpui-kit) for the languages
 //! callers render.
 
+mod aligned;
 mod document;
 mod highlight;
 mod selectable;
 
+pub use aligned::{AlignedOptions, AlignedRow, AlignedSide, render_aligned, row_height};
 pub use document::{
     DiffDocument, DiffFile, DiffHunk, DiffRow, HunkText, RowKind, SplitRow, lang_from_path,
-    patch_from_hunks,
+    paired_word_emphasis, patch_from_hunks,
 };
 pub use highlight::highlight_buffer;
 use selectable::SelectableText;
