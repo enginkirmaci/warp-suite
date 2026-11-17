@@ -105,7 +105,7 @@ Both builds default the version to `git describe --tags --always
 | `suite.toml` | the pin table: the kit tag and one tag per app |
 | `scripts/meta/manifest.py` | suite.toml + app.toml reader shared by the scripts + CI |
 | `.cargo/config.toml` | one cargo target dir for the whole suite: `.build/target` for every app, `kits` and `scripts/build/build.sh` |
-| `kits/` | the six `warpui-kit-*` crates, members of the kit workspace; their paths live in the root `[workspace.dependencies]` |
+| `kits/` | the seven `warpui-kit-*` crates, members of the kit workspace; their paths live in the root `[workspace.dependencies]` |
 | `scripts/dev/refresh.sh` | pulls each app's latest `main`, then builds without installers (`refresh.ps1` on Windows) |
 | `scripts/build/build.sh` | Linux build: `cargo build --release` each app → `dist/linux/warp-suite-<v>-linux/` + tarball |
 | `scripts/build/build.ps1` | Windows build: `dist/windows/` portable zips + Inno Setup installers |
@@ -140,6 +140,9 @@ together. When one changes, update the other side in the **same** commit.
   built-in Tasks workspace, where the AI wands run: a wand prompt carries its
   own diff or file tree, so it must not add the repo to warp-agent's sidebar
   as a workspace.
+  A worktree chat uses the same command: Warp Station sends `new-chat` with the
+  checkout's folder (`<repo>/.worktrees/<branch>`), which warp-agent opens as a
+  workspace and nests under the repository's row.
   `new-chat`/`run-prompt` accept `harness`/`model`/`variant`, and `models`
   answers with the harnesses and each model's variants. `models` also takes
   `refresh: true`: the door re-reads that harness's backend (starting it when

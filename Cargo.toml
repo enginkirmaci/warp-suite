@@ -28,6 +28,7 @@ members = [
     "kits/warpui-kit-markdown",
     "kits/warpui-kit-picker",
     "kits/warpui-kit-platform",
+    "kits/warpui-kit-worktree",
     # Local-only symlinks to the sibling app checkouts (scripts/dev/link-apps.sh).
     # With no links present the glob matches nothing and the kit-only CI still
     # resolves.
@@ -35,7 +36,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.2.73"
+version = "0.2.74"
 edition = "2024"
 # Apps inherit GPL-3.0; every kit overrides this with "MIT" in its own
 # manifest. The publishable kits inherit the suite URL the same way.
@@ -59,6 +60,7 @@ warpui-kit-core = { path = "kits/warpui-kit-core" }
 warpui-kit-build = { path = "kits/warpui-kit-build" }
 warpui-kit-diff = { path = "kits/warpui-kit-diff" }
 warpui-kit-platform = { path = "kits/warpui-kit-platform" }
+warpui-kit-worktree = { path = "kits/warpui-kit-worktree" }
 
 # third-party crates shared by two or more members
 anyhow = "1"
@@ -88,6 +90,7 @@ warpui-kit-markdown = { path = "kits/warpui-kit-markdown" }
 warpui-kit-picker = { path = "kits/warpui-kit-picker" }
 warpui-kit-platform = { path = "kits/warpui-kit-platform" }
 warpui-kit-build = { path = "kits/warpui-kit-build" }
+warpui-kit-worktree = { path = "kits/warpui-kit-worktree" }
 
 # Dev/test profile: line tables only.
 #

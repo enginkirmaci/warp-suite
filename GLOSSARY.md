@@ -27,6 +27,8 @@ consumer rules are in [`docs/agents/domain.md`](docs/agents/domain.md).
 | **version facts** | Each repository's `version.toml` line plus the values stamped into the binary (About, `--version`, the Windows file version, `/health`). |
 | **rail** | The fixed-width file column beside a diff pane — the Changes file list, a History commit's files, and a pull request's Files tab. A rail is a focusable list with its own cursor. |
 | **file tree** | Changed files grouped by the folders their paths share, folding and counting per folder. Synthesized from the changed paths only: it is a view of the change, not a repository explorer, and never lists an untouched file. |
+| **worktree** | A second working directory of a repository, checked out on its own branch, so work can happen without moving the repository's main checkout. A chat's worktree is that chat's directory. Both apps create them by the same rule. |
+| **parent repo** | The repository a worktree was branched from: Station's repo row, and the folder a chat's worktree toggle branches off. Its branch is what the worktree starts from. |
 
 ## Not in this glossary
 

@@ -69,7 +69,7 @@ cargo metadata --no-deps --format-version 1 |
 ```
 
 Step 4 must list `warp-station`, `warp-station-core`, `warp-agent`,
-`warp-notes`, `warp-pomodoro`, `warp-snapit` and the six `warpui-kit-*`
+`warp-notes`, `warp-pomodoro`, `warp-snapit` and the seven `warpui-kit-*`
 crates.
 
 ## Daily commands

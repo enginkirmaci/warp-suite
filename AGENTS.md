@@ -95,16 +95,17 @@ slow build as normal.
 Kits have no CI workflow; run their gate locally:
 
 - `cargo fmt --all --check`.
-- Clippy with `-D warnings` on the six kit crates:
+- Clippy with `-D warnings` on the seven kit crates:
 
   ```sh
   cargo clippy --all-targets \
     -p warpui-kit-core -p warpui-kit-diff -p warpui-kit-markdown \
-    -p warpui-kit-picker -p warpui-kit-platform -p warpui-kit-build \
+    -p warpui-kit-picker -p warpui-kit-platform -p warpui-kit-worktree \
+    -p warpui-kit-build \
     -- -D warnings
   ```
 
-- `cargo test` on the six kit crates.
+- `cargo test` on the seven kit crates.
 
 Each app's own `ci.yml` runs that app's fmt, clippy and tests. After a kit
 change, `cargo test -p <app>` builds that linked app against the kit, which is

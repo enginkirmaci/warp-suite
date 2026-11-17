@@ -1,0 +1,14 @@
+[package]
+name = "warpui-kit-worktree"
+version.workspace = true
+edition.workspace = true
+description = "The suite's one implementation of git worktrees: a worktree per chat under its parent repository, listed, created, removed and pruned the same way by every app"
+license = "MIT"
+repository.workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+
+[dev-dependencies]
+# the tests drive real repositories in throwaway folders
+tempfile = { workspace = true }

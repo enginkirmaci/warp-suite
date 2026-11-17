@@ -4,7 +4,7 @@ Three independent lines, one per kind of repository:
 
 | Line | Source | Tag | Covers |
 |---|---|---|---|
-| Kit | warp-suite `version.toml` | `kits-v<version>` | the six `warpui-kit-*` crates |
+| Kit | warp-suite `version.toml` | `kits-v<version>` | the seven `warpui-kit-*` crates |
 | App | the app repository's `version.toml` | `v<version>` | that app's binary/APK |
 | Suite | [`suite.toml`](../../suite.toml) | `v<suite version>` | the pin table: one app tag per app plus the kit tag |
 

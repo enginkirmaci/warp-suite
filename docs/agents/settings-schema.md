@@ -160,6 +160,12 @@ passes answer again.
 `workspaces[]`: `path`, `sessions`, `active_session`, `open_sessions`,
 `collapsed`. Session ids and folder paths inside the maps are opaque.
 
+A `workspaces[]` entry may be a worktree folder (`<repo>/.worktrees/<slug>`):
+warp-agent keeps that row out of the sidebar and renders its chats under the
+repository's, so a worktree changes no key here. Worktrees themselves are git
+state, not app state: the kit crate lists them and nothing about them is
+persisted.
+
 ## Model caches
 
 `schema_version`, `models[]`: `key`, `harness`, `variants`, `context_limit`.
