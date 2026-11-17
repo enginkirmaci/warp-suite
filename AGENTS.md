@@ -307,8 +307,6 @@ what is still useful into `docs/agents/` or the app's `README.md`.
 
 - Never commit a token, PAT, password, private IP, Wi-Fi SSID, home path or
   personal email in file content. Use placeholders in docs and examples.
-- A commit's author and committer are public. Use the public GitHub noreply
-  address, never a private one.
 - Pass credentials through GitHub Actions secrets only; never echo or log them.
 - The Android bridge's bearer token is its only auth on the public route: keep
   the token, the UFW LAN rule and HTTPS in place, and add Cloudflare Access/WAF
