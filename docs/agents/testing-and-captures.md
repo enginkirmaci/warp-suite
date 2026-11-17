@@ -78,7 +78,7 @@ construction. Use them instead of clicking through a hidden window.
 
 | App | Variable | Values |
 | --- | --- | --- |
-| Warp Station | `WARP_STATION_PAGE` | `settings`, `summary`, `merge`, `pomodoro`, `tools`, `about` |
+| Warp Station | `WARP_STATION_PAGE` | `settings`, `summary`, `pomodoro`, `tools`, `about` |
 | Warp Station | `WARP_STATION_LICENSE` | `1` opens About with the license card up |
 | Warp Station | `WARP_STATION_SHORTCUTS` | `1` opens the keyboard sheet on launch |
 | Warp Station | `WARP_STATION_SHEET` | tab label, case-insensitive: `Overview`, `Changes`, `History`, `Pull requests`, `Issues`, `Pipelines` |

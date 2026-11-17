@@ -1,10 +1,36 @@
 # A merge editor for stopped operations
 
-Status: phases 1–5 landed on 2026-11-16: the headless read model, the Merge
-rail page, the editable Result with block takes and Save/Reload, the staging
-gate with whole-file takes, and the keyboard and accessibility pass. §3 is the
-decided contract (D1–D12), §5 the proofs and which of them closed, §6 the phase
-order.
+Status: phases 1–5 landed, then the owner asked for the Visual Studio 2026
+shape; revision 2 is in progress and supersedes the rail page. The merge
+editor is now a **detail mode**, not a rail section (D12 retired): Changes
+shows a conflict banner with an Open merge editor button, and the editor takes
+the repository detail body. Per-line checkboxes, the icon toolbar, word-level
+highlighting, three-pane scroll sync, a configurable size cap and
+"Merge into current branch" are the remaining revision-2 work.
+
+Revision 2 so far: the editor lives in the repository detail (a mode, not a
+tab), Changes shows the conflict banner and opens it, both source panes carry a
+pick box per conflict line, and the Result is composed from the picks over the
+file's original marker text (Current line first per row, then Incoming). The
+toolbar is icon buttons — previous/next conflict, reload, save — with Stage as
+the one filled action. The stale header count is fixed by a notify after the
+pane seeds.
+
+The Current/Incoming columns are now `warpui-kit-diff`'s aligned view
+(`render_aligned`, `AlignedRow`, `AlignedOptions`) instead of the page's own
+row control: the kit draws the gutters, the change washes and the intra-line
+word emphasis, and the pick boxes are its opt-in `lead` property — with
+`lead: None` the kit draws no leading column, so every other diff surface is
+untouched. The app pins the kit by tag (`kits-v0.2.49`), so shipping this
+needs a fresh kit tag and a pin bump in the same window.
+
+The rest of the revision-2 list landed with it: the file-size cap moved into
+`repos.merge_max_kb` (2048 KiB by default, clamped to at least 64) and reaches
+`merge::session_with_cap` through `LoadMerge`; a conflicted "Merge into
+current" opens the editor when the probe reports the stop; and conflict
+navigation (Alt+↑/↓, the toolbar arrows, a strip row) scrolls the aligned
+panes to the block's row and the Result editor to the block's line in the
+composed text. Wheel-scrolling the three surfaces together is not wired.
 
 ## 1. What the tool is, and what the app has today
 
