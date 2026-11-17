@@ -248,3 +248,7 @@ The take buttons carry accessible names that say which conflict they act on
 (`neutral_button_named`), the shortcut sheet gained a Merge group, and the merge
 probe exercises the keyboard walk. No capture was taken: the documented
 hidden-window recipe drives the live desktop, which this session leaves alone.
+
+The panes split the width in two and clip a long line at its column edge; the
+conflict strip is gone (the toolbar arrows and the panes' own Alt+↑/↓ cover
+navigation), so the Result gets the space.
