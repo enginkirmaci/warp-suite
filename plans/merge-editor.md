@@ -30,7 +30,10 @@ The rest of the revision-2 list landed with it: the file-size cap moved into
 current" opens the editor when the probe reports the stop; and conflict
 navigation (Alt+↑/↓, the toolbar arrows, a strip row) scrolls the aligned
 panes to the block's row and the Result editor to the block's line in the
-composed text. Wheel-scrolling the three surfaces together is not wired.
+composed text. The Result also carries one band per picked line, colored by
+the side it came from, and the panes and the Result reconcile their scroll
+offsets every frame by line height, so a wheel on either surface takes the
+other with it.
 
 ## 1. What the tool is, and what the app has today
 
