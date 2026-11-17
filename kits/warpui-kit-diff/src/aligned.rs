@@ -16,6 +16,10 @@ const DIGIT_W: f32 = 7.6;
 const LEAD_W: f32 = 22.0;
 /// The row height relative to the detail font: one mono line plus its gap.
 const ROW_SCALE: f32 = 1.6;
+/// One mono character's advance at the detail font: what sizes a column wide
+/// enough for its longest line so the body can scroll sideways instead of
+/// clipping the text.
+const CHAR_W: f32 = 0.62;
 
 /// Which column a leading cell belongs to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -55,9 +59,12 @@ pub fn render_aligned(rows: &[AlignedRow<'_>], options: AlignedOptions<'_>) -> A
     let mut lead = lead;
     let row_h = row_height(font_detail);
     let gutter_w = px(gutter_width(rows) as f32 * DIGIT_W + 14.);
+    let code_w = px(max_line_chars(rows) as f32 * font_detail * CHAR_W + 16.);
+    let row_w = px(2. * (LEAD_W + f32::from(gutter_w)) + 1. + 2. * f32::from(code_w));
     let mut body = div()
         .debug_selector(|| "aligned-panes".into())
         .w_full()
+        .min_w(row_w)
         .flex()
         .flex_col()
         .font_family(fonts::code_font())
@@ -87,32 +94,53 @@ pub fn render_aligned(rows: &[AlignedRow<'_>], options: AlignedOptions<'_>) -> A
         body = body.child(
             div()
                 .w_full()
+                .min_w(row_w)
                 .flex()
                 .flex_row()
                 .items_stretch()
                 .h(row_h)
                 .child(column(
-                    row.left,
+                    Side {
+                        line: row.left,
+                        wash: left_wash,
+                        emphasis_bg: left_emphasis_bg,
+                        emphasis: &left_emphasis,
+                        lead: lead_cell_left,
+                    },
                     gutter_w,
-                    left_wash,
-                    left_emphasis_bg,
-                    &left_emphasis,
+                    code_w,
                     lead.is_some(),
-                    lead_cell_left,
                 ))
                 .child(div().flex_shrink_0().w(px(1.)).bg(palette::hairline()))
                 .child(column(
-                    row.right,
+                    Side {
+                        line: row.right,
+                        wash: right_wash,
+                        emphasis_bg: right_emphasis_bg,
+                        emphasis: &right_emphasis,
+                        lead: lead_cell_right,
+                    },
                     gutter_w,
-                    right_wash,
-                    right_emphasis_bg,
-                    &right_emphasis,
+                    code_w,
                     lead.is_some(),
-                    lead_cell_right,
                 )),
         );
     }
     body.into_any_element()
+}
+
+/// The longest line either side shows, in characters.
+fn max_line_chars(rows: &[AlignedRow<'_>]) -> usize {
+    rows.iter()
+        .flat_map(|row| {
+            [
+                row.left.map(|(_, text)| text.chars().count()),
+                row.right.map(|(_, text)| text.chars().count()),
+            ]
+        })
+        .flatten()
+        .max()
+        .unwrap_or(0)
 }
 
 fn gutter_width(rows: &[AlignedRow<'_>]) -> usize {
@@ -131,15 +159,15 @@ fn gutter_width(rows: &[AlignedRow<'_>]) -> usize {
 }
 
 /// One side of a row: the optional leading cell, the number, then the code.
-fn column(
-    line: Option<(u32, &str)>,
-    gutter_w: gpui::Pixels,
+struct Side<'a> {
+    line: Option<(u32, &'a str)>,
     wash: Option<Hsla>,
     emphasis_bg: Option<Hsla>,
-    emphasis: &[Range<usize>],
-    has_lead: bool,
+    emphasis: &'a [Range<usize>],
     lead: Option<AnyElement>,
-) -> Div {
+}
+
+fn column(side: Side<'_>, gutter_w: gpui::Pixels, code_w: gpui::Pixels, has_lead: bool) -> Div {
     let mut cell = div()
         .flex_1()
         .min_w_0()
@@ -148,7 +176,7 @@ fn column(
         .flex_row()
         .items_stretch()
         .overflow_hidden()
-        .when_some(wash, |cell, wash| cell.bg(wash));
+        .when_some(side.wash, |cell, wash| cell.bg(wash));
     if has_lead {
         cell = cell.child(
             div()
@@ -157,7 +185,7 @@ fn column(
                 .flex()
                 .items_center()
                 .justify_center()
-                .children(lead.or_else(|| Some(div().into_any_element()))),
+                .children(side.lead.or_else(|| Some(div().into_any_element()))),
         );
     }
     cell = cell.child(
@@ -170,22 +198,27 @@ fn column(
             .items_center()
             .text_color(palette::DIFF_GUTTER)
             .child(
-                line.map(|(number, _)| SharedString::from(number.to_string()))
+                side.line
+                    .map(|(number, _)| SharedString::from(number.to_string()))
                     .unwrap_or_default(),
             ),
     );
-    let text = line.map(|(_, text)| text).unwrap_or("");
-    cell.child(code(text, emphasis, emphasis_bg))
+    let text = side.line.map(|(_, text)| text).unwrap_or("");
+    cell.child(code(text, code_w, side.emphasis, side.emphasis_bg))
 }
 
 /// The code cell, with the changed words carried on their own spans so the
 /// emphasis band sits behind the text without a second text layout.
-fn code(text: &str, emphasis: &[Range<usize>], bg: Option<Hsla>) -> AnyElement {
+fn code(
+    text: &str,
+    code_w: gpui::Pixels,
+    emphasis: &[Range<usize>],
+    bg: Option<Hsla>,
+) -> AnyElement {
     let mut cell = div()
         .flex_1()
-        .min_w_0()
+        .min_w(code_w)
         .px_2()
-        .overflow_hidden()
         .whitespace_nowrap()
         .text_color(Hsla::from(palette::CODE_FG));
     let Some(bg) = bg.filter(|_| !emphasis.is_empty()) else {
