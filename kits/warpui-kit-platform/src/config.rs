@@ -8,6 +8,11 @@
 //!
 //! The store never rewrites keys. A file written by an older suite is an
 //! importer's input, not something the live store normalizes.
+//!
+//! A store that holds user settings can also be told to carry the keys its
+//! type does not know ([`Store::preserving_unknown`]): an older build then
+//! reads a file a newer build wrote, and its next save keeps the newer
+//! fields instead of dropping them.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -182,6 +187,7 @@ pub struct Store<T> {
     path: PathBuf,
     version: u32,
     lock: bool,
+    preserve_unknown: bool,
     marker: PhantomData<fn() -> T>,
 }
 
@@ -195,6 +201,7 @@ where
             path: path.into(),
             version: CURRENT_VERSION,
             lock: false,
+            preserve_unknown: false,
             marker: PhantomData,
         }
     }
@@ -205,6 +212,25 @@ where
     /// have one owner and do not need it.
     pub fn with_lock(mut self) -> Self {
         self.lock = true;
+        self
+    }
+
+    /// Carry the keys the on-disk document holds but this build's type does
+    /// not know through the next write, descending into objects (an array or
+    /// a scalar is one value and is never merged).
+    ///
+    /// Settings and UI state use this so a newer build's fields survive an
+    /// older build's save; a cache leaves it off and writes exactly what it
+    /// holds. The type must tolerate unknown keys on read for this to matter —
+    /// a strict (`deny_unknown_fields`) type never gets past [`load`].
+    ///
+    /// Only a document at this store's own `schema_version` is carried: an
+    /// unversioned or older file is importer input, so its keys are the
+    /// importer's to translate and are not resurrected.
+    ///
+    /// [`load`]: Store::load
+    pub fn preserving_unknown(mut self) -> Self {
+        self.preserve_unknown = true;
         self
     }
 
@@ -236,6 +262,9 @@ where
     pub fn save(&self, value: &T) -> Result<(), Error> {
         self.ensure_writable()?;
         let mut value = serde_json::to_value(value)?;
+        if self.preserve_unknown {
+            carry_unknown_keys(&self.path, self.version, &mut value);
+        }
         let object = value.as_object_mut().ok_or(Error::NotAnObject)?;
         object.insert(VERSION_KEY.to_string(), Value::from(self.version));
         let text = serde_json::to_string_pretty(&value)?;
@@ -305,6 +334,49 @@ where
             crate::io::write_atomically(&self.path, text)
                 .map_err(|err| Error::Io(std::io::Error::other(format!("{err:#}"))))
         }
+    }
+}
+
+/// Merge the keys the file at `path` holds but `next` does not into `next`.
+/// A missing, corrupt, non-object or differently versioned file carries
+/// nothing: the write is then exactly the typed document, which is what a
+/// first save and an importer's rewrite should be.
+fn carry_unknown_keys(path: &Path, version: u32, next: &mut Value) {
+    let Ok(text) = fs::read_to_string(path) else {
+        return;
+    };
+    let Ok(current) = serde_json::from_str::<Value>(&text) else {
+        return;
+    };
+    if current.get(VERSION_KEY).and_then(Value::as_u64) != Some(u64::from(version)) {
+        return;
+    }
+    let Some(current) = current.as_object() else {
+        return;
+    };
+    merge_unknown(current, next);
+}
+
+/// The recursive half of [`carry_unknown_keys`]: objects merge key by key, so
+/// a newer field inside a section survives as well as one at the top. The
+/// reserved version key is this build's to write, never carried.
+fn merge_unknown(current: &Map<String, Value>, next: &mut Value) {
+    let Some(next) = next.as_object_mut() else {
+        return;
+    };
+    for (key, old) in current {
+        if key == VERSION_KEY {
+            continue;
+        }
+        // an absent key is this build's blind spot: carry the newer value
+        // (and, for an object, the newer keys inside it)
+        let child = next.entry(key.clone()).or_insert_with(|| old.clone());
+        if child.is_object()
+            && let Some(old) = old.as_object()
+        {
+            merge_unknown(old, child);
+        }
+        // a scalar or an array is one value: the live build's value wins
     }
 }
 
@@ -618,6 +690,95 @@ mod tests {
         .unwrap();
         let store = Store::<Doc>::new(path.clone());
         assert!(matches!(store.load(), Err(Error::Json(_))));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// The tolerant twin of `Doc`: no `deny_unknown_fields`, so a file a newer
+    /// build wrote stays readable.
+    #[derive(Debug, Default, PartialEq, Serialize, Deserialize)]
+    struct LaterDoc {
+        #[serde(default)]
+        name: String,
+        #[serde(default)]
+        repos: LaterRepos,
+    }
+
+    #[derive(Debug, Default, PartialEq, Serialize, Deserialize)]
+    struct LaterRepos {
+        #[serde(default)]
+        depth: u32,
+    }
+
+    fn later_file(dir: &Path) -> PathBuf {
+        let path = dir.join("settings.json");
+        fs::write(
+            &path,
+            r#"{"schema_version":1,"name":"alpha","future":"kept","repos":{"depth":2,"later":true}}"#,
+        )
+        .unwrap();
+        path
+    }
+
+    #[test]
+    fn a_tolerant_type_reads_a_file_a_newer_build_wrote() {
+        let dir = scratch("tolerant-read");
+        let path = later_file(&dir);
+        let doc = Store::<LaterDoc>::new(path.clone()).load().unwrap();
+        assert_eq!(doc.name, "alpha");
+        assert_eq!(doc.repos.depth, 2);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_preserving_store_carries_unknown_keys_through_a_save() {
+        let dir = scratch("preserving");
+        let path = later_file(&dir);
+        let store = Store::<LaterDoc>::new(path.clone()).preserving_unknown();
+        store.update(|doc| doc.repos.depth = 3).unwrap();
+
+        let saved: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(saved["future"], "kept", "the top-level key survives");
+        assert_eq!(saved["repos"]["later"], true, "a section key survives too");
+        assert_eq!(saved["repos"]["depth"], 3, "the live value still wins");
+        assert_eq!(saved[VERSION_KEY], 1, "the version stays this build's");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_plain_store_writes_only_the_keys_it_holds() {
+        let dir = scratch("plain-write");
+        let path = later_file(&dir);
+        let store = Store::<LaterDoc>::new(path.clone());
+        let doc = store.load().unwrap();
+        store.save(&doc).unwrap();
+
+        let saved: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        assert!(saved.get("future").is_none(), "not carried: {saved}");
+        assert!(
+            saved["repos"].get("later").is_none(),
+            "not carried: {saved}"
+        );
+        assert_eq!(saved["repos"]["depth"], 2);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_preserving_store_does_not_resurrect_a_legacy_key() {
+        let dir = scratch("preserving-legacy");
+        let path = dir.join("settings.json");
+        fs::write(&path, r#"{"name":"alpha","Legacy":true}"#).unwrap();
+
+        Store::<LaterDoc>::new(path.clone())
+            .preserving_unknown()
+            .save(&LaterDoc::default())
+            .unwrap();
+
+        let saved: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        assert!(
+            saved.get("Legacy").is_none(),
+            "an importer drops it: {saved}"
+        );
+        assert_eq!(saved[VERSION_KEY], 1);
         let _ = fs::remove_dir_all(&dir);
     }
 

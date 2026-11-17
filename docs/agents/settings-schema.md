@@ -13,8 +13,11 @@ compatibility rules that must not drift.
   left untouched; an older or unversioned one is importer input.
 - `warpui_kit_platform::config::SharedDoc` owns the shared `~/.warp/ui.json`:
   read-modify-write, unknown keys preserved, sidecar lock.
-- Per-app settings are strict (`deny_unknown_fields`). UI-state and cache
-  files tolerate unknown keys so a newer build does not strand an older one.
+- Settings and UI state tolerate unknown keys, so a file a newer build wrote
+  still loads in an older one, and `Store::preserving_unknown` carries the
+  keys the older build does not know through its next save: switching between
+  two builds never drops a section. Caches write exactly what they hold and
+  lose no user state. warp-snapit stays strict (see [SnapIt](#snapit)).
 - `KeyMap<V>` is a transparent map whose keys are user data (session ids,
   folder paths, monitor names). No casing pass may rewrite those keys.
 - File names are lowercase and have no `.cache` suffix.
@@ -255,13 +258,14 @@ PascalCase layouts are importer input. They are read once, rewritten native,
 and the old file is retired. Warp Station's layout preview reads both shapes
 so it works before warp-snapit has run after an upgrade.
 
-warp-snapit's native documents are strict like every other app's
-(`deny_unknown_fields`), so a mistyped key is reported instead of ignored. The
-keys the schema has retired — `Version`, `EnableKeyboard`, `Keyboard`,
-`ShowMainWindow`, `AppTheme`, the five move shortcuts and the two layout
-shortcuts, `IsVersion3000MessageShown`, `CheckForNewVersion`, `RunAsAdmin` and
-`MouseHoverAnimation` — are stripped before the strict parse, so an older or
-.NET-era file still loads and is rewritten without them.
+warp-snapit's native documents are the one strict settings shape left
+(`deny_unknown_fields`), so a mistyped key is reported instead of ignored; its
+readers in Warp Station stay tolerant. The keys the schema has retired —
+`Version`, `EnableKeyboard`, `Keyboard`, `ShowMainWindow`, `AppTheme`, the five
+move shortcuts and the two layout shortcuts, `IsVersion3000MessageShown`,
+`CheckForNewVersion`, `RunAsAdmin` and `MouseHoverAnimation` — are stripped
+before the strict parse, so an older or .NET-era file still loads and is
+rewritten without them.
 ## Import rules
 
 - `SettingsService::at`, `AppSettings::load`, `UiState::load`,
@@ -273,6 +277,11 @@ shortcuts, `IsVersion3000MessageShown`, `CheckForNewVersion`, `RunAsAdmin` and
   and drops retired fields.
 - The live store never normalizes keys. A file with a newer
   `schema_version` is left alone and the app falls back to defaults.
+- A preserving save carries the keys this build's type does not know, but only
+  from a file at the store's own `schema_version` — one build's file, so the
+  next older build to save keeps it whole. An unversioned or older file is
+  importer input instead: its keys are translated, and the ones the importer
+  did not carry over (the legacy `Repos` object, a retired field) stay gone.
 - A cache is regenerable. The only user data an old cache owned was repo tags;
   the station importer lifts them into `repos.repo_tags` before the cache is
   rewritten.
