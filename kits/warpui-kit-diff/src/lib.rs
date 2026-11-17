@@ -68,7 +68,10 @@ mod document;
 mod highlight;
 mod selectable;
 
-pub use aligned::{AlignedOptions, AlignedRow, AlignedSide, render_aligned, row_height};
+pub use aligned::{
+    AlignedOptions, AlignedRow, AlignedSide, aligned_pane_head, aligned_pick_box, render_aligned,
+    row_height, visible_window,
+};
 pub use document::{
     DiffDocument, DiffFile, DiffHunk, DiffRow, HunkText, RowKind, SplitRow, lang_from_path,
     paired_word_emphasis, patch_from_hunks,
@@ -1593,7 +1596,7 @@ fn highlight_hunk(
     out
 }
 
-fn slice_runs(
+pub(crate) fn slice_runs(
     styles: &[(Range<usize>, HighlightStyle)],
     start: usize,
     len: usize,
@@ -1612,7 +1615,7 @@ fn slice_runs(
 
 /// Token colors plus the emphasis band, split so the two kinds of highlight
 /// never overlap (a `StyledText` run list is a partition, not a layer stack).
-fn merged_runs(
+pub(crate) fn merged_runs(
     text_len: usize,
     tokens: &[(Range<usize>, HighlightStyle)],
     emphasis: &[Range<usize>],
@@ -1673,7 +1676,7 @@ fn merged_runs(
 /// Highlights every content line in one buffer pass (block comments and
 /// strings run across lines) and splits the result back per line, offsets
 /// relative to each line's content start.
-fn line_tokens(
+pub(crate) fn line_tokens(
     lines: &[&str],
     kinds: &[RowKind],
     lang: &str,
@@ -1734,7 +1737,7 @@ fn strip_line_numbers<'a>(lines: &[&'a str]) -> Option<(usize, Vec<&'a str>)> {
     (total > 1 && matched * 5 >= total * 4).then(|| (base.unwrap_or(1), stripped))
 }
 
-fn code_style(window: &mut Window, font_detail: f32, color: gpui::Rgba) -> TextStyle {
+pub(crate) fn code_style(window: &mut Window, font_detail: f32, color: gpui::Rgba) -> TextStyle {
     let mut style = window.text_style();
     style.font_family = fonts::code_font().into();
     style.font_size = AbsoluteLength::Pixels(px(font_detail));
@@ -1759,7 +1762,7 @@ fn block_root(font_detail: f32) -> gpui::Div {
 
 /// One row of text on the ambient background; empty lines keep a single
 /// space so the row still has line height.
-fn styled_text(
+pub(crate) fn styled_text(
     text: &str,
     style: &TextStyle,
     highlights: &[(Range<usize>, HighlightStyle)],

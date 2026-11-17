@@ -41,6 +41,41 @@ Colors come from `warpui-kit-core`'s palette; token colors from the kit's instal
   `render_diff_with_scroll` parse and cache by patch text, so a re-render of
   an unchanged patch never reparses it.
 
+## Aligned view
+
+`render_aligned` draws caller-paired rows as two aligned columns — the merge
+editor's Current/Incoming panes are the first user. It is not the diff
+renderer's split mode: the rows come pre-paired, the caller owns the scroller
+and the pane heads, and every screen-specific extra is an opt-in on
+`AlignedOptions`, so a plain aligned view and the kit's other renderers stay
+untouched:
+
+```rust
+use warpui_kit_diff::{AlignedOptions, aligned_pane_head, lang_from_path, render_aligned, visible_window};
+
+let (start, end) = visible_window(rows.len(), scrolled, viewport_h, row_h);
+let mut options = AlignedOptions::new(font_detail);
+options.lead = Some(&mut pick_boxes);      // leading pick-box column
+options.syntax = lang_from_path(path);     // tree-sitter token colors
+options.base = show_base;                  // middle ancestor column
+options.padding = (start, rows.len() - end); // the windowed rows' context
+let body = render_aligned(&aligned_rows, options, window, cx);
+let head = aligned_pane_head(&[("Current", ours), ("Incoming", theirs)], true);
+```
+
+- `lead` draws the caller's cell per side before the gutter (the merge
+  editor's pick boxes; `aligned_pick_box` is the box visual).
+- `syntax` token-colors each column through the same cached highlight pass
+  the diff body uses; `None` keeps the plain mono foreground.
+- `base` adds the middle column from each row's `base` line, washed with the
+  neutral `DIFF_HUNK_BG` inside changes.
+- `emphasis` turns the changed rows' word-level emphasis off.
+- `AlignedSide::wash()` gives the side's color for a result pane that bands
+  its composed lines.
+- Changed rows reuse the diff palette: del wash left, add wash right, word
+  emphasis through one inline `StyledText` run so token colors and the
+  emphasis band share the text's layout.
+
 ## Selection
 
 The diff body is one selectable text: a drag crosses lines, and Copy gives

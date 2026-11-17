@@ -1,12 +1,12 @@
 # A merge editor for stopped operations
 
-Status: phases 1–5 landed, then the owner asked for the Visual Studio 2026
-shape; revision 2 is in progress and supersedes the rail page. The merge
-editor is now a **detail mode**, not a rail section (D12 retired): Changes
-shows a conflict banner with an Open merge editor button, and the editor takes
-the repository detail body. Per-line checkboxes, the icon toolbar, word-level
-highlighting, three-pane scroll sync, a configurable size cap and
-"Merge into current branch" are the remaining revision-2 work.
+Status: revision 2 landed — the editor is a **detail mode** (not a rail
+section, D12 retired) with per-line pick boxes, the icon toolbar, word-level
+highlighting, three-pane scroll sync, the `repos.merge_max_kb` cap and
+"Merge into current branch". The follow-up pass made the merge screen's
+extras runtime toggles on the diff kit's aligned view (`AlignedOptions`:
+`lead`, `syntax`, `base`, `emphasis`), so only this screen turns them on and
+every other diff surface is untouched; the §7 list is closed.
 
 Revision 2 so far: the editor lives in the repository detail (a mode, not a
 tab), Changes shows the conflict banner and opens it, both source panes carry a
@@ -195,10 +195,11 @@ fixtures build real repositories under the system temp dir. Proofs 1
 
 ## 7. Open work
 
-- Word or line shading inside blocks if the tint proves too coarse.
-- An optional base pane.
-- Shortcut-sheet entries and a `?` row.
-- A size cap for very large files, decided by proof 3.
+None. The list closed with the toggles pass: the word emphasis covers the
+in-block shading item, the base pane is the `base` toggle (a diff3/zdiff3
+section attaches to its row, an unclaimed base line keeps its own row), and
+the sheet's Merge editor group plus the toolbar's `?` keys row cover the
+shortcuts (Alt+↑/↓ conflicts, Alt+B base column).
 
 ## 8. Landed (phase 1)
 
@@ -255,3 +256,17 @@ navigation), so the Result gets the space. Scroll offsets are gpui's negative
 convention everywhere (the window, the sync, the conflict jump), the emphasis
 parts of a changed row lay out inline, and the panes→Result sync is one-way so
 a re-compose never drags the panes.
+
+The toggles pass: the merge screen's extras are runtime options on the kit's
+aligned view, each default-off so only this screen turns them on — `syntax`
+token-colors the panes through the kit's cached highlight pass, `base` draws
+the middle ancestor column (core's `TextMerge.base` carries the diff3/zdiff3
+sections; `MergeRow.base` claims its row, an unclaimed base line keeps its
+own), `emphasis` can drop the word diff, and the shared chrome moved into the
+kit (`aligned_pane_head`, `aligned_pick_box`, `visible_window`,
+`AlignedSide::wash` — the Result's bands read the side's own wash). A changed
+row's token colors and emphasis share one inline `StyledText` run, superseding
+the div-part layout. The toolbar gains the base toggle (offered only while the
+file carries base sections) and the `?` keys row; Alt+B toggles the column
+from the panes. `aligned_probe` covers the kit side, `merge_probe` the toggle.
+Shipping still needs a fresh kit tag and a pin bump in the same window.

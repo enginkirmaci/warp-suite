@@ -256,6 +256,20 @@ warp-agent's tool tiles. The rules:
 The washes live in `warpui-kit-core::palette`; a new diff color goes there,
 never into an app.
 
+### The aligned view and its toggles
+
+`render_aligned` is the kit's other diff surface: caller-paired rows as two
+aligned columns, for the merge editor's Current/Incoming panes. Every
+screen-specific extra is a runtime opt-in on `AlignedOptions` — pick boxes
+through `lead`, the ancestor column through `base`, token colors through
+`syntax`, word emphasis off through `emphasis` — so a plain aligned view and
+every other diff surface draw exactly as before; a cargo feature cannot vary
+per screen inside one app build, a call-site option can. The merge screen's
+own chrome that the family shares lives in the kit too (`aligned_pane_head`,
+`aligned_pick_box`, `visible_window`, `AlignedSide::wash`). The base column
+reuses the neutral `DIFF_HUNK_BG` for its changed rows — no new diff color —
+and a base line with no paired row keeps its own row rather than hiding.
+
 ## UI scale
 
 The factor is the text size times the desktop text scaling. The bootstrap runs
