@@ -134,8 +134,8 @@ The apps talk to each other; these are the interfaces that must move
 together. When one changes, update the other side in the **same** commit.
 
 - **warp-agent loopback door** (`~/.warp/agent/ipc.port` + `ipc.token`,
-  token-authenticated NDJSON on `127.0.0.1`): commands `open-workspace`,
-  `new-chat`, `run-prompt`, `models`, `status` (+ status pushes).
+  token-authenticated NDJSON on `127.0.0.1`): commands `ping`, `open-workspace`,
+  `new-chat`, `run-prompt`, `cancel`, `models`, `status` (+ status pushes).
   `new-chat`/`run-prompt` take a folder, or `general` for warp-agent's
   built-in Tasks workspace, where the AI wands run: a wand prompt carries its
   own diff or file tree, so it must not add the repo to warp-agent's sidebar
@@ -204,20 +204,25 @@ together. When one changes, update the other side in the **same** commit.
 
 - **warp-android-scribe bridge** (LAN `<nas-lan>:8787`, public
   `https://<nas-host>`): the Android IME posts a 16 kHz mono WAV to
-  `POST /transcribe?lang=tr|auto&tone=semi-formal|formal|…` with
-  `Authorization: Bearer <token>` and receives
+  `POST /transcribe?engine=hex|superwhisper&lang=tr|auto&tone=semi-formal|formal|…`
+  with `Authorization: Bearer <token>` and receives
   `{"text","language","duration"}`. `GET /health` is the token-checked server
-  test; `GET /settings`, `PUT /settings/vocabulary` and
+  test; `GET /engines` reports both engines, their readiness and the default,
+  and the phone picks one per request, so both must keep working.
+  `GET /settings`, `PUT /settings/vocabulary` and
   `POST /settings/processing` read and edit the NAS profile (language list,
-  tone, words, processing mode and model downloads). The bridge turns the
-  request into `superwhisper transcribe` plus `status` polling on the NAS and
-  serializes requests because the daemon has one active session; language and
-  tone are set inside that mutex. The public route is Cloudflare Tunnel ->
-  Nginx Proxy Manager -> 8787. The bearer scheme, field names and status codes
-  are one contract: change the bridge and the Android client in the same
-  commit. Android 17 needs `ACCESS_LOCAL_NETWORK` for LAN; the app requests it
-  and has Local/Remote modes. The APK is sideloaded; the bridge is a systemd
-  user service installed from `warp-android-scribe/deploy/`.
+  tone, words, processing mode and model downloads). Superwhisper keeps
+  `superwhisper transcribe` plus `status` polling on the NAS; Hex is
+  `hex model transcribe --model whisper_large_v3_turbo --language …`, one call
+  per request with no profile, and the phone's tone is ignored for it. The
+  phone sends its tone on every request, so for Superwhisper it overrides the
+  profile's. The bridge serializes requests because the daemon has one active
+  session; language and tone are set inside that mutex. The public route is
+  Cloudflare Tunnel -> Nginx Proxy Manager -> 8787. The bearer scheme, field
+  names and status codes are one contract: change the bridge and the Android
+  client in the same commit. Android 17 needs `ACCESS_LOCAL_NETWORK` for LAN;
+  the app requests it and has Local/Remote modes. The APK is sideloaded; the
+  bridge is a systemd user service installed from `warp-android-scribe/deploy/`.
 
 - **Version facts**: each repository owns its `version.toml`. The kit line
   moves PATCH on every warp-suite commit through its pre-commit hook; each app
