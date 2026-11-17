@@ -140,6 +140,11 @@ JAVA_HOME=/usr/lib/jvm/java-17-openjdk ANDROID_HOME=$HOME/tools/android-sdk \
   ./gradlew assembleDebug
 ```
 
+## Committing
+
+Stage the paths the task touched, not `git add -A`: the tree often carries other
+sessions' changes, and every other dirty file stays as it is.
+
 ## Cross-app contracts
 
 The apps talk to each other across repositories, and the interfaces below must
