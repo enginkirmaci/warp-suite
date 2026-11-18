@@ -113,10 +113,12 @@ pub(crate) fn selector_for(id: &ElementId) -> String {
 ///
 /// The element id doubles as the debug selector, so a probe reaches the link
 /// by the same name the app passed in (`notes-toggle`, `launch-station`) and
-/// the callers do not have to restate it.
+/// the callers do not have to restate it. The mark is the family's two-tone
+/// one from [`crate::about`], so a link reads in the same graphite as the
+/// titlebar's own tile.
 pub fn app_link(
     id: impl Into<ElementId>,
-    icon_path: &str,
+    app: crate::about::AppId,
     label: impl Into<SharedString>,
 ) -> Stateful<Div> {
     let label = label.into();
@@ -137,11 +139,7 @@ pub fn app_link(
         .rounded(px(6.))
         .hover(|d| d.bg(palette::raised()))
         .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
-        .child(crate::icon::icon(
-            icon_path,
-            px(scaled(18.)),
-            palette::text_dim(),
-        ))
+        .child(crate::about::mark(app, 18.))
 }
 
 /// The titlebar zoom button's glyph: the window-state mark, one square while

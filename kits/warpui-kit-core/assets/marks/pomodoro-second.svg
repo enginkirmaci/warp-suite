@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
+  <!-- the hands -->
+  <g transform="translate(12 12) scale(0.1831) translate(-64 -64)" fill="currentColor">
+    <g fill="none" stroke="currentColor" stroke-width="8" stroke-linecap="round">
+      <path d="M64 74V50"/>
+      <path d="M64 74h18"/>
+    </g>
+  </g>
+</svg>

@@ -247,9 +247,21 @@ pub const KEY_FG: Rgba = rgba_hex(0xD2CBC0FF);
 pub const ROW_LINE: Rgba = rgba_hex(0x2F2C29FF);
 pub const ROWS_RULE: Rgba = rgba_hex(0x2F2C29FF);
 pub const MUTED_ICON: Rgba = rgba_hex(0xABA397FF);
-/// The logo tile in the titlebar.
+/// The copper accent's soft step; still the default palette's `accent_soft`.
 pub const BRAND_BG: Rgba = rgba_hex(0x43301FFF);
 pub const BRAND_BORDER: Rgba = rgba_hex(0x5C4229FF);
+
+// ---- the family mark -------------------------------------------------------
+// One palette for the marks in every app surface: Grafit's medium ground with
+// graphite and chalk on it. These do not follow the accent — the mark is the
+// family's, not the app's — so they are fixed constants, not ramp slots.
+
+/// The tile behind a family mark in a titlebar or the About screen.
+pub const BRAND_GROUND: Rgba = rgba_hex(0x777A7DFF);
+/// The mark's lead tone on [`BRAND_GROUND`]: Grafit's primary.
+pub const MARK_LEAD: Rgba = rgba_hex(0x141517FF);
+/// The mark's second tone on [`BRAND_GROUND`]: Grafit's second.
+pub const MARK_SECOND: Rgba = rgba_hex(0xF2F3F4FF);
 
 // ---- text ------------------------------------------------------------------
 // Three steps: hierarchy comes from weight and size, not from a grey ladder.
@@ -282,7 +294,7 @@ pub const ACCENT: Rgba = rgba_hex(0xEE9A5FFF);
 pub const ON_ACCENT: Rgba = rgba_hex(0x24140AFF);
 /// The accent as ink: links, focus rings, the favorite star.
 pub const ACCENT_INK: Rgba = rgba_hex(0xF2A877FF);
-/// The tinted tile behind the brand mark and an active zone.
+/// The tinted tile behind an active zone.
 pub const ACCENT_SOFT: Rgba = BRAND_BG;
 pub const ACCENT_HOVER: Rgba = rgba_hex(0xF5AC78FF);
 pub const ACCENT_BORDER: Rgba = rgba_hex(0xF5AC78FF);
@@ -505,9 +517,21 @@ pub fn accent_hover() -> Rgba {
 pub fn accent_ink() -> Rgba {
     current_ramp().accent_ink
 }
-/// The tinted tile behind the brand mark.
+/// The tinted tile behind an active zone.
 pub fn accent_soft() -> Rgba {
     current_ramp().accent_soft
+}
+/// The tile behind a family mark.
+pub fn brand_ground() -> Rgba {
+    BRAND_GROUND
+}
+/// The family mark's lead tone.
+pub fn mark_lead() -> Rgba {
+    MARK_LEAD
+}
+/// The family mark's second tone.
+pub fn mark_second() -> Rgba {
+    MARK_SECOND
 }
 /// Text on a filled [`accent`].
 pub fn on_accent() -> Rgba {

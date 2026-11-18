@@ -356,9 +356,37 @@ pub fn app(id: AppId) -> &'static SuiteApp {
     SUITE.iter().find(|app| app.id == id).unwrap_or(&SUITE[0])
 }
 
-/// The app's monochrome mark, tinted by the caller's color.
-pub fn mark(id: AppId, size: f32, color: gpui::Rgba) -> gpui::Svg {
-    icon_data(mark_bytes(id), px(shell::scaled(size)), color)
+/// The app's mark on its own ground: the two shapes stacked, because gpui
+/// tints a whole svg with one colour and this mark carries two.
+pub fn mark(id: AppId, size: f32) -> Div {
+    let glyph = px(shell::scaled(size));
+    let lead = icon_data(mark_bytes(id), glyph, palette::mark_lead())
+        .absolute()
+        .top_0()
+        .left_0();
+    let mut tile = div().flex_shrink_0().relative().size(glyph).child(lead);
+    if let Some(second) = mark_second_bytes(id) {
+        tile = tile.child(
+            icon_data(second, glyph, palette::mark_second())
+                .absolute()
+                .top_0()
+                .left_0(),
+        );
+    }
+    tile
+}
+
+/// The mark in its tile: what a titlebar and the About list both draw.
+pub fn brand_tile(id: AppId, box_size: f32, glyph: f32) -> Div {
+    div()
+        .flex_shrink_0()
+        .size(px(shell::scaled(box_size)))
+        .rounded(px(if box_size > 40. { 8. } else { 6. }))
+        .bg(palette::brand_ground())
+        .flex()
+        .items_center()
+        .justify_center()
+        .child(mark(id, glyph))
 }
 
 fn mark_bytes(id: AppId) -> &'static [u8] {
@@ -368,6 +396,18 @@ fn mark_bytes(id: AppId) -> &'static [u8] {
         AppId::Notes => include_bytes!("../assets/marks/notes.svg"),
         AppId::Snapit => include_bytes!("../assets/marks/snapit.svg"),
         AppId::Pomodoro => include_bytes!("../assets/marks/pomodoro.svg"),
+    }
+}
+
+/// The second shape, for the marks that carry one. Station's mark is a single
+/// tone, so it has no second file.
+fn mark_second_bytes(id: AppId) -> Option<&'static [u8]> {
+    match id {
+        AppId::Station => None,
+        AppId::Agent => Some(include_bytes!("../assets/marks/agent-second.svg")),
+        AppId::Notes => Some(include_bytes!("../assets/marks/notes-second.svg")),
+        AppId::Snapit => Some(include_bytes!("../assets/marks/snapit-second.svg")),
+        AppId::Pomodoro => Some(include_bytes!("../assets/marks/pomodoro-second.svg")),
     }
 }
 
@@ -638,7 +678,7 @@ fn row(member: &Member, selected: AppId, current: AppId, on_pick: PickFn) -> gpu
                 .flex_row()
                 .items_center()
                 .gap_2()
-                .child(mark_box(member.app.id, 30., 18.))
+                .child(brand_tile(member.app.id, 30., 18.))
                 .child(
                     div()
                         .flex_1()
@@ -802,7 +842,7 @@ fn hero(member: &Member, on_link: LinkFn) -> Div {
             .pt(px(shell::scaled(18.)))
             .px_4()
             .pb_4()
-            .child(mark_box(member.app.id, 56., 32.))
+            .child(brand_tile(member.app.id, 56., 32.))
             .child(
                 div()
                     .flex_1()
@@ -968,18 +1008,6 @@ fn link_row(link: Link, on_link: LinkFn) -> gpui::Stateful<Div> {
         .on_click(move |event, window, cx| on_link(link, event, window, cx))
         .child(icon_data(link_glyph(link), px(14.), palette::accent_ink()))
         .child(link.label())
-}
-
-fn mark_box(id: AppId, box_size: f32, glyph: f32) -> Div {
-    div()
-        .flex_shrink_0()
-        .size(px(shell::scaled(box_size)))
-        .rounded(px(if box_size > 40. { 8. } else { 6. }))
-        .bg(palette::accent_soft())
-        .flex()
-        .items_center()
-        .justify_center()
-        .child(mark(id, glyph, palette::accent_ink()))
 }
 
 fn tag(label: impl Into<SharedString>) -> Div {
