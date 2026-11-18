@@ -132,11 +132,17 @@ def sync_checkout(path: Path, *, check: bool, dry_run: bool) -> Result:
     return Result("updated", f"{before} -> {after} ({commits})")
 
 
+def is_link(path: Path) -> bool:
+    """Symlink, or a Windows junction (which is_symlink() does not report)."""
+    is_junction = getattr(path, "is_junction", None)
+    return path.is_symlink() or bool(is_junction and is_junction())
+
+
 def resolve(name: str, source: Path, *, use_links: bool) -> Path | str:
     """The checkout the workspace builds, or a message explaining the miss."""
     if use_links:
         link = APPS / name
-        if link.is_symlink():
+        if is_link(link):
             target = link.resolve()
             if target.is_dir():
                 return target
@@ -157,7 +163,7 @@ def ensure_links(names: list[str]) -> None:
     missing = []
     for name in names:
         link = APPS / name
-        if not link.is_symlink() or not link.resolve().is_dir():
+        if not is_link(link) or not link.resolve().is_dir():
             missing.append(name)
     if not missing:
         return
