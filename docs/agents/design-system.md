@@ -641,6 +641,30 @@ window-wide list cursor and no window-level arrow handler.
   and the list exposes a name, so a probe can move the cursor without a
   pointer.
 
+## Resizable columns
+
+Every list column carries a drag bar on its right edge: a 6 px strip over the
+list's hairline, with the column-resize cursor and a hover rule. A drag moves
+the column between its bounds and the drop writes the width; the diff beside
+it takes the rest. A column that is stacked above its detail — the narrow
+Files band, a one-column workbench — has no bar, because there is nothing to
+drag against.
+
+- **One shape.** The panes and the list width come from `warpui-kit-core`; the
+  drag bar and the row that reads the pointer live in the host's
+  `ui/resize.rs` (Warp Station's today). A new list uses that shape instead of
+  hand-rolling a handle, cursor and bounds.
+- **One width per column, clamped.** The column names its default and bounds
+  once (Warp Station's `store::Pane`), and every reader goes through the same
+  clamp, so a saved or hand-edited width can never starve the diff.
+- **The width is user state.** The page list is the family's `list_width`;
+  Warp Station's workbench columns share `settings.layout.pane_widths`. A drag
+  stays in memory and the drop persists it, so a missed save never stalls a
+  drag.
+- **Pointer only.** The bar is a pointer affordance; the keyboard crosses
+  lists with `pane_nav`, and a list's own keys stay on the list. Do not add a
+  resize chord.
+
 ## File trees
 
 A file list that shows changed files groups them under the folders their paths

@@ -57,7 +57,8 @@ compatibility rules that must not drift.
 
 Top level: `schema_version`, `nuget_local`, `repos`, `clipboard_password`,
 `snapit`, `keep_awake`, `opencode`, `deepseek`, `warp_agent`, `warp_notes`,
-`pomodoro`, `general`, `changes`, `files`, `workflow`, `notifications`.
+`pomodoro`, `general`, `changes`, `files`, `workflow`, `notifications`,
+`layout`.
 
 - `nuget_local`: `enable_nuget` (true), `watch_folder` (null),
   `nuget_package_filter` (`*.nupkg`), `file_copy_delay_ms` (2000),
@@ -119,6 +120,12 @@ Top level: `schema_version`, `nuget_local`, `repos`, `clipboard_password`,
   `errors` (true), `action_confirmations` (true), `pipelines` (true), and the retired
   `fetch_summaries` (true; kept so older files parse, no longer shown — the
   bulk fetch pass it summarized is gone).
+- `layout`: `pane_widths` ({}), the workbench list columns the user dragged,
+  keyed `work_list`, `files_rail`, `commits_list`, `commit_files`,
+  `changes_files`, `history_list` and `commit_rail`, in layout pixels. A
+  missing or out-of-range value reads the design's width; the drag clamps it
+  against the column's bounds. The page list (Summaries, Settings, Tools,
+  About, the merge editor) keeps its older home in `repos.list_width`.
 
 ## warp-station cache
 
