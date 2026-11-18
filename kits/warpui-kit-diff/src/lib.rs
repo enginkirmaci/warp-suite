@@ -19,8 +19,12 @@
 //!
 //! By default rows never wrap: one row is one line, and the body scrolls
 //! horizontally so a long line keeps its shape. Split puts its two columns in
-//! separate viewports, each with its own horizontal scrollbar, so a long line
-//! on one side never pushes the other side off screen. `DiffOptions::wrap`
+//! separate viewports, so a long line on one side never pushes the other side
+//! off screen. Both viewports share one content width, and the scrolled pane
+//! mirrors their offsets, so the two sides pan together and stay aligned; the
+//! shorter side does not stop at its own last line. (A plain
+//! [`render_diff_with`] block keeps the two viewports independent, since it
+//! has no handles to hold one offset across frames.) `DiffOptions::wrap`
 //! switches to a row-per-line body where the code wraps inside its column and
 //! the number stays on the first visual line; in split a row takes the taller
 //! side's height so both columns stay aligned.
@@ -88,9 +92,10 @@ use gpui::prelude::*;
 use gpui::{
     AbsoluteLength, AnyElement, App, Background, BorderStyle, Bounds, Corners, Div, Edges,
     ElementId, HighlightStyle, Hsla, ListAlignment, ListState, PaintQuad, Pixels, ScrollHandle,
-    StyledText, TextStyle, Window, canvas, div, list, pattern_slash, point, px, relative, size,
-    transparent_black,
+    SharedString, StyledText, TextRun, TextStyle, Window, canvas, div, list, pattern_slash, point,
+    px, relative, size, transparent_black,
 };
+use unicode_width::UnicodeWidthStr as _;
 
 use warpui_kit_core::fonts;
 use warpui_kit_core::palette;
@@ -98,6 +103,11 @@ use warpui_kit_core::palette;
 /// The design's diff pitch: mono 13 / 21. A ratio, so the rows keep the same
 /// rhythm at every text-size step the caller passes.
 const DIFF_LINE_HEIGHT: f32 = 21.0 / 13.0;
+
+/// Slack on the widest shaped line before it becomes both columns' minimum
+/// code width: the code cell's own leading, plus a little for a token run or
+/// a fallback glyph shaping slightly wider than the plain line measurement.
+const SPLIT_WIDTH_SLACK: f32 = 24.0;
 
 thread_local! {
     /// Parsed patches, keyed by (text hash, length). Parsing includes the word
@@ -129,7 +139,9 @@ pub struct DiffOptions {
 /// Scroll handles the app keeps across frames so it can draw pinned
 /// horizontal scrollbars outside the vertical scroller. The kit owns the
 /// vertical scroller too (see [`render_diff_with_scroll`]), so a horizontal
-/// wheel can never be turned into vertical movement by a parent scroller.
+/// wheel can never be turned into vertical movement by a parent scroller. In
+/// split the two columns move together: [`left`](Self::left) and
+/// [`right`](Self::right) mirror each other, so both bars show one position.
 /// An app that does not draw bars can use the plain [`render_diff_with`],
 /// which passes none and leaves the body in flow.
 #[derive(Clone, Default)]
@@ -137,6 +149,9 @@ pub struct DiffScrollHandles {
     pub unified: ScrollHandle,
     pub left: ScrollHandle,
     pub right: ScrollHandle,
+    /// The split columns' last horizontal offsets, so a step in either
+    /// viewport is mirrored into the other on the next render.
+    split_sync: Rc<RefCell<SplitSync>>,
     /// The vertical viewport of the unwrapped body. Wrapped bodies virtualise
     /// their rows with a list, which owns its own scroll offset.
     pub vertical: ScrollHandle,
@@ -149,6 +164,14 @@ pub struct DiffScrollHandles {
 struct WrapList {
     key: u64,
     state: ListState,
+}
+
+/// The two split offsets as the last render left them. A side that moved
+/// since then is the one the user scrolled; the other follows it.
+#[derive(Default)]
+struct SplitSync {
+    left: Option<Pixels>,
+    right: Option<Pixels>,
 }
 
 /// A unified diff with Zed-style gutter, marker column and two-tone washes.
@@ -289,6 +312,7 @@ fn render_document(
             font_detail,
             scroll,
             fill_hatch,
+            window,
         );
     }
     if options.wrap {
@@ -348,6 +372,7 @@ fn render_unified(
         &ColumnIds::UNIFIED,
         ColumnWidth::Full,
         None,
+        None,
     );
     let body = diff_scroller(
         column.into_any_element(),
@@ -379,6 +404,7 @@ fn render_split(
     font_detail: f32,
     scroll: Option<&DiffScrollHandles>,
     fill_hatch: Background,
+    window: &Window,
 ) -> AnyElement {
     let gutter_width = split_gutter_width(file);
     let paint = RowPaint {
@@ -390,6 +416,15 @@ fn render_split(
     if left.is_empty() {
         return div().into_any_element();
     }
+    if let Some(scroll) = scroll {
+        sync_split_scroll(scroll);
+    }
+    // Both columns get one content width, so their viewports have the same
+    // scroll range: with a column-wide range a short side would stop before
+    // the long one and the two would no longer pan together.
+    let content_width =
+        widest_line(window, &paint.style, &left).max(widest_line(window, &paint.style, &right))
+            + px(SPLIT_WIDTH_SLACK);
     let left = render_column(
         left,
         &paint,
@@ -398,6 +433,7 @@ fn render_split(
         &ColumnIds::LEFT,
         ColumnWidth::Split,
         Some(fill_hatch),
+        Some(content_width),
     );
     let right = render_column(
         right,
@@ -407,6 +443,7 @@ fn render_split(
         &ColumnIds::RIGHT,
         ColumnWidth::Split,
         Some(fill_hatch),
+        Some(content_width),
     );
     let body = div()
         .debug_selector(|| "diff-split".into())
@@ -865,8 +902,9 @@ fn wrapped_cell(
 }
 
 /// One split column's viewport. The column body keeps at least the viewport's
-/// width and grows with a long line; the viewport scrolls that line on its own
-/// instead of pushing the other column off screen.
+/// width and grows with a long line; the viewport scrolls that line instead of
+/// pushing the other column off screen. Both viewports share one content
+/// width, and their offsets are mirrored before layout, so they pan together.
 fn column_viewport(
     ids: &'static ColumnIds,
     body: Div,
@@ -888,9 +926,86 @@ fn column_viewport(
     viewport.child(body)
 }
 
+/// Keep the split columns on one horizontal offset. The viewport that moved
+/// since the previous render is the one the user scrolled, and the other takes
+/// its offset before this frame lays out, so the two paint together.
+fn sync_split_scroll(scroll: &DiffScrollHandles) {
+    let mut sync = scroll.split_sync.borrow_mut();
+    let left = scroll.left.offset().x;
+    let right = scroll.right.offset().x;
+    let (Some(last_left), Some(last_right)) = (sync.left, sync.right) else {
+        // The first frame has no baseline to tell a user step from a clamp.
+        sync.left = Some(left);
+        sync.right = Some(right);
+        return;
+    };
+    let target = match (left != last_left, right != last_right) {
+        (true, false) => left,
+        (false, true) => right,
+        // Both moved: a new patch or a resize re-clamped both. Take the
+        // smaller step so neither side is left past its own content.
+        (true, true) => left.max(right),
+        (false, false) => return,
+    };
+    if left != target {
+        scroll
+            .left
+            .set_offset(point(target, scroll.left.offset().y));
+    }
+    if right != target {
+        scroll
+            .right
+            .set_offset(point(target, scroll.right.offset().y));
+    }
+    sync.left = Some(target);
+    sync.right = Some(target);
+}
+
+/// The widest line in one split column, shaped with the column's own face.
+/// Both columns get the larger of the two widths, so the longest line decides
+/// the shared scroll range. Picking the line with the most cells first means
+/// one shape per side, not one per row.
+fn widest_line(window: &Window, style: &TextStyle, lines: &[Line]) -> Pixels {
+    let Some(line) = lines.iter().max_by_key(|line| visual_cells(&line.text)) else {
+        return Pixels::ZERO;
+    };
+    if line.text.is_empty() {
+        return Pixels::ZERO;
+    }
+    let font_size = style.font_size.to_pixels(window.rem_size());
+    let run = TextRun {
+        len: line.text.len(),
+        font: style.font(),
+        color: style.color,
+        background_color: None,
+        underline: None,
+        strikethrough: None,
+    };
+    window
+        .text_system()
+        .shape_line(
+            SharedString::from(line.text.clone()),
+            font_size,
+            &[run],
+            None,
+        )
+        .width
+}
+
+/// A line's width in monospace cells: the code face is monospaced, so the
+/// cell count picks the widest line. A tab jumps a tab stop; Unicode width
+/// counts the double-width glyphs.
+fn visual_cells(text: &str) -> usize {
+    text.width() + text.matches('\t').count() * 3
+}
+
 /// One column of a diff body: the gutter, the selectable code text, and the
 /// canvas that paints every row's wash. Unified has one; split has two. Split
 /// also passes the `hatch` it lays under an unpaired row's whole side.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "one column carries the paint, geometry, ids and split width inputs"
+)]
 fn render_column(
     lines: Vec<Line>,
     paint: &RowPaint,
@@ -899,6 +1014,7 @@ fn render_column(
     ids: &'static ColumnIds,
     width: ColumnWidth,
     hatch: Option<Background>,
+    code_min_width: Option<Pixels>,
 ) -> Div {
     // One buffer for the whole column: selection and copy work across lines
     // only when the text is one laid-out run.
@@ -1057,6 +1173,14 @@ fn render_column(
 
     // The code column holds the one selectable text; the canvases sit behind
     // it and behind the gutter.
+    let mut code = div()
+        .debug_selector(move || ids.code.into())
+        .flex_1()
+        .relative()
+        .child(code_canvas);
+    if let Some(min_width) = code_min_width {
+        code = code.min_w(min_width);
+    }
     body.child(
         div()
             .debug_selector(move || ids.gutter.into())
@@ -1066,17 +1190,12 @@ fn render_column(
             .child(div().pl(px(11.)).pr_2().child(gutter_styled)),
     )
     .child(
-        div()
-            .debug_selector(move || ids.code.into())
-            .flex_1()
-            .relative()
-            .child(code_canvas)
-            .child(
-                div()
-                    .debug_selector(move || ids.text.into())
-                    .pl_2()
-                    .child(selectable),
-            ),
+        code.child(
+            div()
+                .debug_selector(move || ids.text.into())
+                .pl_2()
+                .child(selectable),
+        ),
     )
 }
 

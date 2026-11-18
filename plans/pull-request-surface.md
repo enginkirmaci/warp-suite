@@ -119,8 +119,11 @@ replaced the whole detail pane with the pull request and had no list beside it.
   runs, opening the detail over the run detail; the pane itself (head, strip,
   tabs, verbs) did not change when it moved. The pane is the same shape as D1–D9, with Azure's own data and
   verbs behind it: state pill Active/Completed/Abandoned, review split
-  Approve/Decline (a vote), primary Complete / Set auto-complete /
-  Auto-complete set / Reopen, Abandon through the page's card.
+  Approve/Decline (a vote), primary Set auto-complete / Auto-complete set /
+  Reopen; the split's menu carries the deliberate Complete and Abandon, the
+  latter confirmed on the page's card. The primary defaults to auto-complete
+  even when the pull request is ready, because Azure's own workflow arms the
+  merge when the policies clear; Complete keeps its two-press arm in the menu.
 - **D17 — Azure hands out no patch with its change list.** A file's diff is a
   second call per file (`items?path=…&includeContent=true` on both branches)
   and a whole-file unified diff built in core: one hunk with three lines of

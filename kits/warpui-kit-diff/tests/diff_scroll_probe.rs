@@ -202,7 +202,7 @@ fn a_wrapped_list_rows_stay_selectable(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::gpui::test]
-fn a_horizontal_wheel_in_split_moves_the_column_under_the_pointer(cx: &mut TestAppContext) {
+fn a_horizontal_wheel_in_split_moves_both_columns_together(cx: &mut TestAppContext) {
     cx.update(gpui_kit::init);
     cx.update(apply_theme);
 
@@ -222,13 +222,29 @@ fn a_horizontal_wheel_in_split_moves_the_column_under_the_pointer(cx: &mut TestA
             );
             assert_eq!(
                 scroll.right.offset().x,
-                px(0.),
-                "the right column stayed put"
+                scroll.left.offset().x,
+                "the right column moved with it"
             );
             assert_eq!(
                 scroll.vertical.offset().y,
                 px(0.),
                 "a horizontal step did not scroll the shared body"
+            );
+
+            // the same step over the right column drives the left one: the
+            // two viewports have one position, not one each
+            let at = near_top(vcx, "diff-right-text");
+            wheel(vcx, at, ScrollDelta::Pixels(point(px(-120.), px(0.))));
+            let scroll = vcx.update(|_, cx| host.read(cx).scroll.clone());
+            assert!(
+                scroll.right.offset().x < px(-120.),
+                "the right column took another step: {:?}",
+                scroll.right.offset()
+            );
+            assert_eq!(
+                scroll.left.offset().x,
+                scroll.right.offset().x,
+                "the left column followed the right one"
             );
         },
     );

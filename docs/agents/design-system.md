@@ -218,7 +218,10 @@ warp-agent's tool tiles. The rules:
   `hairline` divider separates them. The columns split the pane evenly and
   each owns its horizontal viewport and a bar in the pinned footer under the
   body, so a long line on one side never pushes the other side off screen.
-  A state-only, truncated or multi-file patch stays unified.
+  The scrolled pane gives both viewports one content width and mirrors their
+  offsets: a step in either one moves both, so the sides pan together and the
+  shorter side does not exhaust its scroll first. A state-only, truncated or
+  multi-file patch stays unified.
 - **The scrolled pane owns both axes.** `render_diff_with_scroll` is the
   vertical viewport; the app does not wrap it in another scroller. Both the
   vertical frame and each horizontal viewport are axis-restricted, so a
