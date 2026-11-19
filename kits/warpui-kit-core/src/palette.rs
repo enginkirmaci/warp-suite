@@ -252,16 +252,16 @@ pub const BRAND_BG: Rgba = rgba_hex(0x43301FFF);
 pub const BRAND_BORDER: Rgba = rgba_hex(0x5C4229FF);
 
 // ---- the family mark -------------------------------------------------------
-// One palette for the marks in every app surface: Grafit's medium ground with
-// graphite and chalk on it. These do not follow the accent — the mark is the
-// family's, not the app's — so they are fixed constants, not ramp slots.
+// One palette for the marks in every app surface: Grafit Ters' dark ground with
+// chalk and the mid grey on it. These do not follow the accent — the mark is
+// the family's, not the app's — so they are fixed constants, not ramp slots.
 
 /// The tile behind a family mark in a titlebar or the About screen.
-pub const BRAND_GROUND: Rgba = rgba_hex(0x777A7DFF);
-/// The mark's lead tone on [`BRAND_GROUND`]: Grafit's primary.
-pub const MARK_LEAD: Rgba = rgba_hex(0x141517FF);
-/// The mark's second tone on [`BRAND_GROUND`]: Grafit's second.
-pub const MARK_SECOND: Rgba = rgba_hex(0xF2F3F4FF);
+pub const BRAND_GROUND: Rgba = rgba_hex(0x141517FF);
+/// The mark's lead tone on [`BRAND_GROUND`]: Grafit Ters' primary.
+pub const MARK_LEAD: Rgba = rgba_hex(0xF2F3F4FF);
+/// The mark's second tone on [`BRAND_GROUND`]: the mid grey.
+pub const MARK_SECOND: Rgba = rgba_hex(0x777A7DFF);
 
 // ---- text ------------------------------------------------------------------
 // Three steps: hierarchy comes from weight and size, not from a grey ladder.
