@@ -268,7 +268,7 @@ so it works before warp-snapit has run after an upgrade.
 warp-snapit's native documents are the one strict settings shape left
 (`deny_unknown_fields`), so a mistyped key is reported instead of ignored; its
 readers in Warp Station stay tolerant. The keys the schema has retired —
-`Version`, `EnableKeyboard`, `Keyboard`, `ShowMainWindow`, `AppTheme`, the five
+`Version`, `EnableKeyboard`, `Keyboard`, `ShowMainWindow`, `AppTheme`, the four
 move shortcuts and the two layout shortcuts, `IsVersion3000MessageShown`,
 `CheckForNewVersion`, `RunAsAdmin` and `MouseHoverAnimation` — are stripped
 before the strict parse, so an older or .NET-era file still loads and is

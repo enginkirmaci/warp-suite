@@ -1,9 +1,9 @@
 # The family design
 
 What a warpui-kit app looks like and where each part comes from. Everything
-lives in `warpui-kit-core`, so the three GPUI apps — Warp Station, warp-agent
-and warp-notes — draw the same colors, the same type at the same sizes, and
-scale the same way. (`apps/warp-snapit` is the exception: a Windows-only Win32
+lives in `warpui-kit-core`, so the GPUI apps — Warp Station, warp-agent,
+warp-notes and Warp Pomodoro — draw the same colors, the same type at the same
+sizes, and scale the same way. (`apps/warp-snapit` is the exception: a Windows-only Win32
 binary that does not link the kit.) This file is the design source of truth for
 the suite; the constants themselves are
 `kits/warpui-kit-core/src/{palette,fonts,scale,kit}.rs`.
@@ -12,8 +12,8 @@ the suite; the constants themselves are
 An app's `theme.rs` re-exports core and adds layout constants. A new color or
 size goes into core, where every app gets it, and never into one app.
 
-**Current state:** all three GPUI apps run the shared `bootstrap::init`, carry
-the text-size and palette pickers, and have a per-app Reduce motion switch. A
+**Current state:** every GPUI app runs the shared `bootstrap::init`, carries
+the text-size and palette pickers, and has a per-app Reduce motion switch. A
 palette click moves every surface and the accent family in all three (see
 [The accent](#the-accent)).
 
@@ -377,8 +377,13 @@ must agree:
   live job in the order it started, with the repository, folder or pass it
   belongs to; the last job landing closes the panel. The panel reads the same
   list the chip counts (`Store::running_jobs`), so the two cannot disagree.
+  A single-job window skips the panel: Warp Pomodoro's chip states the pass
+  (spinner, phase word, clock) and the window itself is that job's detail.
 - **A title does not invent work.** It repeats a count the app already has
-  (`Store::activity`, the tile's `running`) and shows nothing at zero.
+  (`Store::activity`, the tile's `running`) and shows nothing at zero. One
+  live job names itself (`Generating alpha`); several count (`2 running`).
+  A paused-but-not-idle state may keep the words in the OS title while the
+  chip drops (paused is not work to spin over) — Pomodoro's `Paused 12:34`.
 
 ## Controls
 
