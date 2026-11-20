@@ -18,6 +18,9 @@ consumer rules are in [`docs/agents/domain.md`](docs/agents/domain.md).
 | **bootstrap** | `warpui_kit_core::bootstrap::init`, the one startup sequence every app runs before its first window (text size, palette, scale, motion). |
 | **ramp** | The current palette, read through the kit helpers. The only source of colours and accents; app code holds no colour, font family or font size literal. |
 | **door** | A token-authenticated loopback NDJSON interface an app publishes (`ipc.port` + `ipc.token` under `~/.warp/<app>/`) so its siblings can drive it. warp-agent's and warp-pomodoro's doors are contracts. |
+| **harness** | A coding-agent runtime the app can run a chat on, named by a stable wire id (`opencode`, `opencode-v2`, `dsh`). The app reaches it through an adapter, never through its own protocol. |
+| **adapter** | The app-side implementation for one harness protocol: process lifecycle, transport and translation into the app's event stream. |
+| **connection** | How the app reaches a harness: it spawns and owns a process (*managed*), or attaches to a service someone else runs (*attached*). |
 | **probe** | A headless UI integration test at `tests/<name>_probe.rs` that builds the real views through the `lib.rs` boundary. |
 | **capture** | A screenshot of a hidden window, taken without pulling the owner's screen; the recipe is in `docs/agents/testing-and-captures.md`. |
 | **store** | The notes store (default `~/notes`): one root, repo notes under `projects/<repo>`. User content, not app data. |
