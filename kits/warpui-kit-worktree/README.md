@@ -9,9 +9,9 @@ moving the checkout its owner is looking at.
 - The folder is `<parent repo>/.worktrees/<slug>`, one flat level, where the
   slug is the branch with its separators flattened (`agent/fix-login` →
   `agent-fix-login`).
-- The branch is the caller's choice; a chat derives it from its title with
-  `branch_name`. A name that is taken gets `-2`, `-3`, … instead of attaching
-  an existing branch.
+- The branch is the caller's choice; a chat derives it from its first prompt
+  with `branch_name` at send time. A name that is taken gets `-2`, `-3`, …
+  instead of attaching an existing branch.
 - `worktrees/` goes into the repository's local `.git/info/exclude` once, so the
   parent's own changes stay clean without touching a tracked file.
 - Creation starts at the current HEAD. A repository with no commit yet is

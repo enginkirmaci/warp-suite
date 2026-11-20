@@ -7,9 +7,9 @@
 //!
 //! - the folder is `<parent repo>/.worktrees/<slug>`, one flat level, where the
 //!   slug is the branch with its separators flattened;
-//! - the branch is the caller's choice (a chat derives it from its title with
-//!   [`branch_name`]), and a name that is already taken gets the next free
-//!   numeric suffix instead of checking out someone else's branch;
+//! - the branch is the caller's choice (a chat derives it from its first
+//!   prompt with [`branch_name`]), and a name that is already taken gets the
+//!   next free numeric suffix instead of checking out someone else's branch;
 //! - `worktrees/` is written into the repository's local exclude, so the
 //!   parent's own changes stay clean without a tracked file changing.
 //!
