@@ -1,4 +1,4 @@
 # The suite's version: the one source of truth.
 # scripts/meta/version.py is the only writer. MINOR/MAJOR move by hand; PATCH moves
 # on every commit (pre-commit hook) and never resets.
-version = "0.2.96"
+version = "0.2.98"
