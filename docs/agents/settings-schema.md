@@ -194,8 +194,10 @@ the standalone launch's chosen store (`--store` wins).
 `schema_version`, `work_minutes` (25), `short_break_minutes` (5),
 `long_break_minutes` (15), `long_break_every` (4, clamped to 1..=12),
 `auto_start_breaks` (true), `auto_start_work` (false),
-`desktop_notifications` (true), `sound_enabled` (true), `sound_path` (""; a
-WAV/OGG outside the app folder, empty = the bundled chime), `window_mode`
+`desktop_notifications` (true), `sound_enabled` (true), `sound_volume` (70;
+percent of the recorded amplitude, 0 = silent, clamped to 0..=100),
+`sound_path` (""; a WAV/OGG outside the app folder, empty = the bundled
+chime), `window_mode`
 (`full` default / `mini`), `always_on_top` (true; the mini card's pin),
 `bounds_full` / `bounds_mini` (null, or `{x, y, w, h}` in window pixels,
 clamped to at least 260×88 and dropped when the box is broken; the mini box
