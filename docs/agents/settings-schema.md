@@ -51,7 +51,8 @@ compatibility rules that must not drift.
   `mcp_disabled_workspaces`, `text_size`, `show_tooltips`.
 - `tab` values are the app's display labels (`"Changes"`, `"History"`), not
   enum ids.
-- `RepoSortMode` stays numeric; `HarnessKind` stays `"opencode"`/`"dsh"`.
+- `RepoSortMode` stays numeric; harness ids stay the stable wire strings
+  `"opencode"`, `"opencode-v2"` and `"dsh"` (display labels are separate).
 
 ## warp-station settings
 
@@ -149,8 +150,9 @@ passes answer again.
 
 ## warp-agent settings
 
-`schema_version`, `opencode_executable` (`opencode`), `dsh_executable`
-(`dsh`), `default_harness` (`opencode`), `default_model`, `default_variant`,
+`schema_version`, `harnesses` (map keyed by harness id; each entry
+`{"enabled": bool, "executable": string}`), `default_harness` (`opencode`),
+`opencode_executable` (`opencode`), `dsh_executable` (`dsh`), `default_model`, `default_variant`,
 `default_variant_highest`, `default_agent`, `auto_allow_always`,
 `auto_allow_instant`, `auto_allow_default_min_seconds`,
 `auto_allow_default_max_seconds`, `auto_allow_away_min_seconds`,
@@ -159,13 +161,24 @@ passes answer again.
 `workday_start_hour`, `text_size`, `show_tooltips`, `reduce_motion`,
 `mcp_disabled`.
 
+- The harness map is the live setting. `opencode` and `dsh` start enabled,
+  `opencode-v2` starts disabled; executables default per registry descriptor.
+  The old `opencode_executable`/`dsh_executable` fields are kept in sync for
+  older readers and are the migration input when the map is absent.
+- At least one usable backend (`opencode`/`dsh`) stays enabled; the default
+  harness falls back to the first enabled one. A newer reader adds a missing
+  registry entry instead of failing the whole file.
+- No v2 URL or password is stored here: the adapter reads the CLI registration
+  file at start and after a 401.
+
 ## warp-agent UI state
 
 `schema_version`, `pins` (`KeyMap<bool>`), `favorites` (`KeyMap<bool>`),
 `workspaces[]`, `active_workspace`, `model`, `variant`, `agent`, `folder`,
 `auto_allow_always`, `sidebar_width`, `sidebar_visible`, `drafts`
 (`KeyMap<String>`), `mcp_disabled_workspaces` (`Vec<String>`),
-`harness_by_session` (`KeyMap<"opencode"|"dsh">`), `deleted_sessions`.
+`harness_by_session` (`KeyMap<"opencode"|"opencode-v2"|"dsh">`),
+`deleted_sessions`.
 
 `workspaces[]`: `path`, `sessions`, `active_session`, `open_sessions`,
 `collapsed`. Session ids and folder paths inside the maps are opaque.
@@ -179,7 +192,10 @@ persisted.
 ## Model caches
 
 `schema_version`, `models[]`: `key`, `harness`, `variants`, `context_limit`.
-The released flat `["provider/model"]` list is importer input only.
+The harness is part of the identity (`(harness, key)`), because the catalogs
+overlap on model names. The released flat `["provider/model"]` list is importer
+input only and reads as opencode entries. Disabled harness entries stay on
+disk but out of the pickers.
 
 ## warp-notes settings
 

@@ -134,8 +134,17 @@ The apps talk to each other; these are the interfaces that must move
 together. When one changes, update the other side in the **same** commit.
 
 - **warp-agent loopback door** (`~/.warp/agent/ipc.port` + `ipc.token`,
-  token-authenticated NDJSON on `127.0.0.1`): commands `ping`, `open-workspace`,
-  `new-chat`, `run-prompt`, `cancel`, `models`, `status` (+ status pushes).
+  token-authenticated NDJSON on `127.0.0.1`, protocol **3**): commands `ping`,
+  `open-workspace`, `new-chat`, `run-prompt`, `cancel`, `models`, `status`
+  (+ status pushes), plus the `harness`, `subscribe` and `unsubscribe`
+  commands. `harness` carries `{method, params}` and dispatches the app-level
+  harness operations with typed errors (`unknown:`, `disabled:`,
+  `unavailable:`, `unsupported:`); `subscribe` takes a `subscription` id and
+  optional `harness`/`session`/`run` filters, acks the id, and pushes
+  `harness-event` frames; overflow and shutdown are explicit
+  (`subscribe-overflow`, `subscribe-closed`). `status` and `harness metadata`
+  list only enabled harnesses with `available`, `state`, `connection` and
+  `capabilities`.
   `new-chat`/`run-prompt` take a folder, or `general` for warp-agent's
   built-in Tasks workspace, where the AI wands run: a wand prompt carries its
   own diff or file tree, so it must not add the repo to warp-agent's sidebar
