@@ -7,12 +7,12 @@ real loopback connection.
 
 **Blocked by:** 05
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 **Category:** enhancement
 
 - [x] Existing commands (`ping`, `open-workspace`, `new-chat`, `run-prompt`, `cancel`, `models`, `status`) keep their shape and pass their tests.
-- [ ] `harness` dispatches the app-level methods and returns typed results or errors: unknown method, disabled harness, unavailable harness, unsupported operation.
+- [x] `harness` dispatches the app-level methods and returns typed results or errors: unknown method, disabled harness, unavailable harness, unsupported operation.
 - [x] `subscribe` pushes filtered harness events with subscription ids; overflow and close are explicit.
 - [x] Harness metadata lists enabled harnesses with availability and capabilities; `status` reports the same; disabled harnesses are rejected.
 - [x] `ping` reports the new protocol version; the token remains the only gate; auto-allow is untouched.
@@ -31,3 +31,13 @@ Protocol side landed in warp-agent `a153367` ("feat(agent): expose the door harn
 - Full app gates: 125 lib tests plus probes, fmt and clippy green; kit platform 43 tests and clippy green; Station core warp tests green.
 
 Remaining before this ticket can be resolved: dispatching the rest of the app-level methods (prompt, cancel, session create/fork/delete, permissions, forms, ...) needs the store/host adapter wiring and the v2 instance; that is ticket 14. The door protocol and filtering are complete and tested.
+
+
+## Final dispatch
+
+Full dispatch landed in warp-agent `23d13e0` ("feat(agent): dispatch door harness calls through the host", version 0.1.34).
+
+- `src/harness/call.rs` is the one JSON↔typed mapping for the full trait surface: catalogs, sessions/transcript/create/fork/rename/delete, prompts/interrupt/compact/commands/skills, permissions/forms, diff, find/forget, inbox, revert, shell/background, MCP, health/start/stop. Parsing happens before an adapter is touched; `HarnessError` maps to the existing `unknown:`/`disabled:`/`unavailable:`/`unsupported:` prefixes.
+- The net thread receives `HarnessCall`, resolves the descriptor/scope, gets-or-creates the host instance, starts it on a blocking lane and returns `HarnessCallResult`; the store parks the door `Reply` by call id and answers on the event with a 65 s timeout. `health`/`start`/`stop` stay on the app lifecycle so a door call cannot split app state from the net thread.
+- Tests: door tests pin deferred dispatch and the error envelopes; host tests drive one call per category through a surface fake; store tests cover parking/result, timeout, unknown/disabled, StartServer waiters, health and stop. 162 lib tests + 35 probe tests green; clippy/fmt green.
+- Known limits recorded honestly: a lazily created door-only instance gets no event pump until the app start path adopts it; door-only v2 creates a second host instance whose stream is not fed to `subscribe` (the shared-instance wiring is ticket 13/14 follow-up); `sessions`/`session` remain the cached open-tile answers, so a door-created session needs `directory` on later calls. The protocol, dispatch surface and error contract are complete.
