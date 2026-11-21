@@ -8,7 +8,7 @@
 # `version` names the combined suite release. It is deliberately independent of
 # the kit and app versions.
 [suite]
-version = "0.1.0"
+version = "0.2.116"
 
 [kits]
 tag = "kits-v0.2.112"
