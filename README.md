@@ -160,6 +160,24 @@ together. When one changes, update the other side in the **same** commit.
   catalog loaded earlier in the session. warp-agent owns the protocol; Warp
   Station is the client — a missing warp-agent binary turns Warp Station's AI
   features off, a closed one is launched on demand.
+- **warp-flow loopback door** (`~/.warp/flow/ipc.port` + `ipc.token`,
+  token-authenticated NDJSON on `127.0.0.1`, warp-flow's own protocol **1**,
+  documents at `schema_version` 1): commands `ping`, `runs`, `run`, `answer`,
+  `pause`, `resume`, `abandon` and `subscribe`. Framing is the family's through
+  `warpui_kit_platform::door` (auth line, then `{"id", "cmd", …}` →
+  `{"id", "ok", …}`), and the endpoint files are written token-first, both
+  `0600`. `runs` answers the board the app is showing plus the host's live
+  runs; `run` takes `issue` (the canonical issue folder) and answers that
+  folder's board detail and its live phase; `answer` takes `issue`, `question`
+  and `text`, writes the one file the app owns and answers `resumed` or
+  `recorded` (a run this window drives continues, one driven elsewhere is only
+  recorded); `pause`/`resume`/`abandon` take `issue` and answer the phase,
+  carrying the host's own sentence when refused. `subscribe` takes an optional
+  `issue` filter, acks, and then pushes `{"push": "run", …}` on a phase, status
+  or log change and `{"push": "board"}` — a contentless notification, because
+  board content stays pull-only and a subscriber re-asks `runs`. warp-flow owns
+  this protocol; warp-agent's Flow page is its client. Starting a run has no
+  verb on purpose: starting stays warp-flow's own action.
 - **SnapIt settings**: [warp-snapit](https://github.com/enginkirmaci/warp-snapit)
   and Warp Station read the same versioned snake_case `~/.warp/snapit`
   `settings.json`/layouts. The old .NET-shaped files are importer input only;

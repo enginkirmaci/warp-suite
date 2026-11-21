@@ -1,8 +1,8 @@
 # warp-flow
 
-_Status: design closed; S0–S3 done and S4a done. Six grill rounds; the build
-order below is accepted. The checkout lives at `apps/warp-flow`; next is S4b,
-warp-flow's door, then S4c, warp-agent's Flow page. Prototype:
+_Status: design closed; S0–S3 and S4a–S4b done. Six grill rounds; the build
+order below is accepted. The checkout lives at `apps/warp-flow`; next is S4c,
+warp-agent's Flow page. Prototype:
 `.scratch/warp-flow/prototype-screens.html` (throwaway, fake data)._
 
 Takes a request — a feature, a bug, a change — and drives it to merged code:
@@ -226,12 +226,15 @@ filled primary per surface.
   app, a worker thread per issue folder (one run per repository), the dirty-tree
   refusal, the snapshot the door will publish, the run screen's Start / Pause /
   Resume / Abandon and the engine's own log lines. An answer to a run the app
-  drove continues it. **S4b** warp-flow's door: `~/.warp/flow/ipc.port` +
-  `ipc.token`, the verbs of
-  [ADR-0012](../docs/adr/0012-warp-flow-publishes-a-door-of-its-own.md),
-  publishing that same snapshot, `subscribe` for the log and the phase, and a
-  loopback probe. **S4c** warp-agent's Flow page over that door: one engine,
-  two clients.
+  drove continues it. **S4b (done)** warp-flow's door:
+  `~/.warp/flow/ipc.port` + `ipc.token`, protocol 1, the seven verbs of
+  [ADR-0012](../docs/adr/0012-warp-flow-publishes-a-door-of-its-own.md) over
+  the family's framing, `runs`/`run` served from the snapshot the window
+  adopted (no second scan), `answer` through the host so both surfaces share
+  one writer, and `subscribe` pushing a run whole but the board as a
+  re-ask-please notification. Nine loopback probes. The quit path moved off
+  the window entity, which never sees app shutdown in this gpui rev. **S4c**
+  warp-agent's Flow page over that door: one engine, two clients.
 - **S5 — the rest of the screens.** Artifacts, task & diff, workflow editor,
   repos & gates, settings.
 - **S6 — release.** The `release` workflow, packaging assets, and a
