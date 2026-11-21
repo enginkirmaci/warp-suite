@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 /// The wire protocol version a `ping` answers with.
-pub const PROTOCOL: u32 = 2;
+pub const PROTOCOL: u32 = 3;
 /// Prompts ride whole on one line; repository trees inside them grow large.
 /// Both sides drop the connection over this.
 pub const MAX_LINE: usize = 8 * 1024 * 1024;
@@ -28,6 +28,12 @@ pub mod cmd {
     pub const CANCEL: &str = "cancel";
     pub const MODELS: &str = "models";
     pub const STATUS: &str = "status";
+    /// One command for the app-level harness operations: `{cmd, method, params}`.
+    pub const HARNESS: &str = "harness";
+    /// Opens a filtered stream of harness events for this connection.
+    pub const SUBSCRIBE: &str = "subscribe";
+    /// Removes one subscription; the stream closes when the connection does.
+    pub const UNSUBSCRIBE: &str = "unsubscribe";
 }
 
 pub fn port_file_in(dir: &Path) -> PathBuf {
