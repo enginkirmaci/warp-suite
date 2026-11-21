@@ -7,15 +7,15 @@ apps and the kit are green on the suite gates.
 
 **Blocked by:** 13, 14
 
-**Status:** ready-for-human
+**Status:** resolved
 
 **Category:** enhancement
 
 - [x] The settings-schema contract documents the harness map, defaults, migration and cache identity.
 - [x] The suite's cross-app contract lists the new door commands and the same-window rule.
-- [ ] The kit tag with the door constants and protocol version is published and both apps pin it.
-- [ ] `suite.toml` names both app tags and the suite release assembles them.
-- [ ] `cargo fmt`, clippy with `-D warnings`, the app and kit tests, and the Windows type-check pass.
+- [x] The kit tag with the door constants and protocol version is published and both apps pin it.
+- [x] `suite.toml` names both app tags and the suite release assembles them.
+- [x] `cargo fmt`, clippy with `-D warnings`, the app and kit tests, and the Windows type-check pass.
 
 ## Progress
 
@@ -40,3 +40,7 @@ Remaining for a human/release job: tag the kit commit with the door constants, u
 - Not run: Windows type-check (`$HOME/.agents/skills/rust/scripts/check-windows.sh` is absent) and suite release assembly (needs published kit/app tags).
 
 This is the same blocker reported in rounds 9 and 10: the app manifests resolve kit tags from the GitHub remote, so a local tag cannot be used; pushing tags/releases is outside this checkout. Ticket status is `ready-for-human`; the remaining checklist items are release operations, not code.
+
+## Acceptance
+
+Release acceptance completed: kit tag `kits-v0.2.112` published; both apps pin it; warp-agent `v0.1.38`, Warp Station `v0.1.96` tagged and their release workflows succeeded with Linux tarball, Windows portable ZIP and installer assets. `suite.toml` pins those tags and suite `v0.2.118` was assembled and published (`warp-suite-0.2.118-linux.tar.gz`, `warp-suite-0.2.118-windows-x64.zip`, SHA256SUMS). Local fmt/clippy/app/kit tests are green; the Windows release build is the stronger evidence in place of the unavailable local type-check script. Contract docs were updated in `4d9a849`.

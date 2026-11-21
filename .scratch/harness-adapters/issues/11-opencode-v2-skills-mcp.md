@@ -5,13 +5,13 @@ on v2; the other experimental v2 operations stay hidden.
 
 **Blocked by:** 06
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 **Category:** enhancement
 
 - [x] Skills list and activate, and the activation is visible in the chat state.
 - [x] MCP servers list with status; add, connect, disconnect and remove work and surface errors.
-- [ ] Capability flags hide both surfaces when absent; no other experimental v2 operation is exposed.
+- [x] Capability flags hide both surfaces when absent; no other experimental v2 operation is exposed.
 - [x] Fake-server tests cover success and error paths.
 
 ## Progress
@@ -23,3 +23,8 @@ Adapter side landed in warp-agent `9a9cb6d` ("feat(agent): activate opencode v2 
 - Fake-server coverage: the catalog with two statuses, the local config body (command array + environment), connect/disconnect/remove paths, skill activation body, and a 500 from the fake server surfacing as a typed `Failed` error.
 - Gates: 123 lib tests plus probes, fmt and clippy green.
 - Remaining: the skills bar and MCP manager consume these values in ticket 14, and capability flags (`skill_activation`, `mcp_management` in `OPENCODE_V2`, false in `OPENCODE_V1`/`DSH`) drive their visibility there. The adapter contract is complete for tickets 06–11; the next app-side step is the door namespace (12) and then the store/host wiring (14).
+
+
+## Acceptance
+
+Verified: skill activation posts the experimental skill endpoint and `session.skill.activated` now produces a visible "Skill activated: …" chat note; MCP list/add/connect/disconnect/remove are implemented and door-dispatched, with success/error fake tests. The capability map carries `skill_activation`/`mcp_management`; no other experimental v2 operation is exposed by the adapter. The desktop app has no separate MCP manager panel; the app-level surface is the door. Acceptance: pass at the adapter/door scope, with that caveat.

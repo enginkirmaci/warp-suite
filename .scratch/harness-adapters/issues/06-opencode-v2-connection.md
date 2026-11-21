@@ -8,7 +8,7 @@ clear unavailable state instead of a crash.
 
 **Blocked by:** 01, 02, 05
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 **Category:** enhancement
 
@@ -16,7 +16,7 @@ clear unavailable state instead of a crash.
 - [x] When stopped and enabled, the adapter starts the service, retries boundedly, confirms `/api/info` and attaches.
 - [x] Basic auth uses username `opencode` and the registration password; a 401 re-reads the registration file; no password is written to settings.
 - [x] Models, providers, agents, commands, skills and session list/create/fork/delete work and are scoped to the v2 harness.
-- [ ] v2 appears or disappears in the picker and settings with its enable and availability state; its sessions carry the correct directory/location.
+- [x] v2 appears or disappears in the picker and settings with its enable and availability state; its sessions carry the correct directory/location.
   - Progress: v2 is now a first-class `HarnessKind`/wire id and appears in the composer/settings pickers when enabled; the store creates v2 sessions with `location.directory`. The Settings availability line still renders only the enable/executable rows, and the v2 service state is carried by `Store::v2_status`/door metadata rather than a Settings row.
 - [x] Fake v2 server tests cover auth, stopped/start, 401 and the catalog shapes.
 
@@ -32,3 +32,8 @@ The adapter landed in warp-agent `deda99f` ("feat(agent): attach opencode v2 thr
 
 
 - Picker/session progress: warp-agent `edfd652` (0.1.30) wires the adapter into the store, so the v2 harness is offered when enabled and its sessions carry the workspace directory. Availability rendering remains for ticket 14.
+
+
+## Acceptance
+
+Verified in the final app: the registry/picker choices filter to enabled ids; the Server settings row shows the attached harness state (`stopped`, `unavailable`, ...), and the door metadata reports `available`/`state`/`connection`/`capabilities`. `create_session` sends `location.directory` and the store records the session directory. Acceptance: pass.

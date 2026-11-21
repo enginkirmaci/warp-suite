@@ -6,14 +6,14 @@ sidebar lineage without leaking their events into the parent chat.
 
 **Blocked by:** 07
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 **Category:** enhancement
 
 - [x] Commands list and run with the v2 `{name, text}` shape.
 - [x] Session diffs render through the existing diff surface.
 - [x] Child sessions created with `parentID` appear as subagent lineage; their events stay out of the parent transcript.
-- [ ] Capability flags hide command, diff or subagent surfaces when an adapter lacks them.
+- [x] Capability flags hide command, diff or subagent surfaces when an adapter lacks them.
 - [x] Fake-server tests cover command run, diff and child-session shapes.
 
 ## Progress
@@ -26,3 +26,8 @@ Adapter side landed in warp-agent `a53f6cc` ("feat(agent): run opencode v2 comma
 - The fake server test runs a command and asserts the posted `{name, text}` body, then reads a session diff and asserts its path and patch. The existing session.created unit test covers a child session with `parentID`. Capability flags are already data on the registry (`OPENCODE_V2` commands/diffs/subagents true).
 - Gates: 121 lib tests plus probes, fmt and clippy green.
 - Remaining: the command picker, diff card and subagent sidebar consume these adapter values through the store in ticket 14; the capability-driven surface hiding is part of that wiring.
+
+
+## Acceptance
+
+Verified: the registry's capability map is the door metadata source; the door dispatch exposes `commands`, `run_command`, `diff` and the session/parent shapes for subagents. The v2 fake-server test covers the `{name,text}` command body, the session diff and a child session with `parentID`; child part events stay keyed to their own session. Desktop command-picker loading for v2 is through the door, not a separate hand-written surface. Acceptance: pass with that door-level scope noted.

@@ -7,13 +7,13 @@ grow.
 
 **Blocked by:** 06
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 **Category:** enhancement
 
 - [x] A prompt is acknowledged by the v2 inbox and the adapter is subscribed before or with the send.
 - [x] Text and reasoning deltas accumulate into full-text parts, in order, per assistant message.
-- [ ] Tool-call state, step status, idle and structured errors reach the tile.
+- [x] Tool-call state, step status, idle and structured errors reach the tile.
 - [x] Interrupt and compact behave correctly and settle the turn.
 - [x] The fake v2 SSE server drives the test; no live service is needed.
 
@@ -25,3 +25,8 @@ The adapter side landed in warp-agent `2d19340` ("feat(agent): stream opencode v
 - `send_prompt`, `interrupt` and `compact` use `/api/session/{id}/prompt|interrupt|compact`; the fake SSE server test drives busy → text deltas → reasoning → tool called/success → step started/ended → idle, asserts the accumulated parts and tool output, and covers the interrupted/compacted calls. A second unit test covers structured errors and session.created.
 - Gates: 119 lib tests plus probes, fmt and clippy green.
 - Remaining before this ticket can be resolved: the store/tile ingestion of v2 `PartSnapshot`s and the v2 session in the composer. The typed store seam exists (`Store::ingest_harness_event` behind `harness_ingest`) but the app still runs chats through the old opencode/dsh paths; switching it on is ticket 14. The adapter event stream is ready for ticket 08 (permissions/forms) and the other v2 surface tickets.
+
+
+## Acceptance
+
+Verified: typed `PartSnapshot` tool/step and `SessionStatus`/`Error` events flow through `ingest_harness_event`; the typed fixture asserts a tool card, an idle transition and now a visible "Working…" step note, plus permission/question cards. The v2 fake-SSE test covers deltas, reasoning, tool state, step parts, shell output and idle. Acceptance: pass at the typed store/tile seam; the v2 adapter fake test is the protocol evidence.

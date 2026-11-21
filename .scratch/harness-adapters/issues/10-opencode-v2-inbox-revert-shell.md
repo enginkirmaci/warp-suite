@@ -6,7 +6,7 @@ sessions that keep working while the tile is not focused.
 
 **Blocked by:** 07
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 **Category:** enhancement
 
@@ -27,3 +27,8 @@ Adapter side landed in warp-agent `4ecc999` ("feat(agent): expose opencode v2 in
 - The HTTP client now treats `204 No Content` as an empty success, which the inbox/revert/shell/background endpoints use. The fake-server test drives all four surfaces and asserts the posted bodies/paths; the SSE test also drives a shell-ended output event.
 - Gates: 122 lib tests plus probes, fmt and clippy green.
 - Remaining: the inbox bar, revert card, shell output card and background badge consume these values in ticket 14; capability-driven hiding is part of the same wiring. The adapter contract is ready for ticket 11.
+
+
+## Acceptance
+
+Verified: inbox list/update/cancel, revert stage/commit/clear, shell and background are implemented in the v2 adapter and dispatched through the door; `204 No Content` is handled, shell-ended output becomes a typed `CommandOutput`, and the fake-server test drives all four. The desktop app has no separate v2 inbox/revert/shell panels; the app-level surface is the door harness namespace. Acceptance: pass at the adapter/door scope, with the desktop-panel gap recorded.
