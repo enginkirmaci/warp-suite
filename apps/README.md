@@ -6,6 +6,7 @@ Local-only symlinks to the sibling app checkouts, created by
 ```
 apps/warp-station -> ../../warp-station
 apps/warp-agent   -> ../../warp-agent
+apps/warp-flow    -> ../../warp-flow
 apps/warp-notes   -> ../../warp-notes
 apps/warp-snapit  -> ../../warp-snapit
 apps/warp-pomodoro -> ../../warp-pomodoro
@@ -16,8 +17,9 @@ them in place the root workspace's `apps/*` member glob builds every app against
 the local `kits/` (the `[patch]` table in `Cargo.toml` swaps the git kit
 source for the local path).
 
-`apps/warp-flow` is the one real directory here, not a link: it holds that app's
-own git repository inside the suite on purpose. `apps/*` is gitignored, so this
-history never sees it, and the member glob, the shared `.build/target` and the
-kit `[patch]` table treat it exactly like a link. `link_apps.py` never replaces
-a real directory, so nothing can turn it into one.
+Every app is a link now. `warp-flow` was the last real directory here — it was
+scaffolded inside the suite while its design was still moving — and it moved to
+the sibling checkout when S4 landed. Its link is made by hand until its first
+release exists: `link_apps.py` takes the app names from `suite.toml`, and that
+table pins a tag, so `suite.toml` gains `warp-flow` in the same change window as
+its first release.

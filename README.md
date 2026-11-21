@@ -14,6 +14,7 @@ Currently in the suite:
 | warp-station | [warp-station](https://github.com/enginkirmaci/warp-station) | Repository workbench (Rust/GPUI) |
 | warp-agent | [warp-agent](https://github.com/enginkirmaci/warp-agent) | Chat client over `opencode serve` and `dsh web` (Rust/GPUI) |
 | warp-snapit | [warp-snapit](https://github.com/enginkirmaci/warp-snapit) | Rust port of the SnapIt zone snapper (Windows-only, portable zip) |
+| warp-flow | [warp-flow](https://github.com/enginkirmaci/warp-flow) | Workflow engine — a request to merged code through harness sessions on warp-agent's door (Rust/GPUI) |
 | warp-notes | [warp-notes](https://github.com/enginkirmaci/warp-notes) | Per-repo markdown notes with a live editor (Rust/GPUI) |
 | warp-pomodoro | [warp-pomodoro](https://github.com/enginkirmaci/warp-pomodoro) | Pomodoro focus timer with a live Station rail page, a countdown ring and a mini always-on-top card (Rust/GPUI) |
 | warp-android-scribe | [warp-android-scribe](https://github.com/enginkirmaci/warp-android-scribe) | Android dictation IME with a full QWERTY keyboard over Superwhisper or Hex (Kotlin/Compose + Rust bridge) |

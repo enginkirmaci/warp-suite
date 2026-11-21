@@ -19,6 +19,7 @@ bridge is not a member here. Repositories and tags are in
 | warp-station | `warp-station` + `warp-station-core` | Repository workbench (Rust/GPUI) |
 | warp-agent | `warp-agent` | Chat over `opencode serve` and `dsh web` (Rust/GPUI) |
 | warp-snapit | `warp-snapit` | Windows-only zone snapper (Win32, no GPUI/kit) |
+| warp-flow | `warp-flow` + `warp-flow-core` | Workflow engine over warp-agent's door, publishing a door of its own (Rust/GPUI) |
 | warp-notes | `warp-notes` | Per-repo markdown notes with a live editor (Rust/GPUI) |
 | warp-pomodoro | `warp-pomodoro` | Focus timer with a live Station rail page (Rust/GPUI) |
 | warp-android-scribe | `warp-android-scribe-bridge` | Dictation IME over Superwhisper or Hex (Kotlin/Compose + Rust bridge) |

@@ -8357,14 +8357,14 @@ dependencies = [
 
 [[package]]
 name = "warpui-kit-build"
-version = "0.2.128"
+version = "0.2.129"
 dependencies = [
  "winresource",
 ]
 
 [[package]]
 name = "warpui-kit-core"
-version = "0.2.128"
+version = "0.2.129"
 dependencies = [
  "async-channel",
  "futures-util",
@@ -8380,7 +8380,7 @@ dependencies = [
 
 [[package]]
 name = "warpui-kit-diff"
-version = "0.2.128"
+version = "0.2.129"
 dependencies = [
  "gpui-kit",
  "gpui-pre",
@@ -8392,7 +8392,7 @@ dependencies = [
 
 [[package]]
 name = "warpui-kit-markdown"
-version = "0.2.128"
+version = "0.2.129"
 dependencies = [
  "anyhow",
  "gpui-kit",
@@ -8406,7 +8406,7 @@ dependencies = [
 
 [[package]]
 name = "warpui-kit-picker"
-version = "0.2.128"
+version = "0.2.129"
 dependencies = [
  "gpui-kit",
  "gpui-pre",
@@ -8415,7 +8415,7 @@ dependencies = [
 
 [[package]]
 name = "warpui-kit-platform"
-version = "0.2.128"
+version = "0.2.129"
 dependencies = [
  "anyhow",
  "gpui-kit",
@@ -8432,7 +8432,7 @@ dependencies = [
 
 [[package]]
 name = "warpui-kit-worktree"
-version = "0.2.128"
+version = "0.2.129"
 dependencies = [
  "anyhow",
  "tempfile",

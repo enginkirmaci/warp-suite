@@ -84,12 +84,16 @@ artifact, question, approval, repair.
     deleted automatically.
 15. **Dogfood order:** a warp-suite kit crate first (`cargo test -p …`, headless
     and fast), then warp-notes, then warp-flow itself.
-16. **The checkout lives inside the suite — no symlink.** `apps/warp-flow` is
-    a real directory holding the app's own git repository (its `.git` lives
-    there too); `apps/*` is gitignored, so the suite's history never sees it,
-    while the workspace glob picks it up and the shared `.build/target` and the
-    kit `[patch]` table apply. `link_apps.py` never replaces a real directory,
-    so a symlink can never appear later.
+16. **The checkout is a sibling, like every other app's.** `apps/warp-flow`
+    is a symlink to `../warp-flow`, which holds the app's own git repository.
+    This reverses the earlier choice (a real directory inside the suite, with
+    its `.git` in the tree): while the design was still moving, one checkout in
+    one place was worth being the single exception in `link_apps.py` and in
+    `apps/README.md`; once S4 landed the exception bought nothing the shared
+    build did not already give, and it left this app as the only one that could
+    not be opened from its own repository. The link is made by hand for now and
+    `suite.toml` gains its pin in the same change window as the first release,
+    after which `link_apps.py` owns it.
 17. **The app is the process that drives a run.** `Runner::run` is blocking and
     owns `&mut self`, so it moves onto the app's background executor and the
     app publishes warp-flow's door from the same process

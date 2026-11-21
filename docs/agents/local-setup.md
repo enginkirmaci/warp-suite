@@ -22,11 +22,16 @@ a package selector took minutes.
 ├── warp-suite/                 # this repo: kits, suite tools, suite.toml
 ├── warp-station/
 ├── warp-agent/
+├── warp-flow/
 ├── warp-notes/
 ├── warp-pomodoro/
 ├── warp-snapit/
 └── warp-android-scribe/        # Gradle project + Rust bridge (own repo)
 ```
+
+`warp-flow`'s link is made by hand until it has a published release: the
+linker takes app names from `suite.toml`, whose entries carry a release tag, so
+that table gains warp-flow in the same change window as its first tag.
 
 The app directories must be siblings of `warp-suite`. Any other layout works
 with `scripts/dev/link-apps.sh --source <dir>`; the symlink then points at an
