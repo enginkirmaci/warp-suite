@@ -1,9 +1,9 @@
 # warp-flow
 
-_Status: design closed; S0, S1, S2 and S3a done. Six grill rounds; the build
-order below is accepted. The checkout lives at `apps/warp-flow`; next is S3b,
-the run screen. Prototype: `.scratch/warp-flow/prototype-screens.html`
-(throwaway, fake data)._
+_Status: design closed; S0–S3 done. Six grill rounds; the build order below is
+accepted. The checkout lives at `apps/warp-flow`; next is S4, the engine host
+and warp-agent's Flow page. Prototype:
+`.scratch/warp-flow/prototype-screens.html` (throwaway, fake data)._
 
 Takes a request — a feature, a bug, a change — and drives it to merged code:
 distil it into an issue, split it into tasks, write each task in its own
@@ -86,6 +86,18 @@ artifact, question, approval, repair.
     while the workspace glob picks it up and the shared `.build/target` and the
     kit `[patch]` table apply. `link_apps.py` never replaces a real directory,
     so a symlink can never appear later.
+17. **The app is the process that drives a run.** `Runner::run` is blocking and
+    owns `&mut self`, so it moves onto the app's background executor and the
+    app publishes warp-flow's door from the same process
+    ([ADR-0012](../docs/adr/0012-warp-flow-publishes-a-door-of-its-own.md)):
+    the UI and the door are two clients of one engine, never two engines.
+    `warp-flow-cli` stays as the headless driver for a run nobody else is
+    driving. Pause, resume and abandon reach the loop through a value it reads
+    at each **step boundary** — a pause stops between steps, never inside a
+    session, and it leaves no artifact behind, so the issue folder keeps saying
+    what happened rather than what someone asked for. A run the app did not
+    start but sees as `running` is somebody else's: the app offers **Resume**
+    (the same takeover `warp-flow-cli run` does) and never starts it on its own.
 
 
 ## The door contract (measured in S0)
@@ -195,10 +207,20 @@ filled primary per surface.
   a frame), the repository rail, a six-column board whose open question forces
   **Waiting on you**, and a read-only run detail pane. Six probes. The engine
   still has no host in the app, so `warp-flow-cli` stays the way to start a
-  run. **S3b** the run screen: the workflow DAG, the task dependency strip, the
-  live session log, question and approval cards, and the run actions that need
-  an engine host in the app.
-- **S4 — the warp-agent Flow page.** Reads the flow door, answers questions.
+  run. **S3b (done)** the run screen: `workflow.toml` as step bands in
+  topological order with one lane per task for a per-task step, every row's
+  state derived from `run.md` and the task files, the task dependency strip
+  (`01 ∥ 02 → 03`) with the blocker rule in words, the whole attempt history
+  grouped by step and task, and the open question answered in place — the one
+  file the app writes, through core's atomic document write. Leaving the
+  screen rather than ghosting it when the run disappears. Eight probes. The
+  run **actions** (start, pause, abandon, resume) wait for S4, because they
+  need the engine in the app.
+- **S4 — the engine host and the Flow page.** The app drives runs (start,
+  resume, pause, abandon), answers questions from the run screen, and answers
+  the same question from warp-agent's door. `warp-agent`'s Flow page reads
+  warp-flow's door and answers there: one engine, two clients
+  ([ADR-0012](../docs/adr/0012-warp-flow-publishes-a-door-of-its-own.md)).
 - **S5 — the rest of the screens.** Artifacts, task & diff, workflow editor,
   repos & gates, settings.
 - **S6 — release.** The `release` workflow, packaging assets, and a
