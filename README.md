@@ -176,8 +176,10 @@ together. When one changes, update the other side in the **same** commit.
   `issue` filter, acks, and then pushes `{"push": "run", …}` on a phase, status
   or log change and `{"push": "board"}` — a contentless notification, because
   board content stays pull-only and a subscriber re-asks `runs`. warp-flow owns
-  this protocol; warp-agent's Flow page is its client. Starting a run has no
-  verb on purpose: starting stays warp-flow's own action.
+  this protocol; warp-agent's Flow sheet is its client (rail row,
+  `Ctrl+Shift+F`). Starting a run has no verb on purpose: starting stays
+  warp-flow's own action, and a warp-flow that is not running reads as a named
+  state on the sheet rather than as an error.
 - **SnapIt settings**: [warp-snapit](https://github.com/enginkirmaci/warp-snapit)
   and Warp Station read the same versioned snake_case `~/.warp/snapit`
   `settings.json`/layouts. The old .NET-shaped files are importer input only;

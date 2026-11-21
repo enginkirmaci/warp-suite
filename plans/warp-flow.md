@@ -1,8 +1,8 @@
 # warp-flow
 
-_Status: design closed; S0–S3 and S4a–S4b done. Six grill rounds; the build
-order below is accepted. The checkout lives at `apps/warp-flow`; next is S4c,
-warp-agent's Flow page. Prototype:
+_Status: design closed; S0–S4 done. Six grill rounds; the build
+order below is accepted. The checkout lives at `apps/warp-flow`; next is S5, the rest of the
+screens. Prototype:
 `.scratch/warp-flow/prototype-screens.html` (throwaway, fake data)._
 
 Takes a request — a feature, a bug, a change — and drives it to merged code:
@@ -233,8 +233,14 @@ filled primary per surface.
   adopted (no second scan), `answer` through the host so both surfaces share
   one writer, and `subscribe` pushing a run whole but the board as a
   re-ask-please notification. Nine loopback probes. The quit path moved off
-  the window entity, which never sees app shutdown in this gpui rev. **S4c**
-  warp-agent's Flow page over that door: one engine, two clients.
+  the window entity, which never sees app shutdown in this gpui rev. **S4c
+  (done)** warp-agent's Flow sheet over that door: one engine, two clients. It
+  shows what waits on a person (the question, rendered as markdown, with the
+  controls its kind asks for) and what moves (phase, the engine's own log, the
+  verbs the phase allows), and it cannot start a run — that stays warp-flow's
+  action. The client is `src/flow.rs` on warp-agent's existing net runtime with
+  `absent` as a named state, so a warp-flow that is not running reads as "start
+  warp-flow", never as a broken page.
 - **S5 — the rest of the screens.** Artifacts, task & diff, workflow editor,
   repos & gates, settings.
 - **S6 — release.** The `release` workflow, packaging assets, and a
