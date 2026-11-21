@@ -1,8 +1,9 @@
 # warp-flow
 
-_Status: design closed; S0, S1 and S2 done. Six grill rounds; the build order
-below is accepted. The checkout lives at `apps/warp-flow`; next is S3, the app. Prototype: `.scratch/warp-flow/prototype-screens.html` (throwaway,
-fake data)._
+_Status: design closed; S0, S1, S2 and S3a done. Six grill rounds; the build
+order below is accepted. The checkout lives at `apps/warp-flow`; next is S3b,
+the run screen. Prototype: `.scratch/warp-flow/prototype-screens.html`
+(throwaway, fake data)._
 
 Takes a request — a feature, a bug, a change — and drives it to merged code:
 distil it into an issue, split it into tasks, write each task in its own
@@ -188,8 +189,15 @@ filled primary per surface.
   `status`, `--dry-run`), `flow.toml` loading, a `merge` step kind, resuming
   from `run.md`, and an end-to-end probe that drives a real throwaway
   repository to merged, resolved tasks.
-- **S3 — the app shell.** Repo rail, kanban board, run screen, waiting-on-you,
-  against the live engine.
+- **S3 — the app shell.** **S3a (done)** the shell over the issue folders: a
+  `lib.rs` probe boundary, a thin launcher, the versioned settings document,
+  a background scan of every configured repository (2 s poll, no filesystem in
+  a frame), the repository rail, a six-column board whose open question forces
+  **Waiting on you**, and a read-only run detail pane. Six probes. The engine
+  still has no host in the app, so `warp-flow-cli` stays the way to start a
+  run. **S3b** the run screen: the workflow DAG, the task dependency strip, the
+  live session log, question and approval cards, and the run actions that need
+  an engine host in the app.
 - **S4 — the warp-agent Flow page.** Reads the flow door, answers questions.
 - **S5 — the rest of the screens.** Artifacts, task & diff, workflow editor,
   repos & gates, settings.
