@@ -17,6 +17,11 @@ The functional v2 bridge landed, but the enum/special-case removal is still open
 - The settings page can select v2 as a default, the composer pill cycles to it when enabled, and disabling v2 detaches the adapter without touching the shared service.
 - Still open for this ticket: the enum itself, the dsh workspace sentinel, the per-kind old net branches (`oc.rs` now rejects v2 with explicit arms), the old request/event variants and the v1/dsh adapters being the real chat path. The typed store seam (`harness_ingest`) is switched on by `ensure_v2`; v1/dsh still use the old net client. The acceptance evidence cannot be claimed until that sweep lands.
 
+A second sweep landed in warp-agent `da42a46` ("refactor(agent): replace the harness enum with registry ids", version 0.1.32): the old `HarnessKind` enum, `DSH_SERVER_KEY` and dsh-named shared request/event variants are gone; `HarnessId` strings flow from settings through the store, UI and door; the registry carries launch specs and scope/connection predicates; settings/UI/door iterate descriptors. Inventory before the sweep: 232 `HarnessKind` references across 19 files, 56 sentinel references, ~72 per-kind comparisons. After: zero, with 129 lib tests and all probes green.
+
+Still open: v1/dsh chat/session/streaming/approval paths are still on the legacy net thread (`src/oc.rs`/`src/dsh.rs`, `WorkspaceNet`, `ApiRequest`/`UiEvent`), selected by descriptor predicates. That routing is the last piece of ticket 14.
+
+
 ## Remaining work
 
 - Replace `HarnessKind`/`DSH_SERVER_KEY` and the old `ApiRequest`/`UiEvent` variants with registry ids and the host; move v1/dsh chat/session/streaming/approval flows onto their adapters.
