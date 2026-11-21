@@ -19,7 +19,7 @@ tag = "v0.1.96"
 
 [apps.warp-agent]
 repo = "enginkirmaci/warp-agent"
-tag = "v0.1.44"
+tag = "v0.1.45"
 
 [apps.warp-notes]
 repo = "enginkirmaci/warp-notes"
@@ -28,6 +28,10 @@ tag = "v0.1.4"
 [apps.warp-pomodoro]
 repo = "enginkirmaci/warp-pomodoro"
 tag = "v0.2.4"
+
+[apps.warp-flow]
+repo = "enginkirmaci/warp-flow"
+tag = "v0.1.20"
 
 [apps.warp-snapit]
 repo = "enginkirmaci/warp-snapit"

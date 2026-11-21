@@ -8219,7 +8219,7 @@ dependencies = [
 
 [[package]]
 name = "warp-flow"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "anyhow",
  "gpui-kit",
@@ -8240,7 +8240,7 @@ dependencies = [
 
 [[package]]
 name = "warp-flow-core"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "serde",
  "serde_json",
@@ -8358,14 +8358,14 @@ dependencies = [
 
 [[package]]
 name = "warpui-kit-build"
-version = "0.2.130"
+version = "0.2.131"
 dependencies = [
  "winresource",
 ]
 
 [[package]]
 name = "warpui-kit-core"
-version = "0.2.130"
+version = "0.2.131"
 dependencies = [
  "async-channel",
  "futures-util",
@@ -8381,7 +8381,7 @@ dependencies = [
 
 [[package]]
 name = "warpui-kit-diff"
-version = "0.2.130"
+version = "0.2.131"
 dependencies = [
  "gpui-kit",
  "gpui-pre",
@@ -8393,7 +8393,7 @@ dependencies = [
 
 [[package]]
 name = "warpui-kit-markdown"
-version = "0.2.130"
+version = "0.2.131"
 dependencies = [
  "anyhow",
  "gpui-kit",
@@ -8407,7 +8407,7 @@ dependencies = [
 
 [[package]]
 name = "warpui-kit-picker"
-version = "0.2.130"
+version = "0.2.131"
 dependencies = [
  "gpui-kit",
  "gpui-pre",
@@ -8416,7 +8416,7 @@ dependencies = [
 
 [[package]]
 name = "warpui-kit-platform"
-version = "0.2.130"
+version = "0.2.131"
 dependencies = [
  "anyhow",
  "gpui-kit",
@@ -8433,7 +8433,7 @@ dependencies = [
 
 [[package]]
 name = "warpui-kit-worktree"
-version = "0.2.130"
+version = "0.2.131"
 dependencies = [
  "anyhow",
  "tempfile",
