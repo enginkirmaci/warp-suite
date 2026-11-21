@@ -7,7 +7,7 @@ change.
 
 **Blocked by:** 03, 04, 05, 06, 07, 08, 09, 10, 11, 12, 13
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 ## Progress
 
@@ -30,8 +30,20 @@ Still open: v1/dsh chat/session/streaming/approval paths are still on the legacy
 
 **Category:** enhancement
 
-- [ ] No old harness enum, dsh sentinel, per-kind client field or dsh-named shared request/event variant remains.
-- [ ] The store, UI and door iterate the registry; unknown ids are typed errors.
-- [ ] Every existing probe and unit test is green; chat, v1, dsh, v2, settings, door and transcript behavior is unchanged.
-- [ ] No `if harness == ...` branch remains outside the adapters.
-- [ ] The v2 protocol is known only to its adapter.
+- [x] No old harness enum, dsh sentinel, per-kind client field or dsh-named shared request/event variant remains.
+- [x] The store, UI and door iterate the registry; unknown ids are typed errors.
+- [x] Every existing probe and unit test is green; chat, v1, dsh, v2, settings, door and transcript behavior is unchanged.
+- [x] No `if harness == ...` branch remains outside the adapters.
+- [x] The v2 protocol is known only to its adapter.
+
+
+## Final sweep
+
+The routing landed in warp-agent `de7b959` ("refactor(agent): route managed harness chats through their adapters", version 0.1.33).
+
+- The net thread now owns `HarnessHost` instances keyed by `(HarnessId, Option<folder>)`, created through the descriptor factory. It starts/stops instances, pumps each adapter's typed `HarnessEvent` stream, maps connection/health/exit facts to store notifications and dispatches every `ApiRequest` through the `Harness` trait. The `WorkspaceNet` per-kind `api`/`shared` fields and the direct `ApiClient`/`DshHandle` routing are gone; those clients remain only as transport inside their adapters.
+- The store consumes typed events for every harness (`UiEvent::HarnessEvent` → `ingest_harness_event_from`) with the instance folder tagging the event. Typed vocabulary gained prompt attachments/commands, transcript history, todos, reconnect and exit facts; the trait gained `transcript`, `find_files`, `forget_session`, session-scoped catalogs, and a bridge module builds the wire JSON once.
+- Inventory: 232 `HarnessKind` references and 56 sentinel references before the sweep → 0; no `if harness == <id>` branch outside adapters (only descriptor scope/connection facts). v2 protocol code exists only in `harness/opencode_v2.rs`.
+- Gates: `cargo fmt --all --check`, `cargo clippy -p warp-agent --all-targets -- -D warnings`, `cargo test -p warp-agent` → **142 lib tests + all 15 probe binaries, 0 failures**.
+- Live smoke (removed from the suite): real `opencode serve`/`dsh web` start → typed events → session list/create → transcript → command catalog → find files → delete → stop. Not exercised against a live model: prompt streaming, approval/question round-trips and GPUI-visible flows; those rely on the adapter unit/fake-server tests.
+- The door's full trait dispatch and the Station AI card remain tickets 12/13, not this ticket.
