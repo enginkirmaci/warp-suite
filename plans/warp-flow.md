@@ -1,8 +1,8 @@
 # warp-flow
 
-_Status: design closed; S0–S3 done. Six grill rounds; the build order below is
-accepted. The checkout lives at `apps/warp-flow`; next is S4, the engine host
-and warp-agent's Flow page. Prototype:
+_Status: design closed; S0–S3 done and S4a done. Six grill rounds; the build
+order below is accepted. The checkout lives at `apps/warp-flow`; next is S4b,
+warp-flow's door, then S4c, warp-agent's Flow page. Prototype:
 `.scratch/warp-flow/prototype-screens.html` (throwaway, fake data)._
 
 Takes a request — a feature, a bug, a change — and drives it to merged code:
@@ -62,7 +62,11 @@ artifact, question, approval, repair.
 11. **Questions are first class.** `approve` (yes/no), `select`, `multi`,
     `text` — asked by a step or by the harness agent mid-session, written to
     `questions/NN.md`, answered from either UI, written by warp-flow alone. A
-    run paused on a question does not spend its wall-clock budget.
+    run paused on a question does not spend its wall-clock budget. An answer
+    given to a run the answering surface is driving continues it — the answer
+    is what the engine waited for — while an answer for a run being driven
+    somewhere else is only recorded, and that driver continues it. One act, one
+    button; and never two engines on one issue folder.
 12. **Harness permissions are policy, not a person.** Inside a task worktree,
     edits and commands are allowed; writes outside it, network access, `push`
     and force operations become a question. Every automatic answer is written
@@ -216,11 +220,18 @@ filled primary per surface.
   screen rather than ghosting it when the run disappears. Eight probes. The
   run **actions** (start, pause, abandon, resume) wait for S4, because they
   need the engine in the app.
-- **S4 — the engine host and the Flow page.** The app drives runs (start,
-  resume, pause, abandon), answers questions from the run screen, and answers
-  the same question from warp-agent's door. `warp-agent`'s Flow page reads
-  warp-flow's door and answers there: one engine, two clients
-  ([ADR-0012](../docs/adr/0012-warp-flow-publishes-a-door-of-its-own.md)).
+- **S4 — the engine host, its door and the Flow page.** **S4a (done)** the
+  app drives runs: `Control`/`Signal` read at every step boundary, `Paused` and
+  `Abandoned` recorded in `run.md`, `core::prepare` shared by the CLI and the
+  app, a worker thread per issue folder (one run per repository), the dirty-tree
+  refusal, the snapshot the door will publish, the run screen's Start / Pause /
+  Resume / Abandon and the engine's own log lines. An answer to a run the app
+  drove continues it. **S4b** warp-flow's door: `~/.warp/flow/ipc.port` +
+  `ipc.token`, the verbs of
+  [ADR-0012](../docs/adr/0012-warp-flow-publishes-a-door-of-its-own.md),
+  publishing that same snapshot, `subscribe` for the log and the phase, and a
+  loopback probe. **S4c** warp-agent's Flow page over that door: one engine,
+  two clients.
 - **S5 — the rest of the screens.** Artifacts, task & diff, workflow editor,
   repos & gates, settings.
 - **S6 — release.** The `release` workflow, packaging assets, and a
