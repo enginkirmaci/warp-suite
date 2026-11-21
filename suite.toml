@@ -11,15 +11,15 @@
 version = "0.1.0"
 
 [kits]
-tag = "kits-v0.2.76"
+tag = "kits-v0.2.112"
 
 [apps.warp-station]
 repo = "enginkirmaci/warp-station"
-tag = "v0.1.8"
+tag = "v0.1.95"
 
 [apps.warp-agent]
 repo = "enginkirmaci/warp-agent"
-tag = "v0.1.4"
+tag = "v0.1.36"
 
 [apps.warp-notes]
 repo = "enginkirmaci/warp-notes"
