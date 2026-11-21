@@ -1,8 +1,7 @@
 # warp-flow
 
-_Status: design closed; S0–S4 done. Six grill rounds; the build
-order below is accepted. The checkout lives at `apps/warp-flow`; next is S5, the rest of the
-screens. Prototype:
+_Status: design closed; S0–S5 done. Six grill rounds; the build
+order below is accepted. The checkout lives at `apps/warp-flow`; next is S6, the release. Prototype:
 `.scratch/warp-flow/prototype-screens.html` (throwaway, fake data)._
 
 Takes a request — a feature, a bug, a change — and drives it to merged code:
@@ -94,7 +93,18 @@ artifact, question, approval, repair.
     not be opened from its own repository. The link is made by hand for now and
     `suite.toml` gains its pin in the same change window as the first release,
     after which `link_apps.py` owns it.
-17. **The app is the process that drives a run.** `Runner::run` is blocking and
+17. **The app may edit a run's files, but the engine owns them while it
+    drives.** The screens write `spec.md`, the task files, `workflow.toml` and
+    `flow.toml` — the issue folder is a person's working surface, not a
+    read-only record — through one atomic writer (a temp file and a rename),
+    because the engine and the two-second scan read those files at undefined
+    moments. What differs is the permission: while this window drives a run, the
+    artifacts screen is read-only with the reason on screen (the engine may be
+    between a step's read and its write), while the workflow and gate files may
+    still be saved because the engine re-reads them at step boundaries by design
+    (ADR-0010) — and both validate before writing, so a running engine can never
+    pick up a graph it would refuse.
+18. **The app is the process that drives a run.** `Runner::run` is blocking and
     owns `&mut self`, so it moves onto the app's background executor and the
     app publishes warp-flow's door from the same process
     ([ADR-0012](../docs/adr/0012-warp-flow-publishes-a-door-of-its-own.md)):
@@ -245,8 +255,19 @@ filled primary per surface.
   action. The client is `src/flow.rs` on warp-agent's existing net runtime with
   `absent` as a named state, so a warp-flow that is not running reads as "start
   warp-flow", never as a broken page.
-- **S5 — the rest of the screens.** Artifacts, task & diff, workflow editor,
-  repos & gates, settings.
+- **S5 — the rest of the screens (done).** A run has six screens under the
+  rail's `THIS RUN`: the run screen, **Artifacts** (the issue folder's documents
+  in tabs, edited in place, saved atomically, refused while the engine drives
+  the run), **Task & diff** (one task's branch, its worktree, its files and the
+  patch through the kit's renderer, from `core::diff`), **Workflow** (the graph
+  as rows with an inspector, validated and saved as a new revision through
+  `Workflow::write`/`save`), **Repos & gates** (the window's repositories with
+  add/remove, and `flow.toml`'s gates edited, validated and runnable once
+  through `FlowConfig::write` and `gate::run_once`) and **Settings** (reduced
+  motion persisted beside the repositories, the folders, the door's state, the
+  version). The screens are entities behind `ui::screens`' one seam, so each
+  loads what it shows on the background executor and none of them writes a file
+  any other way than the seam's atomic writer.
 - **S6 — release.** The `release` workflow, packaging assets, and a
   `suite.toml` pin once a published tag exists.
 
