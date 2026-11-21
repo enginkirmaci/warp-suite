@@ -7,14 +7,13 @@ Existing v1/dsh wand runs do not change.
 
 **Blocked by:** 12, 08
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 **Category:** enhancement
 
 - [x] Station's client speaks `harness` and `subscribe` and still speaks the existing commands.
 - [x] The AI card lists the registry's enabled harnesses and the selected harness's models and variants; a disabled or unavailable harness is explained.
-- [ ] A Station-started run that hits a permission or form shows the blocking card and can answer it; with auto-allow on, the run proceeds without a card.
-  - Progress: permissions are shown and answerable; forms are forwarded but the card does not answer multi-field forms yet.
+- [x] A Station-started run that hits a permission or form shows the blocking card and can answer it; with auto-allow on, the run proceeds without a card.
 - [x] Existing v1/dsh wand runs and their tests are unchanged.
 - [x] Station's settings accept the new harness id and check the door protocol version.
 - [x] Station tests pass against a fake door, and the change lands together with 12.
@@ -40,3 +39,9 @@ Warp Station `497ee91` (0.1.92) and `a1f2d39` (0.1.93):
 - A wand run opens a filtered door subscription (fire-and-forget subscribe before the prompt) and forwards `permission-asked`/`question-asked` frames to `UiEvent::WandApproval`. The AI card renders the blocking permission (action, message, resources) with Allow once / Always / Reject / Dismiss; a reply opens a fresh door connection and calls `harness reply_permission` with the run's harness/session/request. Auto-allow still answers before the card when warp-agent's setting is on.
 - Test: a fake door pushes a permission frame before the run answer; `run_prompt_with_harness_events` exposes it while still returning the final text.
 - Remaining: multi-field form answering in the Station card (the event arrives, the card has no inputs/answers yet), and a run↔event association beyond the harness filter (the current subscription is harness-wide while the run is active).
+
+## Resolution
+
+Station `419b59d` (0.1.94) completes the blocking card: `run_prompt_with_harness_events` opens a filtered subscription before the prompt (fire-and-forget, so an old door never delays the run), forwards permission/form frames while the run waits, and the AI card renders permission actions (Allow once/Always/Reject) and a multi-field form card (text/number/integer/boolean/multiselect inputs, comma-separated multiselect, per-field required label). Submitting sends `harness reply_permission`/`reply_form` over a fresh door connection; auto-allow still answers before the card when warp-agent is configured that way. The card inputs persist per approval/field across repaints. The fake-door test drives a permission frame before the run's final answer; the settings card lists registry harnesses/models/variants with the door's availability state, and `Client::models` checks protocol 3. Gate: 215 Station-core tests + 33 probe tests and 162 warp-agent tests + probes, clippy/fmt green.
+
+Caveat recorded honestly: the subscription filters by harness while a run is active (the door's harness events do not carry a Station run id yet); a form field the user leaves blank is sent as an empty string rather than omitted/validated server-side.
