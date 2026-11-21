@@ -17,6 +17,7 @@ clear unavailable state instead of a crash.
 - [x] Basic auth uses username `opencode` and the registration password; a 401 re-reads the registration file; no password is written to settings.
 - [x] Models, providers, agents, commands, skills and session list/create/fork/delete work and are scoped to the v2 harness.
 - [ ] v2 appears or disappears in the picker and settings with its enable and availability state; its sessions carry the correct directory/location.
+  - Progress: v2 is now a first-class `HarnessKind`/wire id and appears in the composer/settings pickers when enabled; the store creates v2 sessions with `location.directory`. The Settings availability line still renders only the enable/executable rows, and the v2 service state is carried by `Store::v2_status`/door metadata rather than a Settings row.
 - [x] Fake v2 server tests cover auth, stopped/start, 401 and the catalog shapes.
 
 ## Progress
@@ -28,3 +29,6 @@ The adapter landed in warp-agent `deda99f` ("feat(agent): attach opencode v2 thr
 - The registry factory for `opencode-v2` now builds the adapter. Five Unix fake-server tests cover discovery/catalog shapes, a stopped service that is started, missing CLI vs missing registration, bad credentials, and a 401 that re-reads a rotated registration file.
 - Full app gates: 117 lib tests plus probes, fmt and clippy green.
 - Remaining before this ticket can be resolved: make the app hold the v2 instance through the host so enabling/disabling starts/detaches it, show its availability in Settings, and expose v2 in the composer/picker. Those need the host wiring and the enum removal; they are ticket 14 work (ticket 07 starts consuming the v2 event stream). The adapter itself is ready for ticket 07.
+
+
+- Picker/session progress: warp-agent `edfd652` (0.1.30) wires the adapter into the store, so the v2 harness is offered when enabled and its sessions carry the workspace directory. Availability rendering remains for ticket 14.
