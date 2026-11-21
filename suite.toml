@@ -19,7 +19,7 @@ tag = "v0.1.96"
 
 [apps.warp-agent]
 repo = "enginkirmaci/warp-agent"
-tag = "v0.1.37"
+tag = "v0.1.38"
 
 [apps.warp-notes]
 repo = "enginkirmaci/warp-notes"
