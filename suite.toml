@@ -8,7 +8,7 @@
 # `version` names the combined suite release. It is deliberately independent of
 # the kit and app versions.
 [suite]
-version = "0.2.119"
+version = "0.2.120"
 
 [kits]
 tag = "kits-v0.2.112"
@@ -19,7 +19,7 @@ tag = "v0.1.96"
 
 [apps.warp-agent]
 repo = "enginkirmaci/warp-agent"
-tag = "v0.1.38"
+tag = "v0.1.40"
 
 [apps.warp-notes]
 repo = "enginkirmaci/warp-notes"
