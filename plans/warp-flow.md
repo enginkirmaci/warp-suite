@@ -1,7 +1,8 @@
 # warp-flow
 
-_Status: design closed; S0–S5 done. Six grill rounds; the build
-order below is accepted. The checkout lives at `apps/warp-flow`; next is S6, the release. Prototype:
+_Status: design closed; S0–S6 done. Six grill rounds; the build
+order below is accepted. The checkout lives at `apps/warp-flow` — a sibling
+checkout linked there, and pinned in `suite.toml`. Prototype:
 `.scratch/warp-flow/prototype-screens.html` (throwaway, fake data)._
 
 Takes a request — a feature, a bug, a change — and drives it to merged code:
@@ -268,8 +269,17 @@ filled primary per surface.
   version). The screens are entities behind `ui::screens`' one seam, so each
   loads what it shows on the background executor and none of them writes a file
   any other way than the seam's atomic writer.
-- **S6 — release.** The `release` workflow, packaging assets, and a
-  `suite.toml` pin once a published tag exists.
+- **S6 — release (done).** `github.com/enginkirmaci/warp-flow`, public, released
+  as **v0.1.20**: the Linux tarball (binary, desktop entry, eight hicolor sizes
+  and the scalable icon), the Windows portable zip with `warp-flow-cli.exe`
+  beside the app, and the per-user Inno Setup installer, plus `SHA256SUMS`. The
+  assets are `packaging/{linux,windows}` in the app repository and
+  `.github/workflows/release.yml` builds them from that checkout alone — the kits
+  come from the pinned public tag, so no read token is needed. `suite.toml` pins
+  the tag, so `link-apps.sh` owns the `apps/warp-flow` link (the hand-made
+  symlink is gone) and the suite build and suite release assemble the app like
+  the other five. warp-agent moved to v0.1.45 in the same window: its Flow sheet
+  reads warp-flow's door, so the pair has to ship together.
 
 ## Skills (v1)
 
