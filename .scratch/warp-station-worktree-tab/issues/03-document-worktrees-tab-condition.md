@@ -1,6 +1,6 @@
 # 03: Document when the Worktrees tab appears
 
-**Status:** ready-for-agent
+**Status:** resolved
 **Category:** enhancement
 **Blocked by:** 02
 
