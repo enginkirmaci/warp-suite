@@ -1,0 +1,64 @@
+schema = 1
+name = "implement"
+revision = 1
+
+[[step]]
+id = "analyze"
+kind = "harness"
+skill = "analyze"
+produces = "spec.md"
+per_task = false
+
+[[step]]
+id = "split"
+kind = "harness"
+skill = "split"
+depends_on = ["analyze"]
+per_task = false
+
+[[step]]
+id = "approve-plan"
+kind = "question"
+depends_on = ["split"]
+per_task = false
+
+[[step]]
+id = "code"
+kind = "harness"
+skill = "code"
+depends_on = ["approve-plan"]
+per_task = true
+
+[[step]]
+id = "review"
+kind = "harness"
+skill = "review"
+depends_on = ["code"]
+per_task = true
+
+[[step]]
+id = "fmt"
+kind = "gate"
+gate = "fmt"
+depends_on = ["review"]
+per_task = true
+
+[[step]]
+id = "clippy"
+kind = "gate"
+gate = "clippy"
+depends_on = ["fmt"]
+per_task = true
+
+[[step]]
+id = "test"
+kind = "gate"
+gate = "test"
+depends_on = ["clippy"]
+per_task = true
+
+[[step]]
+id = "merge"
+kind = "merge"
+depends_on = ["test"]
+per_task = true
