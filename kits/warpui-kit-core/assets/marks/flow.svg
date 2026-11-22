@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
+  <!-- the big chevron: the mark's outer shape -->
+  <g transform="translate(12 12) scale(0.1831) translate(-64 -64)" fill="none" stroke="currentColor" stroke-width="20" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M26 32 L58 64 L26 96"/>
+  </g>
+</svg>

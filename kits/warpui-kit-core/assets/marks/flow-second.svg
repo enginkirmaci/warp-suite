@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
+  <!-- the small chevron inside the big one -->
+  <g transform="translate(12 12) scale(0.1831) translate(-64 -64)" fill="none" stroke="currentColor" stroke-width="14" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M80 44 L100 64 L80 84"/>
+  </g>
+</svg>

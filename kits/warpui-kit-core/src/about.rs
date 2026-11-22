@@ -42,6 +42,7 @@ pub enum AppId {
     Station,
     Agent,
     Notes,
+    Flow,
     Snapit,
     Pomodoro,
 }
@@ -53,6 +54,7 @@ impl AppId {
             AppId::Station => "station",
             AppId::Agent => "agent",
             AppId::Notes => "notes",
+            AppId::Flow => "flow",
             AppId::Snapit => "snapit",
             AppId::Pomodoro => "pomodoro",
         }
@@ -79,14 +81,14 @@ pub struct SuiteApp {
 }
 
 impl SuiteApp {
-    /// The element-id stem: `station`, `agent`, `notes`, `snapit`.
+    /// The element-id stem: `station`, `agent`, `notes`, `flow`, `snapit`.
     pub fn key(&self) -> &'static str {
         self.id.key()
     }
 }
 
 /// The family, in the list's order.
-pub const SUITE: [SuiteApp; 5] = [
+pub const SUITE: [SuiteApp; 6] = [
     SuiteApp {
         id: AppId::Station,
         name: "Warp Station",
@@ -122,6 +124,19 @@ pub const SUITE: [SuiteApp; 5] = [
         hosted: false,
         binary: "warp-notes",
         repo: "https://github.com/enginkirmaci/warp-notes",
+    },
+    SuiteApp {
+        id: AppId::Flow,
+        name: "Warp Flow",
+        short: "Flow",
+        role: "Workflow engine",
+        blurb: "Every run is one issue folder under .scratch/. The engine drives it from \
+                Triage to Landed through harness steps and the repository's gates; the window \
+                is where a person watches it and answers the engine.",
+        runtime: "Rust · GPUI",
+        hosted: false,
+        binary: "warp-flow",
+        repo: "https://github.com/enginkirmaci/warp-flow",
     },
     SuiteApp {
         id: AppId::Snapit,
@@ -394,6 +409,7 @@ fn mark_bytes(id: AppId) -> &'static [u8] {
         AppId::Station => include_bytes!("../assets/marks/station.svg"),
         AppId::Agent => include_bytes!("../assets/marks/agent.svg"),
         AppId::Notes => include_bytes!("../assets/marks/notes.svg"),
+        AppId::Flow => include_bytes!("../assets/marks/flow.svg"),
         AppId::Snapit => include_bytes!("../assets/marks/snapit.svg"),
         AppId::Pomodoro => include_bytes!("../assets/marks/pomodoro.svg"),
     }
@@ -406,6 +422,7 @@ fn mark_second_bytes(id: AppId) -> Option<&'static [u8]> {
         AppId::Station => None,
         AppId::Agent => Some(include_bytes!("../assets/marks/agent-second.svg")),
         AppId::Notes => Some(include_bytes!("../assets/marks/notes-second.svg")),
+        AppId::Flow => Some(include_bytes!("../assets/marks/flow-second.svg")),
         AppId::Snapit => Some(include_bytes!("../assets/marks/snapit-second.svg")),
         AppId::Pomodoro => Some(include_bytes!("../assets/marks/pomodoro-second.svg")),
     }

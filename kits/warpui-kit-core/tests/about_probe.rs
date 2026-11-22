@@ -48,6 +48,7 @@ fn all_members() -> Vec<Member> {
         member(AppId::Station, "0.1.0", "1b7d006", Some("2026-11-10")),
         member(AppId::Agent, "0.1.4", "c0b868a", None),
         member(AppId::Notes, "0.1.4", "ca22cdd", None),
+        member(AppId::Flow, "0.1.0", "f10a4ce", None),
         member(AppId::Snapit, "0.1.4", "2b7f3c5", None),
         member(AppId::Pomodoro, "0.2.5", "2ec12a8", None),
     ]
@@ -100,7 +101,7 @@ fn the_clipboard_line_is_one_line() {
 }
 
 #[test]
-fn the_suite_is_the_five_members_in_order() {
+fn the_suite_is_the_six_members_in_order() {
     let ids: Vec<AppId> = about::SUITE.iter().map(|app| app.id).collect();
     assert_eq!(
         ids,
@@ -108,14 +109,23 @@ fn the_suite_is_the_five_members_in_order() {
             AppId::Station,
             AppId::Agent,
             AppId::Notes,
+            AppId::Flow,
             AppId::Snapit,
             AppId::Pomodoro
         ]
     );
     let keys: Vec<&str> = about::SUITE.iter().map(|app| app.key()).collect();
-    for key in ["station", "agent", "notes", "snapit", "pomodoro"] {
+    for key in ["station", "agent", "notes", "flow", "snapit", "pomodoro"] {
         assert!(keys.contains(&key), "missing key {key}");
     }
+    // Flow is a window of its own, and its license lives in its repository.
+    let flow = about::app(AppId::Flow);
+    assert_eq!(flow.short, "Flow");
+    assert_eq!(flow.role, "Workflow engine");
+    assert_eq!(flow.binary, "warp-flow");
+    assert_eq!(flow.repo, "https://github.com/enginkirmaci/warp-flow");
+    assert_eq!(flow.runtime, "Rust · GPUI");
+    assert!(!flow.hosted);
     // SnapIt is the headless one: hosted, and its license lives in its own app.
     let snapit = about::app(AppId::Snapit);
     assert!(snapit.hosted);
@@ -166,6 +176,7 @@ fn every_member_has_a_row_and_the_current_app_is_the_primary(cx: &mut TestAppCon
         "about-row-station",
         "about-row-agent",
         "about-row-notes",
+        "about-row-flow",
         "about-row-snapit",
     ] {
         cx.debug_bounds(key).expect(key);
@@ -196,7 +207,12 @@ fn only_installed_members_have_rows(cx: &mut TestAppContext) {
         .expect("station version");
     cx.debug_bounds("about-version-notes")
         .expect("notes version");
-    for key in ["about-row-agent", "about-row-snapit", "about-row-pomodoro"] {
+    for key in [
+        "about-row-agent",
+        "about-row-flow",
+        "about-row-snapit",
+        "about-row-pomodoro",
+    ] {
         assert!(
             cx.debug_bounds(key).is_none(),
             "{key} is not installed and must not render"
@@ -204,6 +220,7 @@ fn only_installed_members_have_rows(cx: &mut TestAppContext) {
     }
     for key in [
         "about-version-agent",
+        "about-version-flow",
         "about-version-snapit",
         "about-version-pomodoro",
     ] {
