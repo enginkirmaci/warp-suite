@@ -142,14 +142,18 @@ client must follow, not guesses:
 - Only a managed harness streams. `dsh` is managed and app-scoped; `opencode`
   v1 is workspace-scoped (and disabled here), and `opencode-v2` is attached with
   no event pump on this path. Budgets are wide: a one-word prompt took 4.2 s and
-  15.6 s on two runs, so a turn caps at 90 s and a timeout sends
-  `harness interrupt`.
+  15.6 s on two runs. A turn's budget is a **silence** window (progress
+  resets it) plus a hard ceiling, and either expiry sends `harness interrupt`:
+  the first version capped the whole turn at 90 s, which killed every real
+  analysis at the cap while it was still pushing part snapshots.
 - Pushes are live only — no replay, `subscribe-overflow` means lost events — and
   some statuses are broadcast twice, so frames are deduped.
 - `permission-asked` / `question-asked` pushes and `reply_permission` /
   `reply_form` methods exist, and `dsh` advertises both capabilities, so the
   engine can answer permissions by policy and escalate questions.
-- There is no system-prompt channel: a skill rides in the prompt text.
+- There is no system-prompt channel: a skill rides in the prompt text, and the
+  engine inlines the whole document — a name alone leaves the session hunting
+  the filesystem for text nobody shipped.
 
 Two small fixes are worth asking warp-agent for: return the new session id under
 a non-reserved key (e.g. `session`) in the `create` reply, and give attached
@@ -282,8 +286,17 @@ filled primary per surface.
 
 ## Skills (v1)
 
-Seven documents: `analyze`, `analyze-gates`, `split`, `code`, `review`,
-`merge`, `repair`. `research` and `prototype` are v2.
+The documents ship **inside `warp-flow-core`** (`crates/warp-flow-core/skills/`,
+embedded with `include_str!`), because a workflow names a skill and every
+repository warp-flow drives would otherwise have to carry the same text. Four
+are shipped: `analyze`, `split`, `code`, `review` — the ones the `implement`
+graph names today. `analyze-gates`, `merge` and `repair` are documents too, but
+only once a graph runs them as sessions: `merge` is the engine's own queue
+today, and `repair` is a future node kind. `research` and `prototype` are v2.
+
+A workflow that names a document this build does not ship is refused during
+preparation, naming the step and the shipped set, so a misconfigured graph
+never spends a session's turn looking for it.
 
 ## Next
 
