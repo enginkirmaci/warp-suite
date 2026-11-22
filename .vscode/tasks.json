@@ -43,6 +43,15 @@
             "problemMatcher": "$rustc"
         },
         {
+            "label": "cargo build (warp-flow)",
+            "type": "shell",
+            "command": "cargo",
+            "args": ["build", "-p", "warp-flow"],
+            "options": { "cwd": "${workspaceFolder}" },
+            "group": "build",
+            "problemMatcher": "$rustc"
+        },
+        {
             "label": "cargo build (warp-snapit)",
             "type": "shell",
             "command": "cargo",
