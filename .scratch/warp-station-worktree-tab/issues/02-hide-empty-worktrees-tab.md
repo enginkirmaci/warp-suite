@@ -1,6 +1,6 @@
 # 02: Hide the Worktrees tab until a listing has a row or an error
 
-**Status:** ready-for-agent
+**Status:** resolved
 **Category:** bug
 **Blocked by:** 01
 
