@@ -1,0 +1,69 @@
+# The suite's workflow template for warp-flow.
+#
+# A run copies this file into its issue folder at start, so editing it here
+# never changes a run that already started. The graph is the one the flow
+# design names: analyze the request, split it into tasks, let a person approve
+# the plan, then drive each ready task through code, review and the gates
+# before the merge queue lands it. Steps marked `per_task` run once for every
+# ready task; each gate step names one gate from `flow.toml`.
+schema = 1
+name = "implement"
+revision = 1
+
+[[step]]
+id = "analyze"
+kind = "harness"
+skill = "analyze"
+produces = "spec.md"
+
+[[step]]
+id = "split"
+kind = "harness"
+skill = "split"
+depends_on = ["analyze"]
+
+[[step]]
+id = "approve-plan"
+kind = "question"
+depends_on = ["split"]
+
+[[step]]
+id = "code"
+kind = "harness"
+skill = "code"
+per_task = true
+depends_on = ["approve-plan"]
+
+[[step]]
+id = "review"
+kind = "harness"
+skill = "review"
+per_task = true
+depends_on = ["code"]
+
+[[step]]
+id = "fmt"
+kind = "gate"
+gate = "fmt"
+per_task = true
+depends_on = ["review"]
+
+[[step]]
+id = "clippy"
+kind = "gate"
+gate = "clippy"
+per_task = true
+depends_on = ["fmt"]
+
+[[step]]
+id = "test"
+kind = "gate"
+gate = "test"
+per_task = true
+depends_on = ["clippy"]
+
+[[step]]
+id = "merge"
+kind = "merge"
+per_task = true
+depends_on = ["test"]
