@@ -85,7 +85,7 @@ Notes:
 
 ## 2. lib.rs and main.rs — bootstrap order
 
-`lib.rs` is the module list; probes depend on it. All three GPUI apps have the
+`lib.rs` is the module list; probes depend on it. All five GPUI apps have the
 boundary now, `apps/warp-agent` included. Its `run()` owns startup and
 `main.rs` is a thin launcher; a new app should follow the same split:
 

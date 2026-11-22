@@ -360,16 +360,6 @@ def layout_errors() -> list[str]:
             if "#ifndef MyAppVersion" in text and "#error" not in text:
                 errors.append(f"{relative}: #ifndef MyAppVersion has no #error")
 
-    gradle = ROOT / "android-apps/warp-android-scribe/android/app/build.gradle.kts"
-    if gradle.is_file():
-        gradle_text = gradle.read_text(encoding="utf-8")
-        if "version.toml" not in gradle_text:
-            errors.append(f"{gradle.relative_to(ROOT)}: does not read version.toml")
-        if re.search(r'(?m)^\s*versionName\s*=\s*"', gradle_text):
-            errors.append(f"{gradle.relative_to(ROOT)}: literal versionName")
-        if re.search(r"(?m)^\s*versionCode\s*=\s*\d+\s*$", gradle_text):
-            errors.append(f"{gradle.relative_to(ROOT)}: literal versionCode")
-
     workflow = ROOT / ".github/workflows/suite-release.yml"
     if workflow.is_file():
         workflow_text = workflow.read_text(encoding="utf-8")

@@ -8,6 +8,13 @@ plus `scripts/build/suite-assemble.sh`) and the integration gate
 (`KITS_READ_TOKEN`), add `SUITE_READ_TOKEN`, and run the first real app and
 suite releases.
 
+> **Status correction, 2026-11-22.** Parts of this record no longer match the
+> tree: the operational remainder finished (the app repositories are public and
+> tagged, and the suite publishes releases), `integration.yml` was never added —
+> `suite-release.yml` is the only workflow — and `docs/agents/repo-model.md` was
+> never written. `android-apps/` is gone: the Android checkout is its own sibling
+> repository. Read the rest as the design rationale, not as a live checklist.
+
 ## Goal
 
 - Every app lives in its own GitHub repository, with its own version, its own

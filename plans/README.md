@@ -3,7 +3,10 @@
 Working design plans and proposals for warp-suite: one markdown file per topic,
 named `<topic>.md` in kebab-case. These files are not shipped documentation.
 
-- Write new plans here, not at the repository root or inside an app directory.
+`plans/` here is suite-level — the kits, the workspace, release/install, and the
+cross-app contracts. An app's plan lives in that app's repository,
+`apps/<name>/plans/`.
+
 - Open with a status line (proposal, in progress) and the decisions that still
   need settling.
 - Delete the plan when the work lands, or fold what still matters into

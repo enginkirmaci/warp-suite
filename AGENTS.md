@@ -133,14 +133,10 @@ It type-checks the Rust code, `#[cfg(windows)]` blocks included, compiles no C
 and links nothing: report it as a type-check, not a Windows build. The real
 Windows build is the app repository's `release` workflow.
 
-**Android.** The Gradle project is built in its own repository:
-
-```sh
-# in the warp-android-scribe checkout
-cd android
-JAVA_HOME=/usr/lib/jvm/java-17-openjdk ANDROID_HOME=$HOME/tools/android-sdk \
-  ./gradlew assembleDebug
-```
+**Android.** The IME and its bridge live in their own repository, with their own
+`AGENTS.md`, Gradle build and CI; the suite never builds them. Its bridge
+contract is in [`README.md#cross-app-contracts`](README.md#cross-app-contracts),
+and it is never a member of this workspace or a line in `suite.toml`.
 
 ## Committing
 
@@ -224,7 +220,7 @@ keeps the index, so the detail is edited in one place.
   cross-thread channel wakeups on foreground tasks: poll on a
   `background_executor().timer(..)` or drain on a timer where that matters.
 - Prefer a `lib.rs` boundary so headless probes can build the real views; the
-  binary stays a thin launcher (all three GPUI apps follow that split,
+  binary stays a thin launcher (all five GPUI apps follow that split,
   `warp-agent` included).
 
 ## Testing and captures
@@ -298,12 +294,14 @@ a crate moves to `kits/` only when more than one app needs it. Done means
 
 ## Plans and proposals
 
-Write plans, proposals and migration checklists to `plans/<topic>.md`, one file
-per topic in kebab-case; `plans/` is repo-wide, so app work files there too, and
-never `PLAN*.md` at the repo root or inside `apps/<name>/`. A plan is a working
-file, not shipped documentation: start with a status line and the open
-decisions, and do not restate the code. Delete it when the work lands, or fold
-what is still useful into `docs/agents/` or the app's `README.md`.
+Write plans, proposals and migration checklists to `plans/<topic>.md` in the
+repository the work belongs to: `plans/` here is suite-level (kits, workspace,
+release/install, cross-app contracts), and an app's plan lives in that app's
+`plans/` — never `PLAN*.md` at the repo root or inside `apps/<name>/`. One file
+per topic in kebab-case. A plan is a working file, not shipped documentation:
+start with a status line and the open decisions, and do not restate the code.
+Delete it when the work lands, or fold what is still useful into
+`docs/agents/` or the app's `README.md`.
 
 ## Public history and secrets
 
@@ -352,6 +350,8 @@ Read the entry your change lands in; each line names the branch that fires it.
 - **Cloning, links, app checkouts** → [`docs/agents/local-setup.md`](docs/agents/local-setup.md).
 - **A shared crate, a kit shape** → [`kits/README.md`](kits/README.md).
 - **Build, deploy, cross-app contracts** → [`README.md`](README.md).
+- **Where a document belongs (suite vs app)** →
+  [`docs/agents/doc-layout.md`](docs/agents/doc-layout.md).
 - **Issues, triage, domain** → [`docs/agents/issue-tracker.md`](docs/agents/issue-tracker.md),
   [`triage-labels.md`](docs/agents/triage-labels.md),
   [`domain.md`](docs/agents/domain.md) and `GLOSSARY.md`.

@@ -1,6 +1,6 @@
 # warp-suite
 
-The kit and release repository for Engin's connected apps. The six
+The kit and release repository for Engin's connected apps. The seven
 `warpui-kit-*` crates live under `kits/`; every app lives in its own repository
 and pins a kit tag. warp-suite builds and releases the kits, assembles the
 combined suite release from pinned app releases, and keeps `apps/` as local
@@ -62,8 +62,8 @@ extract it, and run `install.cmd`. It installs under
 with one shortcut per app, and records what it wrote for `uninstall.cmd`.
 
 The same ZIP is portable: run the executables under `apps\` directly without
-installing. It contains Warp Station, Warp Agent, Warp Notes, Warp Pomodoro and
-Warp SnapIt.
+installing. It contains Warp Station, Warp Agent, Warp Flow, Warp Notes, Warp
+Pomodoro and Warp SnapIt.
 
 ## Build and deploy locally
 
@@ -102,7 +102,11 @@ Both builds default the version to `git describe --tags --always
 |---|---|
 | `AGENTS.md` | suite-wide agent instructions (pins, gates, contracts, traps) |
 | `apps/<name>` | local symlinks to the sibling app checkouts (gitignored); `scripts/dev/link-apps.sh` creates them |
-| `plans/` | working design plans and proposals, one markdown file per topic |
+| `plans/` | suite-level plans and proposals (kits, release, cross-app contracts), one file per topic; app plans live in the app repository |
+| `docs/agents/` | the agent playbook: design system, app recipe, testing, settings, versioning, setup |
+| `docs/adr/` | the family's contract decisions (the door protocol, the worktree rule); app decisions live in the app's `docs/adr/` |
+| `GLOSSARY.md` | the suite's domain vocabulary |
+| `flow.toml`, `workflow.toml` | this repository's gates and workflow template for warp-flow |
 | `suite.toml` | the pin table: the kit tag and one tag per app |
 | `scripts/meta/manifest.py` | suite.toml + app.toml reader shared by the scripts + CI |
 | `.cargo/config.toml` | one cargo target dir for the whole suite: `.build/target` for every app, `kits` and `scripts/build/build.sh` |
@@ -115,7 +119,6 @@ Both builds default the version to `git describe --tags --always
 | `scripts/deploy/bundle-install.sh` | runs inside an extracted bundle; installs into `~/.local` and records what it wrote |
 | `install.sh` | shim over `scripts/deploy/deploy.sh` for the documented one-liner |
 | `.github/workflows/suite-release.yml` | the combined release pipeline |
-| `design/v3/` | the committed design contract (DESIGN.md + prototype source); the live source is the OpenDesign project `warp-suite-v3` |
 
 Each app repository owns its packaging assets and its own build/release
 workflows. warp-suite owns the kit build, the suite assembly and the install
@@ -126,8 +129,8 @@ scripts.
 Agents start at [`AGENTS.md`](AGENTS.md) for the suite-wide rules, then the
 app repository's `AGENTS.md`; the deep guides are in `docs/agents/`,
 including [`settings-schema.md`](docs/agents/settings-schema.md). Design plans
-and proposals go in [`plans/`](plans/), one file per topic, and are deleted
-once the work lands.
+and proposals for the suite go in [`plans/`](plans/), one file per topic, and
+are deleted once the work lands; an app's plans live in that app's `plans/`.
 
 ## Cross-app contracts
 

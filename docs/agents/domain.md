@@ -2,7 +2,10 @@
 
 How the engineering skills consume this repo's domain documentation when
 exploring the codebase. warp-suite is **single-context**: one glossary and one
-ADR folder, both at the root.
+ADR folder, both at the root. An app repository repeats that shape when its own
+vocabulary or decisions outgrow its `AGENTS.md` — warp-flow has a `GLOSSARY.md`
+and four ADRs, warp-agent four ADRs — and those files win when the work is in
+the app.
 
 ## Before exploring, read these
 
@@ -23,7 +26,7 @@ Single-context (this repo):
 ├── GLOSSARY.md
 ├── docs/adr/
 │   └── 0001-<decision-slug>.md
-├── kits/                 the six warpui-kit-* crates, workspace members
+├── kits/                 the seven warpui-kit-* crates, workspace members
 └── apps/<name>           symlinks to the sibling app checkouts (gitignored)
 ```
 
