@@ -54,6 +54,10 @@ artifact, question, approval, repair.
    rebased result, `--no-ff` merge, push only if `flow.toml` says so. A conflict
    is repaired on the task branch (never on `main`) for at most two attempts,
    then it becomes a question. No force-push, ever.
+   A task branch with no commits of its own is a failed attempt, never a
+   resolved task: the queue reports "nothing to merge" and the repair names the
+   repository it measured, which is how a task written against another checkout
+   stops the run instead of closing it on work that does not exist.
 10. **Repair is bounded.** Three attempts per step. A repair may fix code, a
     malformed artifact, or insert a graph node; it may never weaken a test,
     change a gate, or edit the spec or its acceptance criteria. Repeating the
