@@ -32,9 +32,17 @@ siblings.
 The app's files win when the work is in the app; this repository's `AGENTS.md`
 stays the entry point for the shared rules.
 
-Two files look like app config but must stay at the suite root: `flow.toml` and
-`workflow.toml`. warp-flow reads them from the root of the repository it
-manages, and the suite is one such repository.
+Two files look like app config but are warp-flow's, not the suite's: the gates
+and the workflow template. They live in `.flow/` at the root of every
+repository warp-flow drives, and the suite is one such repository:
+
+```text
+.flow/flow.toml       the gates and the merge policy
+.flow/workflow.toml   the workflow template a run copies
+```
+
+`warp-flow-core`'s `layout` module owns both paths
+(warp-flow's ADR-0013), so neither the engine nor the app builds one by hand.
 
 ## Landing a move
 

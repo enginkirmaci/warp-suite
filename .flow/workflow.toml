@@ -1,11 +1,12 @@
-# The suite's workflow template for warp-flow.
+# The suite's workflow template for warp-flow, in the `.flow/` folder every
+# driven repository carries.
 #
 # A run copies this file into its issue folder at start, so editing it here
 # never changes a run that already started. The graph is the one the flow
 # design names: analyze the request, split it into tasks, let a person approve
 # the plan, then drive each ready task through code, review and the gates
 # before the merge queue lands it. Steps marked `per_task` run once for every
-# ready task; each gate step names one gate from `flow.toml`.
+# ready task; each gate step names one gate from `.flow/flow.toml`.
 schema = 1
 name = "implement"
 revision = 1

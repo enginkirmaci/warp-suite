@@ -1,4 +1,5 @@
-# The suite's gate file for warp-flow.
+# The suite's gate file for warp-flow, in the `.flow/` folder every driven
+# repository carries.
 #
 # The three commands are the kit gate in AGENTS.md: formatting, clippy with
 # warnings denied on the seven kit crates, then their tests. A workflow's gate

@@ -106,7 +106,7 @@ Both builds default the version to `git describe --tags --always
 | `docs/agents/` | the agent playbook: design system, app recipe, testing, settings, versioning, setup |
 | `docs/adr/` | the family's contract decisions (the door protocol, the worktree rule); app decisions live in the app's `docs/adr/` |
 | `GLOSSARY.md` | the suite's domain vocabulary |
-| `flow.toml`, `workflow.toml` | this repository's gates and workflow template for warp-flow |
+| `.flow/flow.toml`, `.flow/workflow.toml` | this repository's gates and workflow template for warp-flow |
 | `suite.toml` | the pin table: the kit tag and one tag per app |
 | `scripts/meta/manifest.py` | suite.toml + app.toml reader shared by the scripts + CI |
 | `.cargo/config.toml` | one cargo target dir for the whole suite: `.build/target` for every app, `kits` and `scripts/build/build.sh` |
