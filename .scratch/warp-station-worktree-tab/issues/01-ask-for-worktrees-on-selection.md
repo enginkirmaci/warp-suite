@@ -1,6 +1,6 @@
 # 01: Ask for a repository's worktrees as soon as it is selected
 
-**Status:** ready-for-agent
+**Status:** resolved
 **Category:** bug
 **Blocked by:** None
 
