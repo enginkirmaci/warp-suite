@@ -2,8 +2,7 @@
 
 _Status: design closed; S0–S6 done and their open tickets closed. Six grill rounds; the build
 order below is accepted. The checkout lives at `apps/warp-flow` — a sibling
-checkout linked there, and pinned in `suite.toml`. Prototype:
-`.scratch/warp-flow/prototype-screens.html` (throwaway, fake data)._
+checkout linked there, and pinned in `suite.toml`._
 
 Takes a request — a feature, a bug, a change — and drives it to merged code:
 distil it into an issue, split it into tasks, write each task in its own
@@ -121,8 +120,8 @@ artifact, question, approval, repair.
 
 ## The door contract (measured in S0)
 
-The spike in `.scratch/warp-flow/spike/` ran the real door end to end twice; these
-are the rules a Rust client must follow, not guesses:
+The S0 spike ran the real door end to end twice; these are the rules a Rust
+client must follow, not guesses:
 
 - Auth is one line (`{"auth": token}` → `{"ok": true}`), protocol 3, token read
   before port; a wrong token closes the connection.
@@ -298,7 +297,7 @@ discovered mid-run.
 
 ## After the build
 
-The four tickets S6 left open are closed (`.scratch/warp-flow/issues/`): an
+The four tickets S6 left open are closed: an
 abandon for a run whose worker is gone (a resume worker born abandoned), the
 board revealing the card under its cursor on both axes, each harness session
 recorded as `sessions/<step>[-task-NN].md` and shown on the run screen, and a
