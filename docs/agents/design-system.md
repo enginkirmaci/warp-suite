@@ -722,16 +722,21 @@ members when they land. Opening About again shows the list it already has; a
 re-probe on every rail click would freeze the window behind a slow sibling.
 
 The marks are monochrome `currentColor` SVGs in
-`kits/warpui-kit-core/assets/marks/`, so the accent tints them and they follow
-a palette switch like everything else. Build facts come from each app's
-`build.rs` calling `kits/warpui-kit-build`, which stamps the package version
-and the exported `WARP_SUITE_*` variables; a sibling's facts come from its own
-`--version` line. A plain `cargo run` reports `dev` rather than pretending to
-be a release. `docs/agents/versioning.md` owns the rules. `View license`
-opens the app's own GPL text in a modal, embedded at build time and rendered
-through `warpui_kit_markdown`'s read-only document viewer — the GPL reads as
-prose, at the family's type, selectable — so the license ships with the binary
-and the MIT kit carries none of it.
+`kits/warpui-kit-core/assets/marks/`, drawn as two stacked shapes because GPUI
+tints a whole SVG with one colour. The kit paints them with the fixed Grafit
+Ters 14 brand pair — chalk `MARK_LEAD` on the lead shape and Electric Blue
+`#2878F0` (`MARK_SECOND`) on the second — on the family's own `BRAND_GROUND`
+(`#141517`) tile. They are deliberately not the live accent: the mark is the
+family's, so it reads the same in every app and under every palette. Build
+facts come from each app's `build.rs` calling `kits/warpui-kit-build`, which
+stamps the package version and the exported `WARP_SUITE_*` variables; a
+sibling's facts come from its own `--version` line. A plain `cargo run`
+reports `dev` rather than pretending to be a release.
+`docs/agents/versioning.md` owns the rules. `View license` opens the app's own
+GPL text in a modal, embedded at build time and rendered through
+`warpui_kit_markdown`'s read-only document viewer — the GPL reads as prose, at
+the family's type, selectable — so the license ships with the binary and the
+MIT kit carries none of it.
 
 SnapIt has no window of its own. It is a row on the other apps' screens, its
 `-V` prints the same version line, and Station's Tools › SnapIt page repeats
