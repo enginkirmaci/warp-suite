@@ -31,6 +31,17 @@ symlink and builds into a fresh `.build/target`. Do not replace the symlink
 with a directory, and do not `cargo clean` casually - the warm tree is ~40 GB
 and a cold graph build is minutes even on the NVMe.
 
+Each app checkout's own `target/` is a symlink to the same cache, so a
+standalone build in `~/Developments/<app>` reuses the suite's artifacts
+instead of compiling the gpui graph again. `scripts/dev/link-apps.sh` writes
+and repairs those links. Two things break the sharing, both silent:
+
+- `cargo clean` in an app removes the **link**, not the cache, and the next
+  build creates a real `target/` on the slow disk. Re-run the linker.
+- A `[profile.dev]` that differs from this repo's root one changes the
+  resolved profile hash, so every shared dependency compiles a second time.
+  All six apps carry `debug = "line-tables-only"` to match.
+
 Measured on the NVMe after the move:
 
 | Command | Time |

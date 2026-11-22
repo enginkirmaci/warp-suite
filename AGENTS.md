@@ -62,7 +62,12 @@ recipe. Two facts that trip agents: `link-apps.sh` never replaces a real
 - [`.cargo/config.toml`](.cargo/config.toml) sends every build to
   `.build/target`. Keep it that way: one GPUI dependency tree is shared by every
   app and kit, so `dist/`, `.build/` and `target/` are build output, never
-  edited by hand.
+  edited by hand. Each app checkout's own `target/` is a symlink to that same
+  cache (`scripts/dev/link-apps.sh` writes and repairs it), so a standalone
+  build in `apps/<app>`'s source checkout shares artifacts with the suite
+  build. Every app's `[profile.dev] debug = "line-tables-only"` must match this
+  repo's root `[profile.dev]`: cargo keys a crate's fingerprint on the resolved
+  profile, so a mismatch recompiles the whole shared graph a second time.
 - Pin `gpui` (`gpui-pre`), `gpui-pre-platform` where an app uses it, and
   `gpui-kit` together, in the root `[workspace.dependencies]`, or the linked
   build will not resolve. The crates.io `gpui` is stale: never add it.

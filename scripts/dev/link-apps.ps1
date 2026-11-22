@@ -1,4 +1,5 @@
-# Link the sibling app checkouts into apps\ (Windows wrapper for link_apps.py).
+# Link the sibling app checkouts into apps\, and each app's target\ at the
+# suite's shared build cache (Windows wrapper for link_apps.py).
 $ErrorActionPreference = 'Stop'
 
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path

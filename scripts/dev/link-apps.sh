@@ -1,5 +1,6 @@
 #!/bin/sh
-# Link the sibling app checkouts into apps/ (POSIX wrapper for link_apps.py).
+# Link the sibling app checkouts into apps/, and each app's target/ at the
+# suite's shared build cache (POSIX wrapper for link_apps.py).
 set -eu
 
 here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
