@@ -235,6 +235,21 @@ pub fn segmented(
     choices: Vec<Choice>,
     on_pick: impl Fn(SharedString, &mut Window, &mut gpui::App) + 'static,
 ) -> AnyElement {
+    segmented_sized(prefix, choices, fonts::font_meta(), on_pick)
+}
+
+/// [`segmented`] at a chosen text size.
+///
+/// A form with five short choices (`harness gate question merge cleanup`) and a
+/// 356-px inspector cannot hold the meta step: the trough's content is wider
+/// than the form, and the last segment is clipped. The caller that owns the
+/// narrow form asks for the micro step instead of pushing the form wider.
+pub fn segmented_sized(
+    prefix: &'static str,
+    choices: Vec<Choice>,
+    text_size: f32,
+    on_pick: impl Fn(SharedString, &mut Window, &mut gpui::App) + 'static,
+) -> AnyElement {
     let on_pick = std::rc::Rc::new(on_pick);
     let mut trough = div()
         .flex()
@@ -263,11 +278,14 @@ pub fn segmented(
                 .a11y_toggle(a11y, selected)
                 .cursor_pointer()
                 .h(px(28.))
-                .px(px(12.))
+                // 8 rather than 12 a side: the shipped five-kind control
+                // (`harness gate question merge cleanup`) is the widest set in
+                // the family and must fit the 356-px inspector without a clip.
+                .px(px(8.))
                 .flex()
                 .items_center()
                 .rounded(px(6.))
-                .text_size(px(fonts::font_meta()))
+                .text_size(px(text_size))
                 .when(selected, |d| {
                     d.bg(palette::raised())
                         .text_color(palette::text())

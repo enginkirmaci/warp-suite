@@ -66,8 +66,9 @@ pub struct VersionInfo {
 /// Every suite app answers `--version` as `<name> <version> (<commit>) · <channel>`
 /// before it opens a window, so this is the one fact source that works for a
 /// binary this process did not compile. `None` means missing, a failed exit or
-/// an unreadable line — or a child whose output never arrives before the
-/// deadline.
+/// an unreadable line — or a child whose first line never arrives before the
+/// deadline. A child that prints it is stopped as soon as the line arrives, so
+/// it does not have to exit on its own.
 pub fn version(app: &str) -> Option<VersionInfo> {
     version_from(&binary(app)?)
 }
@@ -104,13 +105,32 @@ fn version_from(binary: &Path) -> Option<VersionInfo> {
             }
         }
     });
+    let mut stdout = Vec::new();
     loop {
+        // The answer is the line, not the exit: stop the child as soon as a
+        // complete line arrives, so a launcher that prints and then keeps
+        // running (or opens a window) costs one line, not the deadline.
+        match reader.recv_timeout(Duration::from_millis(10)) {
+            Ok(bytes) => {
+                stdout.extend_from_slice(&bytes);
+                if stdout.contains(&b'\n') {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return first_line(&stdout);
+                }
+            }
+            // EOF: the last line may have no terminator, so parse what arrived
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return first_line(&stdout);
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+        }
         match child.try_wait() {
             Ok(Some(status)) if status.success() => break,
             Ok(Some(_)) => return None,
-            Ok(None) if Instant::now() < deadline => {
-                std::thread::sleep(Duration::from_millis(10));
-            }
+            Ok(None) if Instant::now() < deadline => {}
             Ok(None) => {
                 let _ = child.kill();
                 let _ = child.wait();
@@ -125,7 +145,6 @@ fn version_from(binary: &Path) -> Option<VersionInfo> {
     }
     // The child is gone, so the bytes it wrote are all there is; wait only for
     // its first line, not for the pipe to close.
-    let mut stdout = Vec::new();
     loop {
         let remaining = deadline.saturating_duration_since(Instant::now());
         match reader.recv_timeout(remaining) {
@@ -144,7 +163,12 @@ fn version_from(binary: &Path) -> Option<VersionInfo> {
             }
         }
     }
-    let stdout = String::from_utf8_lossy(&stdout);
+    first_line(&stdout)
+}
+
+/// The child's first line, parsed.
+fn first_line(stdout: &[u8]) -> Option<VersionInfo> {
+    let stdout = String::from_utf8_lossy(stdout);
     parse_version_line(stdout.lines().next()?)
 }
 
@@ -332,6 +356,40 @@ mod tests {
         assert!(
             started.elapsed() < Duration::from_secs(1),
             "the probe waited on the pipe holder for {:?}",
+            started.elapsed()
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_launcher_that_prints_and_keeps_running_is_stopped_after_its_line() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("warp-fake");
+        // the line is the answer; the sleep must not hold the probe to the
+        // deadline, and killing the shell's `exec` target leaves no orphan
+        std::fs::write(
+            &path,
+            "#!/bin/sh\nprintf 'Warp Fake 1.2.3 (abc1234) · dev\\n'\nexec sleep 30\n",
+        )
+        .expect("write script");
+        let mut permissions = std::fs::metadata(&path).expect("metadata").permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&path, permissions).expect("chmod");
+
+        let started = Instant::now();
+        assert_eq!(
+            version_from(&path),
+            Some(VersionInfo {
+                version: "1.2.3".into(),
+                commit: "abc1234".into(),
+                channel: "dev".into(),
+            })
+        );
+        assert!(
+            started.elapsed() < Duration::from_secs(1),
+            "the probe waited for the launcher to exit for {:?}",
             started.elapsed()
         );
     }

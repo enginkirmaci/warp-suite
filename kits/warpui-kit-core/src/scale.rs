@@ -225,19 +225,32 @@ pub fn text_size_control() -> impl IntoElement {
 // ---- the desktop -----------------------------------------------------------
 
 /// gsettings exists only on Linux desktops; elsewhere the factor stays 1.0.
-#[cfg(all(unix, not(target_os = "macos")))]
+#[cfg(target_os = "linux")]
 mod desktop {
     use super::{HEARD, Ordering};
     use std::io::BufRead as _;
+    use std::os::raw::{c_int, c_ulong};
+    use std::os::unix::process::CommandExt as _;
     use std::process::{Child, Command, Stdio};
     use std::sync::Mutex;
 
     const SCHEMA: &str = "org.gnome.desktop.interface";
     const KEY: &str = "text-scaling-factor";
 
+    /// `prctl(PR_SET_PDEATHSIG, SIGTERM)`: ask Linux to signal this child when
+    /// its parent dies. `prctl` is variadic and the signal is an `unsigned
+    /// long`.
+    const PR_SET_PDEATHSIG: c_int = 1;
+    const SIGTERM: c_ulong = 15;
+
+    unsafe extern "C" {
+        fn prctl(option: c_int, ...) -> c_int;
+        fn _exit(status: c_int) -> !;
+    }
+
     /// The spawned `gsettings monitor`: kept reachable so the quit hook can
-    /// kill it. Dropping a Child leaves it running as an orphan until the next
-    /// write to its closed pipe, which on a quiet desktop may never come.
+    /// kill and reap it. A signal-killed app cannot run that hook, so the
+    /// child is also armed with [`arm_parent_death`].
     static MONITOR: Mutex<Option<Child>> = Mutex::new(None);
 
     pub fn read_factor() -> Option<f32> {
@@ -248,6 +261,36 @@ mod desktop {
         parse_factor(&String::from_utf8_lossy(&output.stdout))
     }
 
+    /// Arms `command`'s child to receive SIGTERM when this process dies. The
+    /// quit hook is the graceful path; this is the net for a process killed by
+    /// Ctrl-C or the compositor, where no hook runs and every launch would
+    /// otherwise leave another `gsettings monitor` behind.
+    ///
+    /// The race: the parent can die between `fork` and `pre_exec`, and a
+    /// parent that is already gone sends no signal, so the child would survive
+    /// with its job done but its watcher gone. `parent` is read before the
+    /// spawn; after the `prctl` a mismatch means that window was missed, and
+    /// the child exits at once. If the `prctl` itself fails the spawn fails,
+    /// and [`super::follow_ui_scale`] carries on without a monitor.
+    fn arm_parent_death(command: &mut Command) {
+        let parent = std::process::id();
+        // SAFETY: this closure runs in the forked child before exec and does
+        // only async-signal-safe work: one `prctl`, one `getppid` through the
+        // std helper, and `_exit` on the lost race. It allocates nothing and
+        // takes no lock, so it cannot deadlock on the parent's state.
+        unsafe {
+            command.pre_exec(move || {
+                if prctl(PR_SET_PDEATHSIG, SIGTERM) == -1 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                if std::os::unix::process::parent_id() != parent {
+                    _exit(1);
+                }
+                Ok(())
+            });
+        }
+    }
+
     /// False when nothing started: no gsettings, or a monitor already running.
     pub fn spawn_monitor() -> bool {
         let Ok(mut slot) = MONITOR.lock() else {
@@ -256,12 +299,13 @@ mod desktop {
         if slot.is_some() {
             return false;
         }
-        let spawned = Command::new("gsettings")
+        let mut command = Command::new("gsettings");
+        command
             .args(["monitor", SCHEMA])
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .spawn();
-        let Ok(mut child) = spawned else {
+            .stderr(Stdio::null());
+        arm_parent_death(&mut command);
+        let Ok(mut child) = command.spawn() else {
             tracing::debug!(
                 "gsettings monitor unavailable; system text scale frozen at startup value"
             );
@@ -314,7 +358,7 @@ mod desktop {
 
     #[cfg(test)]
     mod tests {
-        use super::parse_factor;
+        use super::{arm_parent_death, parse_factor};
 
         #[test]
         fn reads_both_gsettings_forms() {
@@ -328,10 +372,76 @@ mod desktop {
             assert_eq!(parse_factor("text-scaling-factor: 0"), None);
             assert_eq!(parse_factor(""), None);
         }
+
+        /// The monitor must not outlive a signal-killed app. Re-execute this test
+        /// as the parent (a real process the test can kill), arm a child with the
+        /// same helper, SIGKILL the parent, and watch the child go.
+        #[test]
+        fn a_monitored_child_dies_with_its_parent() {
+            use std::path::Path;
+            use std::process::{Command, Stdio};
+            use std::time::{Duration, Instant};
+
+            const ROLE: &str = "WARP_UI_SCALE_PDEATHSIG_ROLE";
+            const PID_FILE: &str = "WARP_UI_SCALE_PDEATHSIG_PID_FILE";
+            const TEST: &str = "scale::desktop::tests::a_monitored_child_dies_with_its_parent";
+
+            if std::env::var_os(ROLE).is_some() {
+                let mut command = Command::new("sleep");
+                command.arg("30").stdin(Stdio::null());
+                arm_parent_death(&mut command);
+                let mut child = command.spawn().expect("spawn the probe child");
+                let pid_file = std::env::var(PID_FILE).expect("pid file");
+                std::fs::write(pid_file, child.id().to_string()).expect("record the child pid");
+                std::thread::sleep(Duration::from_secs(30));
+                let _ = child.wait();
+                return;
+            }
+
+            let pid_file = std::env::temp_dir()
+                .join(format!("warp-scale-pdeathsig-{}.pid", std::process::id()));
+            let _ = std::fs::remove_file(&pid_file);
+            let exe = std::env::current_exe().expect("test executable");
+            let mut parent = Command::new(exe)
+                .args(["--exact", TEST, "--nocapture"])
+                .env(ROLE, "parent")
+                .env(PID_FILE, &pid_file)
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .expect("re-exec the test as the parent");
+
+            let deadline = Instant::now() + Duration::from_secs(10);
+            let pid = loop {
+                if let Ok(text) = std::fs::read_to_string(&pid_file)
+                    && let Ok(pid) = text.trim().parse::<u32>()
+                {
+                    break pid;
+                }
+                assert!(
+                    Instant::now() < deadline,
+                    "the probe parent never recorded its child"
+                );
+                std::thread::sleep(Duration::from_millis(20));
+            };
+
+            parent.kill().expect("SIGKILL the probe parent");
+            parent.wait().expect("reap the probe parent");
+
+            let deadline = Instant::now() + Duration::from_secs(10);
+            while Path::new(&format!("/proc/{pid}")).exists() {
+                assert!(
+                    Instant::now() < deadline,
+                    "the monitored child {pid} outlived its parent"
+                );
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            let _ = std::fs::remove_file(&pid_file);
+        }
     }
 }
 
-#[cfg(not(all(unix, not(target_os = "macos"))))]
+#[cfg(not(target_os = "linux"))]
 mod desktop {
     pub fn read_factor() -> Option<f32> {
         None

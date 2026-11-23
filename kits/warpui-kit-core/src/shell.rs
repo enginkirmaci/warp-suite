@@ -259,9 +259,14 @@ pub fn stage() -> Div {
     div().flex().flex_col().flex_1().min_w_0().min_h_0()
 }
 
-/// The list and detail panes, side by side.
+/// The list and detail panes, side by side. The row never grows past the
+/// window: an unwrapped line inside the detail contributes its full width as
+/// the row's minimum, and without `min_w_0` here that minimum pushes the
+/// detail's right edge off screen. The detail has its own `min_w_0` for the
+/// content it holds, and [`stage`] has one for the column; the list is a fixed
+/// width and must not shrink, so it carries none.
 pub fn panes() -> Div {
-    div().flex().flex_row().flex_1().min_h_0()
+    div().flex().flex_row().flex_1().min_w_0().min_h_0()
 }
 
 /// The strip of opened items over the panes. Its first tab is the list itself.

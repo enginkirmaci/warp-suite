@@ -93,9 +93,60 @@ pub fn menu_row(
     text_size: f32,
     on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 ) -> AnyElement {
+    menu_row_inner(
+        id,
+        label,
+        None,
+        keys,
+        destructive,
+        text_size,
+        on_click,
+    )
+}
+
+/// [`menu_row`] with the design's 16 px leading icon slot, for a menu whose
+/// rows are things rather than verbs (a run's folder, the repository it lives
+/// in). `ink` is the glyph's colour, usually the row's own text step.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a menu row is id, label, glyph, ink, keycap, tone, size and action; the plain menu_row keeps the short call for the common case"
+)]
+pub fn menu_row_with_icon(
+    id: impl Into<ElementId>,
+    label: impl Into<SharedString>,
+    glyph: &'static str,
+    ink: gpui::Rgba,
+    keys: Option<SharedString>,
+    destructive: bool,
+    text_size: f32,
+    on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+) -> AnyElement {
+    menu_row_inner(
+        id,
+        label,
+        Some((glyph, ink)),
+        keys,
+        destructive,
+        text_size,
+        on_click,
+    )
+}
+
+fn menu_row_inner(
+    id: impl Into<ElementId>,
+    label: impl Into<SharedString>,
+    leading: Option<(&'static str, gpui::Rgba)>,
+    keys: Option<SharedString>,
+    destructive: bool,
+    text_size: f32,
+    on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+) -> AnyElement {
+    let id: ElementId = id.into();
+    let selector = id.to_string();
     let label: SharedString = label.into();
     div()
-        .id(id.into())
+        .id(id)
+        .debug_selector(move || selector.clone())
         .role(Role::MenuItem)
         .aria_label(label.clone())
         .px_3()
@@ -110,8 +161,21 @@ pub fn menu_row(
         .when(destructive, |d| d.text_color(palette::DANGER))
         .when(!destructive, |d| d.text_color(palette::text()))
         .hover(|s| s.bg(palette::HOVER))
+        .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| {
+            cx.stop_propagation()
+        })
         .on_click(on_click)
-        .child(div().min_w_0().truncate().child(label))
+        .children(leading.map(|(glyph, ink)| {
+            div()
+                .flex_shrink_0()
+                .flex()
+                .items_center()
+                .justify_center()
+                .w(px(16.))
+                .h(px(16.))
+                .child(crate::icon::icon(glyph, px(16.), ink))
+        }))
+        .child(div().min_w_0().flex_1().truncate().child(label))
         .children(keys.map(menu_keycap))
         .into_any_element()
 }

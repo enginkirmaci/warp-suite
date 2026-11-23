@@ -1194,6 +1194,7 @@ impl LiveEditorState {
             tokens: &lookup,
             notes: self.notes.as_ref(),
             images: &image_status,
+            read_only: self.read_only,
         };
         if self.views_revision != self.revision || self.views.len() != doc.lines.len() {
             self.views = (0..doc.lines.len())

@@ -303,3 +303,51 @@ fn a_crowded_strip_keeps_each_title_its_width(cx: &mut TestAppContext) {
         "both tabs keep their title's width in a 360 strip: {a:?} {b:?}"
     );
 }
+
+/// The panes row may not grow past the window: an unwrapped line in the detail
+/// contributes its full width as the row's minimum otherwise, which is what
+/// pushed the detail's right edge off screen in the app.
+#[gpui_kit::gpui::test]
+fn the_panes_row_stays_inside_the_window(cx: &mut TestAppContext) {
+    struct WideDetail;
+    impl Render for WideDetail {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div().flex().flex_row().size_full().child(
+                shell::panes()
+                    .debug_selector(|| "probe-panes".into())
+                    .child(
+                        shell::list_pane(shell::LIST_WIDTH).debug_selector(|| "probe-list".into()),
+                    )
+                    .child(
+                        shell::detail_pane()
+                            .debug_selector(|| "probe-detail".into())
+                            .child(div().whitespace_nowrap().child("x".repeat(400))),
+                    ),
+            )
+        }
+    }
+
+    cx.update(gpui_kit::init);
+    let (_root, cx) = cx.add_window_view(|_, _| WideDetail);
+    cx.simulate_resize(size(px(1440.), px(900.)));
+    cx.run_until_parked();
+    cx.update(|window, cx| drop(window.draw(cx)));
+
+    let panes = cx.debug_bounds("probe-panes").expect("panes");
+    let list = cx.debug_bounds("probe-list").expect("list");
+    let detail = cx.debug_bounds("probe-detail").expect("detail");
+    assert!(
+        panes.size.width <= px(1440.),
+        "the row must not grow past the window: {panes:?}"
+    );
+    assert_eq!(
+        detail.origin.x + detail.size.width,
+        px(1440.),
+        "the detail ends at the window's right edge"
+    );
+    assert_eq!(
+        list.size.width,
+        px(shell::LIST_WIDTH),
+        "the list holds its width"
+    );
+}

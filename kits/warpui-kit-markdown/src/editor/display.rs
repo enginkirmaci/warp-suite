@@ -404,6 +404,9 @@ pub struct ViewContext<'a> {
     pub notes: Option<&'a std::collections::HashSet<String>>,
     /// How an image source stands right now.
     pub images: &'a dyn Fn(&str) -> ImageStatus,
+    /// A read-only document keeps its front-matter rows but offers nothing to
+    /// press: the Add property row would promise an edit the editor refuses.
+    pub read_only: bool,
 }
 
 // Obsidian's default theme metrics, in em of the base size unless noted.
@@ -1639,6 +1642,15 @@ fn frontmatter_line(cx: &ViewContext<'_>, ix: usize, block: &LiveBlock) -> LineV
         return properties_heading(cx, line);
     }
     if ix + 1 == block.lines.end {
+        if cx.read_only {
+            // the closing fence takes no room in a reading: the rows under the
+            // heading are the front matter, and nothing here adds one
+            return LineView {
+                hidden: true,
+                text: empty_box(Px(cx.em), false, line.range.start),
+                ..LineView::default()
+            };
+        }
         return add_property_line(cx, line);
     }
     if let Some(property) = properties.iter().find(|p| p.line == ix) {
@@ -1841,6 +1853,7 @@ mod tests {
             tokens: &|_| None,
             notes: None,
             images: &|_| ImageStatus::Missing,
+            read_only: false,
         };
         let view = build_view(&cx, line);
         if let Some(table) = &view.table {
@@ -1975,6 +1988,7 @@ mod tests {
                 tokens: &|_| None,
                 notes: None,
                 images: &|_| ImageStatus::Missing,
+                read_only: false,
             };
             build_view(&cx, 0)
         };
@@ -1998,6 +2012,7 @@ mod tests {
             tokens: &|_| None,
             notes: None,
             images: &|_| ImageStatus::Missing,
+            read_only: false,
         };
         let bars = build_view(&cx, 0)
             .decor
@@ -2048,6 +2063,7 @@ mod tests {
             tokens: &|_| None,
             notes: None,
             images: &|_| ImageStatus::Missing,
+            read_only: false,
         };
         let view = build_view(&cx, 0);
         assert!(
@@ -2119,6 +2135,7 @@ mod tests {
             tokens: &|_| None,
             notes: None,
             images: &|_| ImageStatus::Missing,
+            read_only: false,
         };
         assert!(
             build_view(&cx, 1).hidden,
@@ -2142,6 +2159,7 @@ mod tests {
                 width: 100.,
                 height: 50.,
             },
+            read_only: false,
         };
         build_view(&cx, line)
     }
@@ -2221,6 +2239,7 @@ mod tests {
                 tokens: &|_| None,
                 notes: None,
                 images: &|_| ImageStatus::Missing,
+                read_only: false,
             };
             build_view(&cx, 0).text.frags.iter().any(|f| f.link_icon)
         };
@@ -2243,6 +2262,7 @@ mod tests {
             tokens: &|_| None,
             notes: Some(&notes),
             images: &|_| ImageStatus::Missing,
+            read_only: false,
         };
         let view = build_view(&cx, 0);
         let inks: Vec<Ink> = view.text.frags[0].runs.iter().map(|(_, s)| s.ink).collect();
@@ -2253,7 +2273,7 @@ mod tests {
     }
 
     /// The views of a frontmatter's lines, with the caret on the last one.
-    fn panel(text: &str) -> Vec<LineView> {
+    fn panel_with(text: &str, read_only: bool) -> Vec<LineView> {
         let doc = parse_document(text);
         let cx = ViewContext {
             text,
@@ -2265,8 +2285,13 @@ mod tests {
             tokens: &|_| None,
             notes: None,
             images: &|_| ImageStatus::Missing,
+            read_only,
         };
         (0..doc.lines.len()).map(|ix| build_view(&cx, ix)).collect()
+    }
+
+    fn panel(text: &str) -> Vec<LineView> {
+        panel_with(text, false)
     }
 
     fn row(view: &LineView) -> (String, String) {
@@ -2294,6 +2319,23 @@ mod tests {
         assert_eq!(row(&views[2]), ("count".to_string(), "12".to_string()));
         assert_eq!(views[3].text.display_text(), "Add property");
         assert_eq!(views[3].role, LineRole::AddProperty);
+    }
+
+    #[test]
+    fn a_read_only_frontmatter_offers_no_add_row() {
+        let text = "---\ntitle: Note\ncount: 12\n---\nbody";
+        let views = panel_with(text, true);
+        assert_eq!(views[0].text.display_text(), "Properties");
+        assert_eq!(row(&views[1]), ("title".to_string(), "Note".to_string()));
+        assert_eq!(row(&views[2]), ("count".to_string(), "12".to_string()));
+        assert!(
+            views[3].hidden,
+            "the closing fence takes no room in a reading"
+        );
+        assert!(
+            views.iter().all(|view| view.role != LineRole::AddProperty),
+            "a read-only document never offers an edit it refuses"
+        );
     }
 
     #[test]
@@ -2378,6 +2420,7 @@ mod tests {
                 tokens: &|_| None,
                 notes: None,
                 images: &|_| ImageStatus::Missing,
+                read_only: false,
             };
             assert!(build_view(&cx, 1).property.is_some(), "caret {caret}");
         }
@@ -2401,6 +2444,7 @@ mod tests {
             tokens: &|_| None,
             notes: None,
             images: &|_| ImageStatus::Missing,
+            read_only: false,
         };
         let view = build_view(&cx, 0);
         let t = &view.text;
@@ -2429,6 +2473,7 @@ mod tests {
             tokens: &|_| None,
             notes: None,
             images: &|_| ImageStatus::Missing,
+            read_only: false,
         };
         let view = build_view(&cx, 0);
         assert_eq!(view.text.display_text(), "a    b");
@@ -2448,6 +2493,7 @@ mod tests {
             tokens: &|_| None,
             notes: None,
             images: &|_| ImageStatus::Missing,
+            read_only: false,
         };
         let h1 = build_view(&cx, 0);
         assert!((h1.text.size.0 - 25.888).abs() < 0.01);
