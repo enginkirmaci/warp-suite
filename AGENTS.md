@@ -113,6 +113,20 @@ Kits have no CI workflow; run their gate locally:
 
 - `cargo test` on the seven kit crates.
 
+Documentation has its own gate, and it is not a cargo one:
+
+```sh
+python3 scripts/meta/check-docs.py
+```
+
+It resolves every relative link in `AGENTS.md` and `docs/**/*.md` across the
+suite and each linked app, and every entry under `.agents/skills/*/references/`.
+Both are pointers to a file, and both fail silently: nothing crashes, the text
+just stops being true. An app reaches the suite's guides through
+`../warp-suite/...`, which resolves from the app's own checkout and from
+`apps/<name>` alike; `../../AGENTS.md` resolved from neither. With no links the
+script checks the suite alone, which is what CI does.
+
 Each app's own `ci.yml` runs that app's fmt, clippy and tests. After a kit
 change, `cargo test -p <app>` builds that linked app against the kit, which is
 what catches a moved public API; with the checkouts linked,

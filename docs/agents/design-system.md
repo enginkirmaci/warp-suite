@@ -566,8 +566,7 @@ Two kinds of text. The line is what the surface *is*, not how long it is.
   Copy / Select all (the user message's Edit in input / Re-prompt / Fork), and
   `LiveEditorState::apply_streamed` feeds a streaming surface while keeping
   the reader's selection and scroll (reasoning). The per-surface decisions
-  live beside `text_view` in
-  [`ui/markdown.rs`](../../apps/warp-agent/src/ui/markdown.rs).
+  live beside `text_view` in warp-agent's `src/ui/markdown.rs`.
 - **Labels** are fixed UI vocabulary: buttons, menu rows, tabs, list-row
   titles, field labels, section heads, tool names, statuses, counts. They are
   plain `div`/`SharedString` text, never markdown, never an editor, never a

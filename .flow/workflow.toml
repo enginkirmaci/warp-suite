@@ -3,52 +3,93 @@
 #
 # A run copies this file into its issue folder at start, so editing it here
 # never changes a run that already started. The graph is the one the flow
-# design names: analyze the request, split it into tasks, let a person approve
-# the plan, then drive each ready task through code, review and the gates
-# before the merge queue lands it.
+# design names: analyze the request and write the plan — the spec and the task
+# files (ADR-0022) — let a person approve it, then drive each ready task
+# through code, review and the gates before the merge queue lands it. A
+# conflicted merge hands the branch to its conflict step (ADR-0020), and the
+# run closes with a cleanup beside the summary (ADR-0021).
 #
-# A step's place is its `depends_on` set, not its position in this file
-# (ADR-0014): a step may name several dependencies, and two steps with no
-# dependency between them may run at the same time, up to `max_parallel`.
-# Steps marked `per_task` run once for every ready task.
+# The file is read downwards (ADR-0018): a step that says nothing about its
+# dependencies waits for every step declared before it, so a pipeline needs no
+# edges at all. Naming steps is how a step breaks out of that order — a branch
+# names the step it leaves from, and `depends_on = []` is a root wherever it is
+# declared. Steps marked `per_task` run once for every ready task.
 #
 # A gate is a step (ADR-0015): it carries its own command, folder and timeout,
 # so there is no second file to keep in step with this one.
-schema = 2
+#
+# A step may declare back-edges (ADR-0023): `edges` is a list, each entry naming
+# the step the work goes back to, the trigger that sends it, and how many times
+# the edge may be taken. `review` sends the work back to `code` when its
+# artifact's front matter says `verdict: changes`; `test` sends it back when the
+# gate exits non-zero. When an edge's budget is spent the step fails and the run
+# stops, unless the edge says `on_exhausted = "continue"`.
+#
+# A merge may name the step that resolves its conflict (ADR-0020): the named
+# step is a per-task harness step declared after the merge, it runs inside the
+# merge's turn when the rebase conflicts, and the merge retries after it.
+#
+# The run ends with two siblings (ADR-0021): `summary` writes the closing report
+# and `cleanup` removes every merged task's worktree and branch. Both name
+# `merge`, so neither waits for the other; the cleanup never touches the
+# checkout, so it may run beside the summary.
+#
+# What a harness step runs on is picked per step (ADR-0017): `harness`, `model`
+# and `effort` are resolved against warp-agent's catalog when the step's turn
+# comes, and a name nothing publishes blocks the step instead of being swapped
+# for another. Every remaining harness step runs on dsh with
+# `opencode-go/deepseek-v4.1-flash`; the effort is the one thing that differs,
+# because it is the only knob that should: the steps that decide and write get
+# `max`, and the ones that read and report get `high`. `bump` is a gate, and the
+# cleanup is not a session at all: both are declared below.
+schema = 3
 name = "implement"
 revision = 1
 max_parallel = 2
 
+# The request is read once, at the start, and the whole plan — the spec and the
+# task files — comes out of this step: the hardest thinking in the run, so the
+# highest effort (ADR-0022).
 [[step]]
 id = "analyze"
 kind = "harness"
 skill = "analyze"
 produces = "spec.md"
-
-[[step]]
-id = "split"
-kind = "harness"
-skill = "split"
-depends_on = ["analyze"]
+harness = "dsh"
+model = "opencode-go/deepseek-v4.1-flash"
+effort = "max"
 
 [[step]]
 id = "approve-plan"
 kind = "question"
-depends_on = ["split"]
 
+# The code step is the run's long tail: it writes the change, so it gets the
+# highest effort. It is per task, so this is what every task's session runs.
 [[step]]
 id = "code"
 kind = "harness"
 skill = "code"
 per_task = true
-depends_on = ["approve-plan"]
+harness = "dsh"
+model = "opencode-go/deepseek-v4.1-flash"
+effort = "max"
 
+# The review either clears the code or sends it back. Its artifact is per task
+# (`review-01.md`), because every task is reviewed on its own, and its
+# `verdict` front matter is the only thing the engine reads from it.
+#
+# It reads a diff and writes findings — a reading job, not a writing one — so
+# `high` rather than `max`.
 [[step]]
 id = "review"
 kind = "harness"
 skill = "review"
 per_task = true
-depends_on = ["code"]
+produces = "review.md"
+edges = [{ to = "code", when = "verdict_changes", max = 3 }]
+harness = "dsh"
+model = "opencode-go/deepseek-v4.1-flash"
+effort = "high"
 
 # The three checks are the kit gate in AGENTS.md: formatting, clippy with
 # warnings denied on the seven kit crates, then their tests. The cheapest fails
@@ -83,29 +124,77 @@ cwd = "."
 timeout_secs = 1800
 per_task = true
 depends_on = ["clippy"]
+# A failing test sends the work back to `code` (ADR-0023). A gate writes no
+# artifact, so there is no verdict for it to read: its exit code is the
+# trigger, and the budget is what keeps a repository whose tests never pass
+# from spending sessions forever. `fmt` and `clippy` do not loop: a formatting
+# failure is mechanical, and a repair is the right vocabulary for it.
+edges = [{ to = "code", when = "gate_failed", max = 2 }]
 
-# The version moves once, before the queue lands anything: the engine's own
-# commits pass `--no-verify`, so the pre-commit hook that bumps PATCH never runs
-# on them. One bump per run, never one per task — two task branches that each
+# The join. `bump` names nothing, so it waits for every step declared before it
+# — the whole task lane, every check included. It is not per task, so waiting
+# for a per-task step means waiting for every task to have it: exactly what a
+# step after the task lanes should do.
+#
+# The version moves once, before the queue lands anything, and the gate command
+# does the mechanical work itself: `scripts/meta/version.py bump patch` moves
+# PATCH and stages the writer's files, and `check` proves the result. It commits
+# with `--no-verify`, because the per-commit hook would bump PATCH a second
+# time. One bump per run, never one per task — two task branches that each
 # bumped the same file would conflict on the second merge.
 [[step]]
 id = "bump"
-kind = "harness"
-skill = "bump"
-depends_on = ["test"]
+kind = "gate"
+command = "python3 scripts/meta/version.py bump patch && python3 scripts/meta/version.py check && git commit --no-verify -m 'chore: bump the suite version'"
+cwd = "."
+timeout_secs = 300
+per_task = false
 
+# The merge lands one task's branch. If the rebase conflicts it writes the
+# conflicted attempt's repair and runs `resolve-conflict` inside its turn, then
+# retries; the merge's attempt budget bounds the rounds (ADR-0020).
 [[step]]
 id = "merge"
 kind = "merge"
 per_task = true
 mode = "local"
 push = false
-depends_on = ["bump"]
+on_conflict = "resolve-conflict"
+
+# The conflict step: takes the rebase that failed on the task branch, resolves
+# it and finishes it, so the retry has nothing left to replay. Its input is the
+# newest `repairs/` entry the conflicted attempt wrote; it writes no artifact,
+# because the evidence is the task branch and its session record. It resolves
+# and commits code, so `max`.
+[[step]]
+id = "resolve-conflict"
+kind = "harness"
+skill = "merge-conflict"
+per_task = true
+depends_on = ["merge"]
+harness = "dsh"
+model = "opencode-go/deepseek-v4.1-flash"
+effort = "max"
 
 # The run's closing report: what landed, what did not, and what needs a person.
+# It reads the whole run and writes prose, so `high`. It and `cleanup` are
+# siblings: both name `merge`, so neither waits for the other.
 [[step]]
 id = "summary"
 kind = "harness"
 skill = "summary"
 produces = "summary.md"
+depends_on = ["merge"]
+harness = "dsh"
+model = "opencode-go/deepseek-v4.1-flash"
+effort = "high"
+
+# The run's own housekeeping, not a session and not per task: it removes every
+# merged task's worktree, deletes its branch and prunes. `main`, the issue
+# folder and unresolved tasks are untouched; the issue folder still outlives
+# the run (ADR-0021).
+[[step]]
+id = "cleanup"
+kind = "cleanup"
+per_task = false
 depends_on = ["merge"]
