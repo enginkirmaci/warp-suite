@@ -5,11 +5,19 @@
 # never changes a run that already started. The graph is the one the flow
 # design names: analyze the request, split it into tasks, let a person approve
 # the plan, then drive each ready task through code, review and the gates
-# before the merge queue lands it. Steps marked `per_task` run once for every
-# ready task; each gate step names one gate from `.flow/flow.toml`.
-schema = 1
+# before the merge queue lands it.
+#
+# A step's place is its `depends_on` set, not its position in this file
+# (ADR-0014): a step may name several dependencies, and two steps with no
+# dependency between them may run at the same time, up to `max_parallel`.
+# Steps marked `per_task` run once for every ready task.
+#
+# A gate is a step (ADR-0015): it carries its own command, folder and timeout,
+# so there is no second file to keep in step with this one.
+schema = 2
 name = "implement"
 revision = 1
+max_parallel = 2
 
 [[step]]
 id = "analyze"
@@ -42,29 +50,62 @@ skill = "review"
 per_task = true
 depends_on = ["code"]
 
+# The three checks are the kit gate in AGENTS.md: formatting, clippy with
+# warnings denied on the seven kit crates, then their tests. The cheapest fails
+# a task before the expensive one starts, which is why they are a chain rather
+# than siblings.
+#
+# `scripts/dev/flow-gate.sh` runs cargo in the main checkout's target
+# directory, so a task worktree does not compile the gpui graph again.
 [[step]]
 id = "fmt"
 kind = "gate"
-gate = "fmt"
+command = "scripts/dev/flow-gate.sh fmt --all --check"
+cwd = "."
+timeout_secs = 300
 per_task = true
 depends_on = ["review"]
 
 [[step]]
 id = "clippy"
 kind = "gate"
-gate = "clippy"
+command = "scripts/dev/flow-gate.sh clippy --all-targets -p warpui-kit-core -p warpui-kit-diff -p warpui-kit-markdown -p warpui-kit-picker -p warpui-kit-platform -p warpui-kit-worktree -p warpui-kit-build -- -D warnings"
+cwd = "."
+timeout_secs = 1800
 per_task = true
 depends_on = ["fmt"]
 
 [[step]]
 id = "test"
 kind = "gate"
-gate = "test"
+command = "scripts/dev/flow-gate.sh test -p warpui-kit-core -p warpui-kit-diff -p warpui-kit-markdown -p warpui-kit-picker -p warpui-kit-platform -p warpui-kit-worktree -p warpui-kit-build"
+cwd = "."
+timeout_secs = 1800
 per_task = true
 depends_on = ["clippy"]
+
+# The version moves once, before the queue lands anything: the engine's own
+# commits pass `--no-verify`, so the pre-commit hook that bumps PATCH never runs
+# on them. One bump per run, never one per task — two task branches that each
+# bumped the same file would conflict on the second merge.
+[[step]]
+id = "bump"
+kind = "harness"
+skill = "bump"
+depends_on = ["test"]
 
 [[step]]
 id = "merge"
 kind = "merge"
 per_task = true
-depends_on = ["test"]
+mode = "local"
+push = false
+depends_on = ["bump"]
+
+# The run's closing report: what landed, what did not, and what needs a person.
+[[step]]
+id = "summary"
+kind = "harness"
+skill = "summary"
+produces = "summary.md"
+depends_on = ["merge"]
