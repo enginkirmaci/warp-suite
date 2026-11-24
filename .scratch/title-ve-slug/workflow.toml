@@ -1,0 +1,141 @@
+schema = 3
+name = "implement"
+revision = 1
+max_parallel = 2
+
+[[step]]
+id = "analyze"
+kind = "harness"
+enabled = true
+skill = "analyze"
+harness = "dsh"
+model = "opencode-go/deepseek-v4.1-flash"
+effort = "max"
+produces = "spec.md"
+per_task = false
+push = false
+
+[[step]]
+id = "approve-plan"
+kind = "question"
+enabled = true
+per_task = false
+push = false
+
+[[step]]
+id = "code"
+kind = "harness"
+enabled = true
+skill = "code"
+harness = "dsh"
+model = "opencode-go/deepseek-v4.1-flash"
+effort = "max"
+per_task = true
+push = false
+
+[[step]]
+id = "review"
+kind = "harness"
+enabled = true
+skill = "review"
+harness = "dsh"
+model = "opencode-go/deepseek-v4.1-flash"
+effort = "high"
+produces = "review.md"
+per_task = true
+push = false
+
+[[step.edges]]
+to = "code"
+when = "verdict_changes"
+max = 3
+
+[[step]]
+id = "fmt"
+kind = "gate"
+enabled = true
+command = "scripts/dev/flow-gate.sh fmt --all --check"
+cwd = "."
+timeout_secs = 300
+depends_on = ["review"]
+per_task = true
+push = false
+
+[[step]]
+id = "clippy"
+kind = "gate"
+enabled = true
+command = "scripts/dev/flow-gate.sh clippy --all-targets -p warpui-kit-core -p warpui-kit-diff -p warpui-kit-markdown -p warpui-kit-picker -p warpui-kit-platform -p warpui-kit-worktree -p warpui-kit-build -- -D warnings"
+cwd = "."
+timeout_secs = 1800
+depends_on = ["fmt"]
+per_task = true
+push = false
+
+[[step]]
+id = "test"
+kind = "gate"
+enabled = true
+command = "scripts/dev/flow-gate.sh test -p warpui-kit-core -p warpui-kit-diff -p warpui-kit-markdown -p warpui-kit-picker -p warpui-kit-platform -p warpui-kit-worktree -p warpui-kit-build"
+cwd = "."
+timeout_secs = 1800
+depends_on = ["clippy"]
+per_task = true
+push = false
+
+[[step.edges]]
+to = "code"
+when = "gate_failed"
+max = 2
+
+[[step]]
+id = "bump"
+kind = "gate"
+enabled = true
+command = "python3 scripts/meta/version.py bump patch && python3 scripts/meta/version.py check && git commit --no-verify -m 'chore: bump the suite version'"
+cwd = "."
+timeout_secs = 300
+per_task = false
+push = false
+
+[[step]]
+id = "merge"
+kind = "merge"
+enabled = true
+per_task = true
+mode = "local"
+push = false
+on_conflict = "resolve-conflict"
+
+[[step]]
+id = "resolve-conflict"
+kind = "harness"
+enabled = true
+skill = "merge-conflict"
+harness = "dsh"
+model = "opencode-go/deepseek-v4.1-flash"
+effort = "max"
+depends_on = ["merge"]
+per_task = true
+push = false
+
+[[step]]
+id = "summary"
+kind = "harness"
+enabled = true
+skill = "summary"
+harness = "dsh"
+model = "opencode-go/deepseek-v4.1-flash"
+effort = "high"
+depends_on = ["merge"]
+produces = "summary.md"
+per_task = false
+push = false
+
+[[step]]
+id = "cleanup"
+kind = "cleanup"
+enabled = true
+depends_on = ["merge"]
+per_task = false
+push = false
